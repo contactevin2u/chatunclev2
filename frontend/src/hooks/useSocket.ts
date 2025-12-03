@@ -10,6 +10,7 @@ interface SocketEvents {
   onMessageStatus?: (data: any) => void;
   onAccountStatus?: (data: any) => void;
   onQrUpdate?: (data: any) => void;
+  onSyncProgress?: (data: any) => void;
 }
 
 export function useSocket(events: SocketEvents = {}) {
@@ -38,6 +39,10 @@ export function useSocket(events: SocketEvents = {}) {
       socket.on('qr:update', events.onQrUpdate);
     }
 
+    if (events.onSyncProgress) {
+      socket.on('sync:progress', events.onSyncProgress);
+    }
+
     return () => {
       if (events.onNewMessage) {
         socket.off('message:new', events.onNewMessage);
@@ -51,8 +56,11 @@ export function useSocket(events: SocketEvents = {}) {
       if (events.onQrUpdate) {
         socket.off('qr:update', events.onQrUpdate);
       }
+      if (events.onSyncProgress) {
+        socket.off('sync:progress', events.onSyncProgress);
+      }
     };
-  }, [token, events.onNewMessage, events.onMessageStatus, events.onAccountStatus, events.onQrUpdate]);
+  }, [token, events.onNewMessage, events.onMessageStatus, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress]);
 
   const joinAccount = useCallback((accountId: string) => {
     socketRef.current?.emit('join:account', accountId);

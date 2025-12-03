@@ -6,9 +6,7 @@ import makeWASocket, {
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
-  makeInMemoryStore,
   WAMessageKey,
-  BaileysEventMap,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as fs from 'fs';
@@ -29,25 +27,15 @@ interface MessagePayload {
   mediaMimeType?: string;
 }
 
-interface SessionData {
-  socket: WASocket;
-  store: ReturnType<typeof makeInMemoryStore>;
-}
-
 class SessionManager {
-  private sessions: Map<string, SessionData> = new Map();
+  private sessions: Map<string, WASocket> = new Map();
   private sessionsDir: string;
-  private storesDir: string;
 
   constructor() {
     this.sessionsDir = path.join(process.cwd(), 'sessions');
-    this.storesDir = path.join(process.cwd(), 'stores');
 
     if (!fs.existsSync(this.sessionsDir)) {
       fs.mkdirSync(this.sessionsDir, { recursive: true });
-    }
-    if (!fs.existsSync(this.storesDir)) {
-      fs.mkdirSync(this.storesDir, { recursive: true });
     }
   }
 
@@ -55,29 +43,6 @@ class SessionManager {
     console.log(`[WA] Creating session for account ${accountId}, user ${userId}`);
 
     const sessionPath = path.join(this.sessionsDir, accountId);
-    const storePath = path.join(this.storesDir, `${accountId}.json`);
-
-    // Create in-memory store for this session
-    const store = makeInMemoryStore({ logger });
-
-    // Load store from file if exists
-    if (fs.existsSync(storePath)) {
-      try {
-        store.readFromFile(storePath);
-        console.log(`[WA] Loaded store from ${storePath}`);
-      } catch (error) {
-        console.error(`[WA] Failed to load store:`, error);
-      }
-    }
-
-    // Save store periodically
-    const storeInterval = setInterval(() => {
-      try {
-        store.writeToFile(storePath);
-      } catch (error) {
-        console.error(`[WA] Failed to save store:`, error);
-      }
-    }, 10000); // Save every 10 seconds
 
     // Fetch latest WhatsApp Web version
     const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -98,21 +63,26 @@ class SessionManager {
       syncFullHistory: true, // Enable full history sync
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
-      // getMessage is required for retries and poll decryption
+      // getMessage - fetch from database if needed for retries
       getMessage: async (key: WAMessageKey) => {
-        if (store) {
-          const msg = await store.loadMessage(key.remoteJid!, key.id!);
-          return msg?.message || undefined;
+        // Try to get message from database
+        try {
+          const msg = await queryOne(
+            'SELECT content FROM messages WHERE wa_message_id = $1',
+            [key.id]
+          );
+          if (msg?.content) {
+            return proto.Message.fromObject({ conversation: msg.content });
+          }
+        } catch (error) {
+          console.error('[WA] Error fetching message for retry:', error);
         }
         return proto.Message.fromObject({});
       },
     });
 
-    // Bind store to socket events - THIS IS CRITICAL
-    store.bind(sock.ev);
-
-    // Store session data
-    this.sessions.set(accountId, { socket: sock, store });
+    // Store session
+    this.sessions.set(accountId, sock);
 
     // Handle credentials update
     sock.ev.on('creds.update', saveCreds);
@@ -153,9 +123,6 @@ class SessionManager {
           accountId,
           status: 'disconnected',
         });
-
-        // Clear store interval
-        clearInterval(storeInterval);
 
         // Reconnect if not logged out
         if (shouldReconnect) {
@@ -491,12 +458,10 @@ class SessionManager {
   }
 
   async sendMessage(accountId: string, waId: string, payload: MessagePayload): Promise<string> {
-    const sessionData = this.sessions.get(accountId);
-    if (!sessionData) {
+    const sock = this.sessions.get(accountId);
+    if (!sock) {
       throw new Error('Session not found');
     }
-
-    const { socket: sock } = sessionData;
     const jid = waId.includes('@') ? waId : `${waId}@s.whatsapp.net`;
 
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
@@ -553,11 +518,11 @@ class SessionManager {
   }
 
   async destroySession(accountId: string): Promise<void> {
-    const sessionData = this.sessions.get(accountId);
-    if (sessionData) {
+    const sock = this.sessions.get(accountId);
+    if (sock) {
       console.log(`[WA] Destroying session ${accountId}`);
       try {
-        sessionData.socket.end(undefined);
+        sock.end(undefined);
       } catch (error) {
         console.error(`[WA] Error ending socket:`, error);
       }
@@ -568,13 +533,9 @@ class SessionManager {
   private cleanupSession(accountId: string): void {
     console.log(`[WA] Cleaning up session files for ${accountId}`);
     const sessionPath = path.join(this.sessionsDir, accountId);
-    const storePath = path.join(this.storesDir, `${accountId}.json`);
 
     if (fs.existsSync(sessionPath)) {
       fs.rmSync(sessionPath, { recursive: true, force: true });
-    }
-    if (fs.existsSync(storePath)) {
-      fs.unlinkSync(storePath);
     }
   }
 
@@ -600,11 +561,7 @@ class SessionManager {
   }
 
   getSession(accountId: string): WASocket | undefined {
-    return this.sessions.get(accountId)?.socket;
-  }
-
-  getStore(accountId: string): ReturnType<typeof makeInMemoryStore> | undefined {
-    return this.sessions.get(accountId)?.store;
+    return this.sessions.get(accountId);
   }
 }
 

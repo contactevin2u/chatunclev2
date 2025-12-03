@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
 import { conversations as conversationsApi, messages as messagesApi } from '@/lib/api';
@@ -8,7 +8,7 @@ import { Conversation, Message } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, RefreshCw } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -17,12 +17,49 @@ export default function InboxPage() {
   const [messagesList, setMessagesList] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const selectedConversationRef = useRef<Conversation | null>(null);
+
+  // Keep ref in sync with state for callbacks
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
+
+  // Function to reload conversations
+  const loadConversations = useCallback(async () => {
+    if (!token) return;
+    try {
+      const { conversations } = await conversationsApi.list(token);
+      setConversationsList(conversations);
+      console.log('[UI] Loaded conversations:', conversations.length);
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+    }
+  }, [token]);
 
   // Socket event handlers
   const handleNewMessage = useCallback((data: any) => {
+    console.log('[UI] New message received:', data);
+
+    // Check if this conversation exists in our list
+    const existingConv = conversationsList.find(c => c.id === data.conversationId);
+
+    if (!existingConv) {
+      // New conversation - reload the list
+      console.log('[UI] New conversation detected, reloading list');
+      loadConversations();
+      return;
+    }
+
     // Add to messages if current conversation
-    if (selectedConversation?.id === data.conversationId) {
-      setMessagesList((prev) => [...prev, data.message]);
+    if (selectedConversationRef.current?.id === data.conversationId) {
+      setMessagesList((prev) => {
+        // Check if message already exists
+        if (prev.some(m => m.id === data.message.id)) {
+          return prev;
+        }
+        return [...prev, data.message];
+      });
     }
 
     // Update conversations list
@@ -33,7 +70,7 @@ export default function InboxPage() {
             ...conv,
             last_message: data.message.content,
             last_message_at: data.message.created_at,
-            unread_count: selectedConversation?.id === data.conversationId
+            unread_count: selectedConversationRef.current?.id === data.conversationId
               ? conv.unread_count
               : conv.unread_count + 1,
           };
@@ -48,29 +85,39 @@ export default function InboxPage() {
         return bTime - aTime;
       });
     });
-  }, [selectedConversation?.id]);
+  }, [conversationsList, loadConversations]);
+
+  // Handle sync progress
+  const handleSyncProgress = useCallback((data: any) => {
+    console.log('[UI] Sync progress:', data);
+    setSyncStatus(`Syncing... ${data.messagesCount} messages`);
+
+    // Reload conversations when sync completes
+    if (data.isLatest || data.progress >= 100) {
+      setSyncStatus(null);
+      loadConversations();
+    }
+  }, [loadConversations]);
 
   useSocket({
     onNewMessage: handleNewMessage,
+    onSyncProgress: handleSyncProgress,
   });
 
-  // Load conversations
+  // Load conversations on mount
   useEffect(() => {
     if (!token) return;
 
-    const loadConversations = async () => {
+    const initialLoad = async () => {
       try {
-        const { conversations } = await conversationsApi.list(token);
-        setConversationsList(conversations);
-      } catch (error) {
-        console.error('Failed to load conversations:', error);
+        await loadConversations();
       } finally {
         setIsLoading(false);
       }
     };
 
-    loadConversations();
-  }, [token]);
+    initialLoad();
+  }, [token, loadConversations]);
 
   // Load messages when conversation selected
   useEffect(() => {
@@ -139,8 +186,21 @@ export default function InboxPage() {
       {/* Conversations sidebar */}
       <div className="w-80 border-r border-gray-200 bg-white flex flex-col">
         <div className="p-4 border-b border-gray-200">
-          <h1 className="text-lg font-semibold text-gray-900">Inbox</h1>
-          <p className="text-sm text-gray-500">{conversationsList.length} conversations</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-gray-900">Inbox</h1>
+              <p className="text-sm text-gray-500">
+                {syncStatus || `${conversationsList.length} conversations`}
+              </p>
+            </div>
+            <button
+              onClick={loadConversations}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              title="Refresh conversations"
+            >
+              <RefreshCw className="h-4 w-4 text-gray-500" />
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
           <ConversationList

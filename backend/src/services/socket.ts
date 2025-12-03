@@ -9,7 +9,21 @@ let io: Server;
 export function initializeSocket(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
     cors: {
-      origin: config.corsOrigin,
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl, etc)
+        if (!origin) return callback(null, true);
+
+        // Normalize origins by removing trailing slashes
+        const normalizedOrigin = origin.replace(/\/$/, '');
+        const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
+
+        if (normalizedOrigin === allowedOrigin || config.nodeEnv === 'development') {
+          return callback(null, true);
+        }
+
+        console.log(`[Socket] CORS blocked origin: ${origin}`);
+        callback(new Error('Not allowed by CORS'));
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
