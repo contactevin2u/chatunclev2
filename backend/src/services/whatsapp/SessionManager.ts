@@ -4,6 +4,8 @@ import makeWASocket, {
   WASocket,
   proto,
   downloadMediaMessage,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as fs from 'fs';
@@ -12,7 +14,7 @@ import { query, queryOne, execute } from '../../config/database';
 import { getIO } from '../socket';
 import pino from 'pino';
 
-const logger = pino({ level: 'silent' });
+const logger = pino({ level: process.env.NODE_ENV === 'development' ? 'debug' : 'warn' });
 
 interface MessagePayload {
   type: 'text' | 'image' | 'video' | 'audio' | 'document';
@@ -35,12 +37,27 @@ class SessionManager {
   async createSession(accountId: string, userId: string): Promise<void> {
     const sessionPath = path.join(this.sessionsDir, accountId);
 
+    // Fetch latest version for better compatibility
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Using WA v${version.join('.')}, isLatest: ${isLatest}`);
+
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
     const sock = makeWASocket({
-      auth: state,
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
       printQRInTerminal: false,
       logger,
+      browser: ['ChatUncle', 'Chrome', '120.0.0'],
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false,
+      getMessage: async () => {
+        return { conversation: '' };
+      },
     });
 
     this.sessions.set(accountId, sock);
