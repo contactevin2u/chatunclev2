@@ -110,7 +110,8 @@ class SessionManager {
       }
 
       if (connection === 'open') {
-        console.log(`Session ${accountId} connected`);
+        console.log(`[WA] Session ${accountId} connected successfully`);
+        console.log(`[WA] User info:`, sock.user);
 
         // Get phone number from socket
         const phoneNumber = sock.user?.id?.split(':')[0] || null;
@@ -130,17 +131,29 @@ class SessionManager {
 
     // Handle incoming messages
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      console.log(`[WA] messages.upsert - type: ${type}, count: ${messages.length}`);
 
       for (const msg of messages) {
-        if (msg.key.fromMe) continue; // Skip outgoing messages
+        console.log(`[WA] Message from: ${msg.key.remoteJid}, fromMe: ${msg.key.fromMe}, id: ${msg.key.id}`);
 
-        await this.handleIncomingMessage(accountId, userId, msg);
+        // Skip messages sent by us
+        if (msg.key.fromMe) continue;
+
+        // Skip status broadcasts
+        if (msg.key.remoteJid === 'status@broadcast') continue;
+
+        try {
+          await this.handleIncomingMessage(accountId, userId, msg);
+          console.log(`[WA] Message processed successfully`);
+        } catch (error) {
+          console.error(`[WA] Error processing message:`, error);
+        }
       }
     });
 
     // Handle message status updates
     sock.ev.on('messages.update', async (updates) => {
+      console.log(`[WA] messages.update - count: ${updates.length}`);
       for (const update of updates) {
         if (update.update.status) {
           const io = getIO();
@@ -149,6 +162,37 @@ class SessionManager {
             messageId: update.key.id,
             status: this.mapMessageStatus(update.update.status),
           });
+        }
+      }
+    });
+
+    // Handle chat updates (new chats, unread counts, etc.)
+    sock.ev.on('chats.upsert', async (chats) => {
+      console.log(`[WA] chats.upsert - count: ${chats.length}`);
+    });
+
+    sock.ev.on('chats.update', async (updates) => {
+      console.log(`[WA] chats.update - count: ${updates.length}`);
+    });
+
+    // Handle contacts
+    sock.ev.on('contacts.upsert', async (contacts) => {
+      console.log(`[WA] contacts.upsert - count: ${contacts.length}`);
+    });
+
+    // Handle messaging history sync
+    sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, isLatest }) => {
+      console.log(`[WA] messaging-history.set - chats: ${chats.length}, contacts: ${contacts.length}, messages: ${messages.length}, isLatest: ${isLatest}`);
+
+      // Process synced messages
+      for (const msg of messages) {
+        if (msg.key.fromMe) continue;
+        if (msg.key.remoteJid === 'status@broadcast') continue;
+
+        try {
+          await this.handleIncomingMessage(accountId, userId, msg);
+        } catch (error) {
+          console.error(`[WA] Error processing synced message:`, error);
         }
       }
     });
