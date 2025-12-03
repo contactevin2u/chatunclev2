@@ -57,7 +57,6 @@ class SessionManager {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      printQRInTerminal: true, // Also print to terminal for debugging
       logger,
       browser: ['ChatUncle', 'Chrome', '121.0.0'],
       syncFullHistory: true, // Enable full history sync
