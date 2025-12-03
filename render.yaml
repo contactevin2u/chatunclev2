@@ -35,8 +35,7 @@ databases:
   # PostgreSQL Database
   - name: chatuncle-db
     region: singapore
-    plan: starter
+    plan: basic  # New Render plan: basic ($7/mo), standard, pro
     databaseName: chatuncle
     user: chatuncle_user
-    postgresMajorVersion: 16  # Latest stable version (18 not available yet)
-    ipAllowList: []  # Allow all IPs (for Render internal connections)
+    postgresMajorVersion: 16
