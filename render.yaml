@@ -35,7 +35,7 @@ databases:
   # PostgreSQL Database
   - name: chatuncle-db
     region: singapore
-    plan: basic  # New Render plan: basic ($7/mo), standard, pro
+    plan: basic-256mb  # Options: free, basic-256mb, basic-1gb, basic-4gb, pro-4gb+
     databaseName: chatuncle
     user: chatuncle_user
     postgresMajorVersion: 16
