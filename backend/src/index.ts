@@ -23,7 +23,21 @@ initializeSocket(httpServer);
 
 // Middleware
 app.use(cors({
-  origin: config.corsOrigin,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+
+    // Remove trailing slash for comparison
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
+
+    // Allow if matches or if in development
+    if (normalizedOrigin === allowedOrigin || config.nodeEnv === 'development') {
+      return callback(null, true);
+    }
+
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
