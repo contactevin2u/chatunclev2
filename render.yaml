@@ -1,0 +1,42 @@
+# Render Blueprint for ChatUncle
+# Deploy: https://render.com/deploy
+
+services:
+  # Backend API Service
+  - type: web
+    name: chatuncle-api
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: cd backend && npm install && npm run build
+    startCommand: cd backend && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        fromDatabase:
+          name: chatuncle-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGIN
+        sync: false  # Set this to your Vercel frontend URL after deployment
+    disk:
+      name: whatsapp-sessions
+      mountPath: /opt/render/project/src/backend/sessions
+      sizeGB: 1
+
+databases:
+  # PostgreSQL Database
+  - name: chatuncle-db
+    region: singapore
+    plan: starter
+    databaseName: chatuncle
+    user: chatuncle_user
+    postgresMajorVersion: 16  # Latest stable version (18 not available yet)
+    ipAllowList: []  # Allow all IPs (for Render internal connections)
