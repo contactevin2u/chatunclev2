@@ -26,6 +26,7 @@ import {
   getTypingDuration,
   sleep,
   getRandomDelay,
+  getReplyDelay,
   getAntiBanStats,
   isInWarmupPeriod,
 } from '../antiBan';
@@ -1002,33 +1003,26 @@ class SessionManager {
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
     console.log(`[WA] Connected as: ${sock.user?.id}`);
 
-    // === ANTI-BAN MEASURES ===
+    // === ANTI-BAN MEASURES (OPTIMIZED FOR SPEED) ===
     if (!options.skipAntiBan) {
-      // 1. Pre-send check (rate limiting, daily limits, batch cooldowns)
+      // 1. Pre-send check (rate limiting, daily limits)
       const preCheck = await preSendCheck(accountId, waId);
       if (!preCheck.canSend) {
         console.warn(`[WA] Anti-ban blocked send: ${preCheck.reason}`);
         throw new Error(`Message blocked: ${preCheck.reason}`);
       }
 
-      // 2. Simulate reading the conversation (mark as "online" briefly)
-      try {
-        await sock.sendPresenceUpdate('available', jid);
-        await sleep(getRandomDelay(500, 1500));
-      } catch (e) {
-        console.log(`[WA] Presence update skipped:`, e);
-      }
-
-      // 3. Simulate typing indicator (human-like behavior)
+      // 2. Quick typing indicator (0.5-2 seconds total)
+      // Skip the "available" presence for conversational replies - not needed
       const messageLength = payload.content?.length || 50;
       const typingDuration = getTypingDuration(messageLength);
-      console.log(`[AntiBan] Simulating typing for ${typingDuration}ms`);
+      console.log(`[AntiBan] Typing for ${typingDuration}ms`);
 
       try {
         await sock.sendPresenceUpdate('composing', jid);
         await sleep(typingDuration);
         await sock.sendPresenceUpdate('paused', jid);
-        await sleep(getRandomDelay(200, 500)); // Brief pause after typing
+        // No additional delay after paused - send immediately
       } catch (e) {
         console.log(`[WA] Typing indicator skipped:`, e);
       }
@@ -1104,13 +1098,11 @@ class SessionManager {
         throw new Error('Message sent but no ID returned');
       }
 
-      // === POST-SEND ANTI-BAN RECORDING ===
+      // === POST-SEND RECORDING (no additional delay) ===
       if (!options.skipAntiBan) {
         await postSendRecord(accountId, waId);
-
-        // Go back to "unavailable" after sending (don't stay online)
+        // Go unavailable immediately - no need to wait
         try {
-          await sleep(getRandomDelay(1000, 3000));
           await sock.sendPresenceUpdate('unavailable', jid);
         } catch (e) {
           // Ignore presence errors

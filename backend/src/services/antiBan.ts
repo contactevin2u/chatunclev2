@@ -18,38 +18,49 @@ import { query, queryOne, execute } from '../config/database';
  */
 
 // Rate limiting configuration
+// Based on research: https://wasender.com/blog/save-number-from-banning/
+// WhatsApp pair rate limit: 1 message per 6 seconds to same contact
+// Per-second rate limit: 80 messages/second per business number
 const RATE_LIMITS = {
-  // Messages per minute (conservative: 6-12 recommended)
-  MESSAGES_PER_MINUTE: 8,
+  // Messages per minute (WhatsApp allows ~80/sec, but we're conservative)
+  MESSAGES_PER_MINUTE: 15,
 
-  // Minimum delay between messages in ms (1-3 seconds)
-  MIN_DELAY_MS: 1000,
+  // === REPLY MODE: For conversational replies (already in chat) ===
+  // These should be SHORT for fast responses
+  REPLY_MIN_DELAY_MS: 300,   // 0.3 seconds minimum
+  REPLY_MAX_DELAY_MS: 1500,  // 1.5 seconds maximum
 
-  // Maximum delay between messages in ms (5-15 seconds)
-  MAX_DELAY_MS: 8000,
+  // === BULK MODE: For scheduled/broadcast messages to different contacts ===
+  // These are longer to avoid detection
+  BULK_MIN_DELAY_MS: 2000,   // 2 seconds minimum
+  BULK_MAX_DELAY_MS: 5000,   // 5 seconds maximum
 
-  // Typing indicator duration before sending (1-4 seconds)
-  MIN_TYPING_MS: 1000,
-  MAX_TYPING_MS: 4000,
+  // Legacy defaults (used by getRandomDelay without context)
+  MIN_DELAY_MS: 500,
+  MAX_DELAY_MS: 2000,
 
-  // Cooldown between batches in ms (10 minutes)
-  BATCH_COOLDOWN_MS: 10 * 60 * 1000,
+  // Typing indicator duration (keep short - presence expires after 10s)
+  MIN_TYPING_MS: 500,   // 0.5 seconds
+  MAX_TYPING_MS: 2000,  // 2 seconds max
 
-  // Maximum messages per batch
-  BATCH_SIZE: 30,
+  // Cooldown between batches in ms (5 minutes is enough)
+  BATCH_COOLDOWN_MS: 5 * 60 * 1000,
+
+  // Maximum messages per batch before cooldown
+  BATCH_SIZE: 50,
 
   // Daily limits based on account age (days)
   DAILY_LIMITS: {
-    0: 20,    // Day 0-1: max 20 new contacts
-    1: 30,    // Day 1-3: max 30 new contacts
-    3: 50,    // Day 3-7: max 50 new contacts
-    7: 100,   // Day 7-14: max 100 new contacts
-    14: 200,  // Day 14-30: max 200 new contacts
-    30: 500,  // Day 30+: max 500 new contacts
+    0: 30,    // Day 0-1: max 30 new contacts
+    1: 50,    // Day 1-3: max 50 new contacts
+    3: 100,   // Day 3-7: max 100 new contacts
+    7: 200,   // Day 7-14: max 200 new contacts
+    14: 500,  // Day 14-30: max 500 new contacts
+    30: 1000, // Day 30+: max 1000 new contacts
   } as Record<number, number>,
 
   // Warm-up period in days (highest risk period)
-  WARMUP_PERIOD_DAYS: 10,
+  WARMUP_PERIOD_DAYS: 7,
 };
 
 // In-memory tracking for rate limiting
@@ -105,15 +116,31 @@ export function getRandomDelay(min: number = RATE_LIMITS.MIN_DELAY_MS, max: numb
 }
 
 /**
- * Generate typing indicator duration (human-like)
+ * Generate typing indicator duration (human-like but SHORT)
+ * Presence expires after 10 seconds, so keep this under 3 seconds
  */
 export function getTypingDuration(messageLength: number = 50): number {
-  // Base typing time + time based on message length (simulating typing speed)
+  // Keep it short: 0.5 - 2 seconds with slight variation
+  // Don't scale too much with length - typing should feel natural not robotic
   const baseTime = RATE_LIMITS.MIN_TYPING_MS;
-  const lengthTime = Math.min(messageLength * 30, RATE_LIMITS.MAX_TYPING_MS - baseTime);
-  const randomVariation = Math.floor(Math.random() * 1000);
+  const lengthBonus = Math.min(messageLength * 5, 500); // Max 500ms bonus for long messages
+  const randomVariation = Math.floor(Math.random() * 500);
 
-  return baseTime + lengthTime + randomVariation;
+  return Math.min(baseTime + lengthBonus + randomVariation, RATE_LIMITS.MAX_TYPING_MS);
+}
+
+/**
+ * Get delay for reply mode (conversational, fast response)
+ */
+export function getReplyDelay(): number {
+  return getRandomDelay(RATE_LIMITS.REPLY_MIN_DELAY_MS, RATE_LIMITS.REPLY_MAX_DELAY_MS);
+}
+
+/**
+ * Get delay for bulk mode (scheduled/broadcast, slower)
+ */
+export function getBulkDelay(): number {
+  return getRandomDelay(RATE_LIMITS.BULK_MIN_DELAY_MS, RATE_LIMITS.BULK_MAX_DELAY_MS);
 }
 
 /**
@@ -311,8 +338,8 @@ export async function getAntiBanStats(accountId: string): Promise<{
 }
 
 /**
- * Wait for rate limit with random human-like delay
- * Call this before sending any message
+ * Wait for rate limit (if needed)
+ * For conversational replies, this should rarely block
  */
 export async function waitForRateLimit(accountId: string): Promise<void> {
   // Check rate limit
@@ -320,14 +347,12 @@ export async function waitForRateLimit(accountId: string): Promise<void> {
 
   while (!check.allowed) {
     console.log(`[AntiBan] Rate limit active for ${accountId}, waiting ${check.waitMs}ms. Reason: ${check.reason}`);
-    await sleep(check.waitMs + getRandomDelay(500, 2000)); // Add random buffer
+    await sleep(check.waitMs + getRandomDelay(100, 500)); // Small buffer
     check = await canSendMessage(accountId);
   }
 
-  // Add additional random delay for human-like behavior
-  const randomDelay = getRandomDelay();
-  console.log(`[AntiBan] Adding human-like delay: ${randomDelay}ms`);
-  await sleep(randomDelay);
+  // NO additional random delay here - typing indicator handles the human-like behavior
+  // This function is only for rate limiting, not for adding arbitrary delays
 }
 
 /**
