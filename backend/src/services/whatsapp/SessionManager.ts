@@ -8,11 +8,9 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   WAMessageKey,
   Browsers,
-  isJidUser,
   isJidBroadcast,
   isJidGroup,
   getContentType,
-  delay,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as fs from 'fs';
@@ -30,6 +28,25 @@ import {
   isInWarmupPeriod,
 } from '../antiBan';
 import pino from 'pino';
+
+/**
+ * Check if JID is a user (supports both @s.whatsapp.net and @lid formats)
+ * WhatsApp introduced LID (Link ID) format for privacy - we need to handle both
+ * @see https://github.com/WhiskeySockets/Baileys/issues/1718
+ */
+function isUserJid(jid: string | null | undefined): boolean {
+  if (!jid) return false;
+  // Traditional user format: 1234567890@s.whatsapp.net
+  // New LID format: 1234567890@lid
+  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+}
+
+/**
+ * Extract the user ID from a JID (works with both @s.whatsapp.net and @lid)
+ */
+function extractUserIdFromJid(jid: string): string {
+  return jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+}
 
 // Create logger - use info level to see important logs
 const logger = pino({
@@ -250,7 +267,7 @@ class SessionManager {
         if (isJidGroup(remoteJid)) continue;
 
         // Only process user messages
-        if (!isJidUser(remoteJid)) continue;
+        if (!isUserJid(remoteJid)) continue;
 
         // Handle our own sent messages (for sync acknowledgment)
         if (fromMe) {
@@ -309,9 +326,9 @@ class SessionManager {
         for (const contact of contacts) {
           try {
             // Skip non-user contacts (groups, broadcasts, etc)
-            if (!contact.id || !isJidUser(contact.id)) continue;
+            if (!contact.id || !isUserJid(contact.id)) continue;
 
-            const waId = contact.id.replace('@s.whatsapp.net', '');
+            const waId = extractUserIdFromJid(contact.id);
 
             await queryOne(
               `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
@@ -342,7 +359,7 @@ class SessionManager {
           // Skip status broadcasts and groups using Baileys helpers
           if (!remoteJid || isJidBroadcast(remoteJid)) continue;
           if (isJidGroup(remoteJid)) continue;
-          if (!isJidUser(remoteJid)) continue;
+          if (!isUserJid(remoteJid)) continue;
 
           try {
             await this.handleIncomingMessage(accountId, userId, msg, false);
@@ -384,7 +401,7 @@ class SessionManager {
       for (const contact of contacts) {
         try {
           // Skip non-user contacts (groups, broadcasts, etc)
-          if (!contact.id || !isJidUser(contact.id)) continue;
+          if (!contact.id || !isUserJid(contact.id)) continue;
 
           const waId = contact.id.replace('@s.whatsapp.net', '');
 
@@ -431,10 +448,10 @@ class SessionManager {
 
     // Use Baileys helpers for jid validation
     if (!remoteJid || isJidBroadcast(remoteJid) || isJidGroup(remoteJid)) return;
-    if (!isJidUser(remoteJid)) return;
+    if (!isUserJid(remoteJid)) return;
 
     // Extract phone number from jid
-    const waId = remoteJid.replace('@s.whatsapp.net', '');
+    const waId = extractUserIdFromJid(remoteJid);
 
     console.log(`[WA] Processing message from ${waId}, realtime: ${isRealTime}`);
 
