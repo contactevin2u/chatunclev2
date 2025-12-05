@@ -269,17 +269,29 @@ class SessionManager {
         // Only process user messages
         if (!isUserJid(remoteJid)) continue;
 
-        // Handle our own sent messages (for sync acknowledgment)
+        // Handle our own sent messages (from phone or ChatUncle)
         if (fromMe) {
-          console.log(`[WA] Sent message acknowledged by server: ${messageId}`);
-          // Update message status in database if it exists
-          try {
+          console.log(`[WA] Sent message from self: ${messageId}`);
+
+          // Check if message already exists in DB
+          const existingMsg = await queryOne(
+            'SELECT id FROM messages WHERE wa_message_id = $1',
+            [messageId]
+          );
+
+          if (existingMsg) {
+            // Update status of existing message (sent from ChatUncle)
             await execute(
               `UPDATE messages SET status = 'sent', updated_at = NOW() WHERE wa_message_id = $1`,
               [messageId]
             );
-          } catch (error) {
-            // Message might not exist in DB yet, that's okay
+          } else {
+            // Save message sent from phone - needs to be stored
+            try {
+              await this.handleOutgoingMessage(accountId, userId, msg, type === 'notify');
+            } catch (error) {
+              console.error(`[WA] Error saving outgoing message:`, error);
+            }
           }
           continue;
         }
@@ -376,16 +388,26 @@ class SessionManager {
         for (const msg of messages) {
           const remoteJid = msg.key.remoteJid;
 
-          // Skip messages we sent
-          if (msg.key.fromMe) continue;
-
           // Skip status broadcasts and groups using Baileys helpers
           if (!remoteJid || isJidBroadcast(remoteJid)) continue;
           if (isJidGroup(remoteJid)) continue;
           if (!isUserJid(remoteJid)) continue;
 
           try {
-            await this.handleIncomingMessage(accountId, userId, msg, false);
+            // Check if message already exists
+            const existingMsg = await queryOne(
+              'SELECT id FROM messages WHERE wa_message_id = $1',
+              [msg.key.id]
+            );
+            if (existingMsg) continue;
+
+            if (msg.key.fromMe) {
+              // Outgoing message sent from phone
+              await this.handleOutgoingMessage(accountId, userId, msg, false);
+            } else {
+              // Incoming message from contact
+              await this.handleIncomingMessage(accountId, userId, msg, false);
+            }
             processedCount++;
           } catch (error) {
             // Ignore duplicate errors
@@ -652,6 +674,127 @@ class SessionManager {
           console.error('[WA] Auto-reply processing error:', error);
         }
       }
+    }
+  }
+
+  // Handle outgoing messages sent from phone (not through ChatUncle)
+  private async handleOutgoingMessage(
+    accountId: string,
+    userId: string,
+    msg: proto.IWebMessageInfo,
+    isRealTime: boolean = true
+  ): Promise<void> {
+    const remoteJid = msg.key.remoteJid;
+
+    if (!remoteJid || isJidBroadcast(remoteJid) || isJidGroup(remoteJid)) return;
+    if (!isUserJid(remoteJid)) return;
+
+    const waId = extractUserIdFromJid(remoteJid);
+
+    console.log(`[WA] Processing outgoing message to ${waId}, realtime: ${isRealTime}`);
+
+    // Get or create contact
+    let contact = await queryOne(
+      'SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2',
+      [accountId, waId]
+    );
+
+    if (!contact) {
+      contact = await queryOne(
+        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [accountId, waId, waId]
+      );
+    }
+
+    // Get or create conversation
+    let conversation = await queryOne(
+      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND contact_id = $2',
+      [accountId, contact.id]
+    );
+
+    if (!conversation) {
+      conversation = await queryOne(
+        `INSERT INTO conversations (whatsapp_account_id, contact_id, last_message_at)
+         VALUES ($1, $2, NOW())
+         RETURNING *`,
+        [accountId, contact.id]
+      );
+    } else {
+      await execute(
+        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [conversation.id]
+      );
+    }
+
+    // Parse message content
+    const messageContent = msg.message;
+    let contentType = 'text';
+    let content = '';
+    let mediaUrl = null;
+    let mediaMimeType = null;
+
+    const msgType = messageContent ? getContentType(messageContent) : undefined;
+
+    switch (msgType) {
+      case 'conversation':
+        content = messageContent?.conversation || '';
+        break;
+      case 'extendedTextMessage':
+        content = messageContent?.extendedTextMessage?.text || '';
+        break;
+      case 'imageMessage':
+        contentType = 'image';
+        content = messageContent?.imageMessage?.caption || '';
+        mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        break;
+      case 'videoMessage':
+        contentType = 'video';
+        content = messageContent?.videoMessage?.caption || '';
+        mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        break;
+      case 'audioMessage':
+        contentType = 'audio';
+        mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        break;
+      case 'documentMessage':
+        contentType = 'document';
+        content = messageContent?.documentMessage?.fileName || '';
+        mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+        break;
+      default:
+        if (!content) content = '[Message from phone]';
+    }
+
+    // Get message timestamp
+    const messageTimestamp = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000)
+      : new Date();
+
+    // Save message as sent by agent (from phone)
+    const savedMessage = await queryOne(
+      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
+       VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7)
+       RETURNING *`,
+      [conversation.id, msg.key.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
+    );
+
+    console.log(`[WA] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
+
+    // Emit to frontend
+    if (isRealTime) {
+      const io = getIO();
+      io.to(`user:${userId}`).emit('message:new', {
+        accountId,
+        conversationId: conversation.id,
+        message: savedMessage,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          phone_number: contact.phone_number,
+        },
+      });
     }
   }
 
