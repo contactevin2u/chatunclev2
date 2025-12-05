@@ -13,7 +13,7 @@ router.use(authenticate);
 router.get('/', async (req: Request, res: Response) => {
   try {
     const accounts = await query<WhatsAppAccount>(
-      `SELECT id, phone_number, name, status, created_at, updated_at
+      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
        FROM whatsapp_accounts
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -54,7 +54,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const account = await queryOne<WhatsAppAccount>(
-      `SELECT id, phone_number, name, status, created_at, updated_at
+      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
        FROM whatsapp_accounts
        WHERE id = $1 AND user_id = $2`,
       [req.params.id, req.user!.userId]
@@ -69,6 +69,60 @@ router.get('/:id', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get account error:', error);
     res.status(500).json({ error: 'Failed to get account' });
+  }
+});
+
+// Update account settings
+router.patch('/:id', async (req: Request, res: Response) => {
+  try {
+    const { name, incognitoMode, showChannelName, channelDisplayName } = req.body;
+
+    // Check ownership
+    const existing = await queryOne<WhatsAppAccount>(
+      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!existing) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    const updates: string[] = ['updated_at = NOW()'];
+    const params: any[] = [req.params.id];
+    let paramIndex = 2;
+
+    if (name !== undefined) {
+      params.push(name);
+      updates.push(`name = $${paramIndex++}`);
+    }
+
+    if (incognitoMode !== undefined) {
+      params.push(incognitoMode);
+      updates.push(`incognito_mode = $${paramIndex++}`);
+    }
+
+    if (showChannelName !== undefined) {
+      params.push(showChannelName);
+      updates.push(`show_channel_name = $${paramIndex++}`);
+    }
+
+    if (channelDisplayName !== undefined) {
+      params.push(channelDisplayName);
+      updates.push(`channel_display_name = $${paramIndex++}`);
+    }
+
+    const account = await queryOne<WhatsAppAccount>(`
+      UPDATE whatsapp_accounts
+      SET ${updates.join(', ')}
+      WHERE id = $1
+      RETURNING id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
+    `, params);
+
+    res.json({ account });
+  } catch (error) {
+    console.error('Update account error:', error);
+    res.status(500).json({ error: 'Failed to update account' });
   }
 });
 

@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { config } from './config/env';
 import { initializeSocket } from './services/socket';
 import { sessionManager } from './services/whatsapp/SessionManager';
+import { startScheduledMessageProcessor } from './services/scheduledMessageProcessor';
 
 // Routes
 import authRoutes from './routes/auth';
@@ -14,6 +15,13 @@ import contactsRoutes from './routes/contacts';
 import labelsRoutes from './routes/labels';
 import templatesRoutes from './routes/templates';
 import adminRoutes from './routes/admin';
+import analyticsRoutes from './routes/analytics';
+import scheduledMessagesRoutes from './routes/scheduled-messages';
+import notesRoutes from './routes/notes';
+import searchRoutes from './routes/search';
+import autoReplyRoutes from './routes/auto-reply';
+import activityLogsRoutes from './routes/activity-logs';
+import aalyxRoutes from './routes/aalyx';
 
 const app = express();
 const httpServer = createServer(app);
@@ -57,6 +65,13 @@ app.use('/api/contacts', contactsRoutes);
 app.use('/api/labels', labelsRoutes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/scheduled-messages', scheduledMessagesRoutes);
+app.use('/api/notes', notesRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/auto-reply', autoReplyRoutes);
+app.use('/api/activity-logs', activityLogsRoutes);
+app.use('/api/aalyx', aalyxRoutes);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -72,6 +87,9 @@ httpServer.listen(config.port, async () => {
   // Restore WhatsApp sessions on startup
   if (config.nodeEnv !== 'test') {
     await sessionManager.restoreAllSessions();
+
+    // Start scheduled message processor
+    startScheduledMessageProcessor();
   }
 });
 

@@ -7,12 +7,18 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   WAMessageKey,
+  Browsers,
+  isJidUser,
+  isJidBroadcast,
+  isJidGroup,
+  getContentType,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as fs from 'fs';
 import * as path from 'path';
 import { query, queryOne, execute } from '../../config/database';
 import { getIO } from '../socket';
+import { processAutoReply } from '../autoReplyProcessor';
 import pino from 'pino';
 
 // Create logger - use info level to see important logs
@@ -27,8 +33,15 @@ interface MessagePayload {
   mediaMimeType?: string;
 }
 
+interface SessionState {
+  socket: WASocket;
+  isReady: boolean;
+  readyPromise: Promise<void>;
+  resolveReady: () => void;
+}
+
 class SessionManager {
-  private sessions: Map<string, WASocket> = new Map();
+  private sessions: Map<string, SessionState> = new Map();
   private sessionsDir: string;
 
   constructor() {
@@ -37,6 +50,25 @@ class SessionManager {
     if (!fs.existsSync(this.sessionsDir)) {
       fs.mkdirSync(this.sessionsDir, { recursive: true });
     }
+  }
+
+  // Wait for session to be ready with timeout
+  private async waitForReady(accountId: string, timeoutMs: number = 30000): Promise<void> {
+    const session = this.sessions.get(accountId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    if (session.isReady) {
+      return;
+    }
+
+    // Wait for ready with timeout
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Session sync timeout - please try again')), timeoutMs);
+    });
+
+    await Promise.race([session.readyPromise, timeoutPromise]);
   }
 
   async createSession(accountId: string, userId: string): Promise<void> {
@@ -50,7 +82,7 @@ class SessionManager {
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
-    // Create socket with proper configuration
+    // Create socket with proper configuration based on latest Baileys documentation
     const sock = makeWASocket({
       version,
       auth: {
@@ -58,16 +90,20 @@ class SessionManager {
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
-      browser: ['ChatUncle', 'Chrome', '121.0.0'],
-      syncFullHistory: true, // Enable full history sync
+      // Use Browsers helper for proper browser identification (recommended by Baileys docs)
+      browser: Browsers.ubuntu('ChatUncle'),
+      // Enable full history sync for retrieving old messages
+      syncFullHistory: true,
+      // Don't mark as online on connect - allows user to receive notifications on phone
       markOnlineOnConnect: false,
+      // Disable link preview generation (reduces processing overhead)
       generateHighQualityLinkPreview: false,
-      // getMessage - fetch from database if needed for retries
+      // getMessage callback for poll decryption and message retries
+      // This should return the message content from your database
       getMessage: async (key: WAMessageKey) => {
-        // Try to get message from database
         try {
           const msg = await queryOne(
-            'SELECT content FROM messages WHERE wa_message_id = $1',
+            'SELECT content, content_type FROM messages WHERE wa_message_id = $1',
             [key.id]
           );
           if (msg?.content) {
@@ -80,8 +116,21 @@ class SessionManager {
       },
     });
 
-    // Store session
-    this.sessions.set(accountId, sock);
+    // Create session state with ready promise
+    let resolveReady: () => void = () => {};
+    const readyPromise = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+
+    const sessionState: SessionState = {
+      socket: sock,
+      isReady: false,
+      readyPromise,
+      resolveReady,
+    };
+
+    // Store session state
+    this.sessions.set(accountId, sessionState);
 
     // Handle credentials update
     sock.ev.on('creds.update', saveCreds);
@@ -112,6 +161,12 @@ class SessionManager {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
         console.log(`[WA] Connection closed. Status code: ${statusCode}, shouldReconnect: ${shouldReconnect}`);
+
+        // Mark session as not ready
+        const session = this.sessions.get(accountId);
+        if (session) {
+          session.isReady = false;
+        }
 
         await execute(
           "UPDATE whatsapp_accounts SET status = 'disconnected', updated_at = NOW() WHERE id = $1",
@@ -154,6 +209,14 @@ class SessionManager {
           phoneNumber,
           name,
         });
+
+        // Mark session as ready for sending messages
+        const session = this.sessions.get(accountId);
+        if (session) {
+          session.isReady = true;
+          session.resolveReady();
+          console.log(`[WA] Session ${accountId} is now ready for sending messages`);
+        }
       }
     });
 
@@ -170,14 +233,29 @@ class SessionManager {
 
         console.log(`[WA] Message: jid=${remoteJid}, fromMe=${fromMe}, id=${messageId}, type=${type}`);
 
-        // Skip messages we sent
-        if (fromMe) continue;
+        // Skip status broadcasts using Baileys helper
+        if (!remoteJid || isJidBroadcast(remoteJid)) continue;
 
-        // Skip status broadcasts
-        if (remoteJid === 'status@broadcast') continue;
+        // Skip group messages using Baileys helper
+        if (isJidGroup(remoteJid)) continue;
 
-        // Skip group messages for now
-        if (remoteJid?.endsWith('@g.us')) continue;
+        // Only process user messages
+        if (!isJidUser(remoteJid)) continue;
+
+        // Handle our own sent messages (for sync acknowledgment)
+        if (fromMe) {
+          console.log(`[WA] Sent message acknowledged by server: ${messageId}`);
+          // Update message status in database if it exists
+          try {
+            await execute(
+              `UPDATE messages SET status = 'sent', updated_at = NOW() WHERE wa_message_id = $1`,
+              [messageId]
+            );
+          } catch (error) {
+            // Message might not exist in DB yet, that's okay
+          }
+          continue;
+        }
 
         try {
           await this.handleIncomingMessage(accountId, userId, msg, type === 'notify');
@@ -215,12 +293,15 @@ class SessionManager {
       console.log(`  - progress: ${progress}`);
       console.log(`  - syncType: ${syncType}`);
 
-      // Process contacts from history
+      // Process contacts from history using Baileys jid helpers
       if (contacts && contacts.length > 0) {
+        let processedContactCount = 0;
         for (const contact of contacts) {
           try {
-            const waId = contact.id?.replace('@s.whatsapp.net', '').replace('@g.us', '');
-            if (!waId || contact.id?.endsWith('@g.us')) continue;
+            // Skip non-user contacts (groups, broadcasts, etc)
+            if (!contact.id || !isJidUser(contact.id)) continue;
+
+            const waId = contact.id.replace('@s.whatsapp.net', '');
 
             await queryOne(
               `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
@@ -231,21 +312,27 @@ class SessionManager {
                RETURNING *`,
               [accountId, waId, waId, contact.name || contact.notify || null]
             );
+            processedContactCount++;
           } catch (error) {
             console.error(`[WA] Error processing contact:`, error);
           }
         }
-        console.log(`[WA] Processed ${contacts.length} contacts from history`);
+        console.log(`[WA] Processed ${processedContactCount} contacts from history`);
       }
 
       // Process messages from history
       if (messages && messages.length > 0) {
         let processedCount = 0;
         for (const msg of messages) {
-          // Skip messages we sent, status broadcasts, and groups
+          const remoteJid = msg.key.remoteJid;
+
+          // Skip messages we sent
           if (msg.key.fromMe) continue;
-          if (msg.key.remoteJid === 'status@broadcast') continue;
-          if (msg.key.remoteJid?.endsWith('@g.us')) continue;
+
+          // Skip status broadcasts and groups using Baileys helpers
+          if (!remoteJid || isJidBroadcast(remoteJid)) continue;
+          if (isJidGroup(remoteJid)) continue;
+          if (!isJidUser(remoteJid)) continue;
 
           try {
             await this.handleIncomingMessage(accountId, userId, msg, false);
@@ -280,14 +367,16 @@ class SessionManager {
       console.log(`[WA] chats.update - count: ${updates.length}`);
     });
 
-    // Handle contacts
+    // Handle contacts using Baileys jid helpers
     sock.ev.on('contacts.upsert', async (contacts) => {
       console.log(`[WA] contacts.upsert - count: ${contacts.length}`);
 
       for (const contact of contacts) {
         try {
-          const waId = contact.id?.replace('@s.whatsapp.net', '').replace('@g.us', '');
-          if (!waId || contact.id?.endsWith('@g.us')) continue;
+          // Skip non-user contacts (groups, broadcasts, etc)
+          if (!contact.id || !isJidUser(contact.id)) continue;
+
+          const waId = contact.id.replace('@s.whatsapp.net', '');
 
           await queryOne(
             `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
@@ -329,13 +418,13 @@ class SessionManager {
     isRealTime: boolean = true
   ): Promise<void> {
     const remoteJid = msg.key.remoteJid;
-    if (!remoteJid || remoteJid === 'status@broadcast') return;
 
-    const waId = remoteJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-    const isGroup = remoteJid.endsWith('@g.us');
+    // Use Baileys helpers for jid validation
+    if (!remoteJid || isJidBroadcast(remoteJid) || isJidGroup(remoteJid)) return;
+    if (!isJidUser(remoteJid)) return;
 
-    // Skip group messages
-    if (isGroup) return;
+    // Extract phone number from jid
+    const waId = remoteJid.replace('@s.whatsapp.net', '');
 
     console.log(`[WA] Processing message from ${waId}, realtime: ${isRealTime}`);
 
@@ -389,40 +478,74 @@ class SessionManager {
       return;
     }
 
-    // Determine message type and content
+    // Determine message type and content using Baileys getContentType helper
     const messageContent = msg.message;
     let contentType = 'text';
     let content = '';
     let mediaUrl = null;
     let mediaMimeType = null;
 
-    if (messageContent?.conversation) {
-      content = messageContent.conversation;
-    } else if (messageContent?.extendedTextMessage?.text) {
-      content = messageContent.extendedTextMessage.text;
-    } else if (messageContent?.imageMessage) {
-      contentType = 'image';
-      content = messageContent.imageMessage.caption || '';
-      mediaMimeType = messageContent.imageMessage.mimetype || 'image/jpeg';
-    } else if (messageContent?.videoMessage) {
-      contentType = 'video';
-      content = messageContent.videoMessage.caption || '';
-      mediaMimeType = messageContent.videoMessage.mimetype || 'video/mp4';
-    } else if (messageContent?.audioMessage) {
-      contentType = 'audio';
-      mediaMimeType = messageContent.audioMessage.mimetype || 'audio/ogg';
-    } else if (messageContent?.documentMessage) {
-      contentType = 'document';
-      content = messageContent.documentMessage.fileName || '';
-      mediaMimeType = messageContent.documentMessage.mimetype || 'application/octet-stream';
-    } else if (messageContent?.stickerMessage) {
-      contentType = 'image';
-      content = '[Sticker]';
-      mediaMimeType = messageContent.stickerMessage.mimetype || 'image/webp';
-    } else {
-      // Unknown message type
-      console.log(`[WA] Unknown message type:`, Object.keys(messageContent || {}));
-      content = '[Unsupported message type]';
+    // Use Baileys getContentType to detect message type
+    const msgType = messageContent ? getContentType(messageContent) : undefined;
+    console.log(`[WA] Message content type: ${msgType}`);
+
+    switch (msgType) {
+      case 'conversation':
+        content = messageContent?.conversation || '';
+        break;
+      case 'extendedTextMessage':
+        content = messageContent?.extendedTextMessage?.text || '';
+        break;
+      case 'imageMessage':
+        contentType = 'image';
+        content = messageContent?.imageMessage?.caption || '';
+        mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        break;
+      case 'videoMessage':
+        contentType = 'video';
+        content = messageContent?.videoMessage?.caption || '';
+        mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        break;
+      case 'audioMessage':
+        contentType = 'audio';
+        mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        break;
+      case 'documentMessage':
+      case 'documentWithCaptionMessage':
+        contentType = 'document';
+        content = messageContent?.documentMessage?.fileName ||
+                  messageContent?.documentWithCaptionMessage?.message?.documentMessage?.fileName || '';
+        mediaMimeType = messageContent?.documentMessage?.mimetype ||
+                        messageContent?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
+                        'application/octet-stream';
+        break;
+      case 'stickerMessage':
+        contentType = 'image';
+        content = '[Sticker]';
+        mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
+        break;
+      case 'contactMessage':
+        contentType = 'text';
+        content = `[Contact: ${messageContent?.contactMessage?.displayName || 'Unknown'}]`;
+        break;
+      case 'locationMessage':
+        contentType = 'text';
+        const loc = messageContent?.locationMessage;
+        content = `[Location: ${loc?.degreesLatitude}, ${loc?.degreesLongitude}]`;
+        break;
+      case 'reactionMessage':
+        // Reactions are handled separately - skip them
+        console.log(`[WA] Skipping reaction message`);
+        return;
+      case 'protocolMessage':
+      case 'senderKeyDistributionMessage':
+        // Protocol messages - skip them
+        console.log(`[WA] Skipping protocol message: ${msgType}`);
+        return;
+      default:
+        // Unknown message type
+        console.log(`[WA] Unknown message type: ${msgType}`, Object.keys(messageContent || {}));
+        content = '[Unsupported message type]';
     }
 
     // Get message timestamp
@@ -453,61 +576,125 @@ class SessionManager {
           phone_number: contact.phone_number,
         },
       });
+
+      // Process auto-reply rules for text messages
+      if (contentType === 'text' && content) {
+        try {
+          await processAutoReply({
+            accountId,
+            conversationId: conversation.id,
+            contactWaId: waId,
+            content,
+            userId,
+          });
+        } catch (error) {
+          console.error('[WA] Auto-reply processing error:', error);
+        }
+      }
     }
   }
 
   async sendMessage(accountId: string, waId: string, payload: MessagePayload): Promise<string> {
-    const sock = this.sessions.get(accountId);
-    if (!sock) {
+    const session = this.sessions.get(accountId);
+    if (!session) {
       throw new Error('Session not found');
     }
+
+    // Wait for session to be fully synced and ready
+    try {
+      await this.waitForReady(accountId, 30000);
+    } catch (error) {
+      console.error(`[WA] Session not ready for account ${accountId}:`, error);
+      throw new Error('Session is still syncing - please wait a moment and try again');
+    }
+
+    const sock = session.socket;
+
+    // Check if socket is connected
+    if (!sock.user) {
+      throw new Error('Session not connected - please reconnect');
+    }
+
     const jid = waId.includes('@') ? waId : `${waId}@s.whatsapp.net`;
 
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
+    console.log(`[WA] Connected as: ${sock.user?.id}`);
 
     let result;
 
-    switch (payload.type) {
-      case 'text':
-        result = await sock.sendMessage(jid, { text: payload.content || '' });
-        break;
+    try {
+      switch (payload.type) {
+        case 'text':
+          if (!payload.content) {
+            throw new Error('Text content is required');
+          }
+          result = await sock.sendMessage(jid, { text: payload.content });
+          break;
 
-      case 'image':
-        result = await sock.sendMessage(jid, {
-          image: { url: payload.mediaUrl! },
-          caption: payload.content,
-        });
-        break;
+        case 'image':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for image');
+          }
+          result = await sock.sendMessage(jid, {
+            image: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          });
+          break;
 
-      case 'video':
-        result = await sock.sendMessage(jid, {
-          video: { url: payload.mediaUrl! },
-          caption: payload.content,
-        });
-        break;
+        case 'video':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for video');
+          }
+          result = await sock.sendMessage(jid, {
+            video: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          });
+          break;
 
-      case 'audio':
-        result = await sock.sendMessage(jid, {
-          audio: { url: payload.mediaUrl! },
-          mimetype: payload.mediaMimeType || 'audio/mp4',
-          ptt: true,
-        });
-        break;
+        case 'audio':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for audio');
+          }
+          result = await sock.sendMessage(jid, {
+            audio: { url: payload.mediaUrl },
+            mimetype: payload.mediaMimeType || 'audio/mp4',
+            ptt: true,
+          });
+          break;
 
-      case 'document':
-        result = await sock.sendMessage(jid, {
-          document: { url: payload.mediaUrl! },
-          mimetype: payload.mediaMimeType || 'application/octet-stream',
-          fileName: payload.content || 'document',
-        });
-        break;
+        case 'document':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for document');
+          }
+          result = await sock.sendMessage(jid, {
+            document: { url: payload.mediaUrl },
+            mimetype: payload.mediaMimeType || 'application/octet-stream',
+            fileName: payload.content || 'document',
+          });
+          break;
 
-      default:
-        throw new Error('Unsupported message type');
+        default:
+          throw new Error('Unsupported message type');
+      }
+
+      // Log full result for debugging
+      console.log(`[WA] Message sent successfully:`, {
+        id: result?.key?.id,
+        remoteJid: result?.key?.remoteJid,
+        fromMe: result?.key?.fromMe,
+        status: result?.status,
+        messageTimestamp: result?.messageTimestamp,
+      });
+
+      if (!result?.key?.id) {
+        throw new Error('Message sent but no ID returned');
+      }
+
+      return result.key.id;
+    } catch (error) {
+      console.error(`[WA] Failed to send message:`, error);
+      throw error;
     }
-
-    console.log(`[WA] Message sent, id: ${result?.key?.id}`);
-    return result?.key?.id || '';
   }
 
   async reconnectSession(accountId: string, userId: string): Promise<void> {
@@ -517,11 +704,11 @@ class SessionManager {
   }
 
   async destroySession(accountId: string): Promise<void> {
-    const sock = this.sessions.get(accountId);
-    if (sock) {
+    const session = this.sessions.get(accountId);
+    if (session) {
       console.log(`[WA] Destroying session ${accountId}`);
       try {
-        sock.end(undefined);
+        session.socket.end(undefined);
       } catch (error) {
         console.error(`[WA] Error ending socket:`, error);
       }
@@ -560,7 +747,13 @@ class SessionManager {
   }
 
   getSession(accountId: string): WASocket | undefined {
-    return this.sessions.get(accountId);
+    const session = this.sessions.get(accountId);
+    return session?.socket;
+  }
+
+  isSessionReady(accountId: string): boolean {
+    const session = this.sessions.get(accountId);
+    return session?.isReady || false;
   }
 }
 
