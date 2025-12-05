@@ -4,7 +4,7 @@ import { useRef, useEffect } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle } from 'lucide-react';
 
 interface MessageThreadProps {
   messages: Message[];
@@ -35,6 +35,8 @@ export default function MessageThread({ messages }: MessageThreadProps) {
         return <CheckCheck className="h-3 w-3 text-gray-400" />;
       case 'read':
         return <CheckCheck className="h-3 w-3 text-blue-500" />;
+      case 'failed':
+        return <AlertCircle className="h-3 w-3 text-red-500" />;
       default:
         return null;
     }

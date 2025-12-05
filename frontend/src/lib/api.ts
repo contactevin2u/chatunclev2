@@ -234,3 +234,253 @@ export const admin = {
   getStats: (token: string) =>
     request<{ stats: any }>('/api/admin/stats', { token }),
 };
+
+// Analytics
+export const analytics = {
+  getOverview: (token: string, params?: { accountId?: string; startDate?: string; endDate?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.accountId) searchParams.set('accountId', params.accountId);
+    if (params?.startDate) searchParams.set('startDate', params.startDate);
+    if (params?.endDate) searchParams.set('endDate', params.endDate);
+    const query = searchParams.toString();
+    return request<{ overview: any }>(`/api/analytics/overview${query ? `?${query}` : ''}`, { token });
+  },
+
+  getByAgent: (token: string, params?: { startDate?: string; endDate?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.startDate) searchParams.set('startDate', params.startDate);
+    if (params?.endDate) searchParams.set('endDate', params.endDate);
+    const query = searchParams.toString();
+    return request<{ agents: any[] }>(`/api/analytics/by-agent${query ? `?${query}` : ''}`, { token });
+  },
+
+  getByDay: (token: string, params?: { accountId?: string; days?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.accountId) searchParams.set('accountId', params.accountId);
+    if (params?.days) searchParams.set('days', params.days.toString());
+    const query = searchParams.toString();
+    return request<{ days: any[] }>(`/api/analytics/by-day${query ? `?${query}` : ''}`, { token });
+  },
+
+  getHourlyActivity: (token: string, accountId?: string) => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    return request<{ hours: any[] }>(`/api/analytics/hourly-activity${query}`, { token });
+  },
+};
+
+// Scheduled Messages
+export const scheduledMessages = {
+  list: (token: string, conversationId?: string) => {
+    const query = conversationId ? `?conversationId=${conversationId}` : '';
+    return request<{ scheduledMessages: any[] }>(`/api/scheduled-messages${query}`, { token });
+  },
+
+  create: (token: string, data: {
+    conversationId: string;
+    content: string;
+    contentType?: string;
+    scheduledAt: string;
+    mediaUrl?: string;
+    mediaMimeType?: string;
+  }) =>
+    request<{ scheduledMessage: any }>('/api/scheduled-messages', {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  cancel: (token: string, id: string) =>
+    request<{ scheduledMessage: any }>(`/api/scheduled-messages/${id}/cancel`, {
+      method: 'POST',
+      token,
+    }),
+
+  delete: (token: string, id: string) =>
+    request<{ success: boolean }>(`/api/scheduled-messages/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+};
+
+// Internal Notes
+export const notes = {
+  list: (token: string, conversationId: string) =>
+    request<{ notes: any[] }>(`/api/notes/conversation/${conversationId}`, { token }),
+
+  create: (token: string, conversationId: string, content: string) =>
+    request<{ note: any }>(`/api/notes/conversation/${conversationId}`, {
+      method: 'POST',
+      body: { content },
+      token,
+    }),
+
+  update: (token: string, id: string, content: string) =>
+    request<{ note: any }>(`/api/notes/${id}`, {
+      method: 'PATCH',
+      body: { content },
+      token,
+    }),
+
+  delete: (token: string, id: string) =>
+    request<{ success: boolean }>(`/api/notes/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+};
+
+// Auto-Reply Rules
+export const autoReply = {
+  list: (token: string, accountId?: string) => {
+    const query = accountId ? `?accountId=${accountId}` : '';
+    return request<{ rules: any[] }>(`/api/auto-reply${query}`, { token });
+  },
+
+  get: (token: string, id: string) =>
+    request<{ rule: any }>(`/api/auto-reply/${id}`, { token }),
+
+  create: (token: string, data: {
+    name: string;
+    whatsappAccountId?: string;
+    triggerType?: 'keyword' | 'regex' | 'all';
+    triggerKeywords?: string[];
+    triggerRegex?: string;
+    responseType?: 'text' | 'template';
+    responseContent?: string;
+    responseTemplateId?: string;
+    useAi?: boolean;
+    aiPrompt?: string;
+    priority?: number;
+  }) =>
+    request<{ rule: any }>('/api/auto-reply', {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  update: (token: string, id: string, data: any) =>
+    request<{ rule: any }>(`/api/auto-reply/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  toggle: (token: string, id: string) =>
+    request<{ rule: any }>(`/api/auto-reply/${id}/toggle`, {
+      method: 'POST',
+      token,
+    }),
+
+  delete: (token: string, id: string) =>
+    request<{ success: boolean }>(`/api/auto-reply/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  test: (token: string, id: string, message: string) =>
+    request<{ matches: boolean; rule_name: string; would_respond: boolean; response_preview: string | null }>(
+      `/api/auto-reply/${id}/test`,
+      {
+        method: 'POST',
+        body: { message },
+        token,
+      }
+    ),
+};
+
+// Search
+export const search = {
+  global: (token: string, query: string, params?: { accountId?: string; limit?: number }) => {
+    const searchParams = new URLSearchParams({ q: query });
+    if (params?.accountId) searchParams.set('accountId', params.accountId);
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    return request<{ results: any[] }>(`/api/search?${searchParams.toString()}`, { token });
+  },
+
+  conversation: (token: string, conversationId: string, query: string) =>
+    request<{ messages: any[] }>(`/api/search/conversation/${conversationId}?q=${encodeURIComponent(query)}`, { token }),
+};
+
+// Activity Logs
+export const activityLogs = {
+  list: (token: string, params?: { agentId?: string; actionType?: string; limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set('agentId', params.agentId);
+    if (params?.actionType) searchParams.set('actionType', params.actionType);
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    if (params?.offset) searchParams.set('offset', params.offset.toString());
+    const query = searchParams.toString();
+    return request<{ logs: any[]; total: number }>(`/api/activity-logs${query ? `?${query}` : ''}`, { token });
+  },
+
+  getMyActivity: (token: string, limit?: number) => {
+    const query = limit ? `?limit=${limit}` : '';
+    return request<{ logs: any[] }>(`/api/activity-logs/me${query}`, { token });
+  },
+};
+
+// Account Settings (extended)
+export const accountSettings = {
+  update: (token: string, id: string, data: {
+    name?: string;
+    incognitoMode?: boolean;
+    showChannelName?: boolean;
+    channelDisplayName?: string;
+  }) =>
+    request<{ account: any }>(`/api/accounts/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  getAntiBanStats: (token: string, id: string) =>
+    request<{ stats: any; config: any; recommendations: string[] }>(`/api/accounts/${id}/anti-ban-stats`, { token }),
+};
+
+// Contacts (extended with import/export)
+export const contactsExtended = {
+  ...contacts,
+
+  export: (token: string, accountId: string) =>
+    `${API_URL}/api/contacts/export?accountId=${accountId}&token=${token}`,
+
+  import: async (token: string, accountId: string, file: File, defaultLabels?: string[]) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('accountId', accountId);
+    if (defaultLabels) {
+      formData.append('defaultLabels', JSON.stringify(defaultLabels));
+    }
+
+    const response = await fetch(`${API_URL}/api/contacts/import`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Import failed' }));
+      throw new Error(error.error || 'Import failed');
+    }
+
+    return response.json();
+  },
+
+  bulkLabel: (token: string, contactIds: string[], labelId: string) =>
+    request<{ success: boolean; updated: number }>('/api/contacts/bulk-label', {
+      method: 'POST',
+      body: { contactIds, labelId },
+      token,
+    }),
+
+  bulkUnlabel: (token: string, contactIds: string[], labelId: string) =>
+    request<{ success: boolean; updated: number }>('/api/contacts/bulk-unlabel', {
+      method: 'POST',
+      body: { contactIds, labelId },
+      token,
+    }),
+};
+
+// Re-export API_URL for use in other places
+export { API_URL };

@@ -12,6 +12,10 @@ import {
   LogOut,
   Users,
   BarChart3,
+  UserSquare2,
+  Clock,
+  Bot,
+  Search,
 } from 'lucide-react';
 
 export default function DashboardLayout({
@@ -42,15 +46,18 @@ export default function DashboardLayout({
 
   const navigation = [
     { name: 'Inbox', href: '/dashboard', icon: MessageSquare },
+    { name: 'Contacts', href: '/dashboard/contacts', icon: UserSquare2 },
     { name: 'Accounts', href: '/dashboard/accounts', icon: Smartphone },
+    { name: 'Scheduled', href: '/dashboard/scheduled', icon: Clock },
+    { name: 'Auto-Reply', href: '/dashboard/auto-reply', icon: Bot },
     { name: 'Templates', href: '/dashboard/templates', icon: FileText },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
 
   const adminNavigation = [
+    { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
     { name: 'Agents', href: '/admin/agents', icon: Users },
     { name: 'All Chats', href: '/admin/conversations', icon: MessageSquare },
-    { name: 'Statistics', href: '/admin', icon: BarChart3 },
   ];
 
   return (

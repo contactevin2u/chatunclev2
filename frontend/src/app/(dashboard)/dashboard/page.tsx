@@ -8,7 +8,8 @@ import { Conversation, Message } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
-import { MessageSquare, RefreshCw } from 'lucide-react';
+import InternalNotes from '@/components/chat/InternalNotes';
+import { MessageSquare, RefreshCw, StickyNote, Calendar } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -18,6 +19,7 @@ export default function InboxPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [showNotes, setShowNotes] = useState(false);
   const selectedConversationRef = useRef<Conversation | null>(null);
 
   // Keep ref in sync with state for callbacks
@@ -99,9 +101,22 @@ export default function InboxPage() {
     }
   }, [loadConversations]);
 
+  // Handle message status updates
+  const handleMessageStatus = useCallback((data: { messageId: string; status: string }) => {
+    console.log('[UI] Message status update:', data);
+    setMessagesList((prev) =>
+      prev.map((msg) =>
+        msg.id === data.messageId
+          ? { ...msg, status: data.status as Message['status'] }
+          : msg
+      )
+    );
+  }, []);
+
   useSocket({
     onNewMessage: handleNewMessage,
     onSyncProgress: handleSyncProgress,
+    onMessageStatus: handleMessageStatus,
   });
 
   // Load conversations on mount
@@ -212,41 +227,64 @@ export default function InboxPage() {
       </div>
 
       {/* Message area */}
-      <div className="flex-1 flex flex-col bg-[#E5DDD5]">
-        {selectedConversation ? (
-          <>
-            {/* Chat header */}
-            <div className="bg-[#F0F2F5] px-4 py-3 border-b border-gray-200 flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-                {selectedConversation.contact_name?.charAt(0).toUpperCase() ||
-                  selectedConversation.contact_phone?.charAt(0) ||
-                  '?'}
+      <div className="flex-1 flex bg-[#E5DDD5]">
+        <div className="flex-1 flex flex-col">
+          {selectedConversation ? (
+            <>
+              {/* Chat header */}
+              <div className="bg-[#F0F2F5] px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+                    {selectedConversation.contact_name?.charAt(0).toUpperCase() ||
+                      selectedConversation.contact_phone?.charAt(0) ||
+                      '?'}
+                  </div>
+                  <div>
+                    <h2 className="font-medium text-gray-900">
+                      {selectedConversation.contact_name || selectedConversation.contact_phone}
+                    </h2>
+                    <p className="text-xs text-gray-500">
+                      {selectedConversation.contact_phone}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowNotes(!showNotes)}
+                    className={`p-2 rounded-lg transition-colors ${
+                      showNotes ? 'bg-yellow-100 text-yellow-600' : 'hover:bg-gray-200 text-gray-500'
+                    }`}
+                    title="Internal Notes"
+                  >
+                    <StickyNote className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
-              <div>
-                <h2 className="font-medium text-gray-900">
-                  {selectedConversation.contact_name || selectedConversation.contact_phone}
-                </h2>
-                <p className="text-xs text-gray-500">
-                  {selectedConversation.contact_phone}
-                </p>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4">
+                <MessageThread messages={messagesList} />
               </div>
-            </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4">
-              <MessageThread messages={messagesList} />
+              {/* Input */}
+              <div className="bg-[#F0F2F5] p-3">
+                <MessageInput onSend={handleSendMessage} disabled={isSending} />
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
+              <MessageSquare className="h-16 w-16 mb-4 text-gray-300" />
+              <p className="text-lg">Select a conversation to start chatting</p>
             </div>
+          )}
+        </div>
 
-            {/* Input */}
-            <div className="bg-[#F0F2F5] p-3">
-              <MessageInput onSend={handleSendMessage} disabled={isSending} />
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-            <MessageSquare className="h-16 w-16 mb-4 text-gray-300" />
-            <p className="text-lg">Select a conversation to start chatting</p>
-          </div>
+        {/* Internal Notes Panel */}
+        {showNotes && selectedConversation && (
+          <InternalNotes
+            conversationId={selectedConversation.id}
+            onClose={() => setShowNotes(false)}
+          />
         )}
       </div>
     </div>
