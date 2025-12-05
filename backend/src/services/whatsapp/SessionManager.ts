@@ -403,7 +403,7 @@ class SessionManager {
           // Skip non-user contacts (groups, broadcasts, etc)
           if (!contact.id || !isUserJid(contact.id)) continue;
 
-          const waId = contact.id.replace('@s.whatsapp.net', '');
+          const waId = extractUserIdFromJid(contact.id);
 
           await queryOne(
             `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
