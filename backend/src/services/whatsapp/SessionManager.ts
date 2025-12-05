@@ -297,13 +297,36 @@ class SessionManager {
     sock.ev.on('messages.update', async (updates) => {
       console.log(`[WA] messages.update - count: ${updates.length}`);
       for (const update of updates) {
-        if (update.update.status) {
-          const io = getIO();
-          io.to(`user:${userId}`).emit('message:status', {
-            accountId,
-            messageId: update.key.id,
-            status: this.mapMessageStatus(update.update.status),
-          });
+        const waMessageId = update.key.id;
+        const newStatus = update.update.status;
+
+        if (newStatus !== undefined && newStatus !== null) {
+          const statusStr = this.mapMessageStatus(newStatus as number);
+          console.log(`[WA] Message ${waMessageId} status: ${newStatus} -> ${statusStr}`);
+
+          try {
+            // Update status in database and get the internal message ID
+            const updatedMsg = await queryOne(
+              `UPDATE messages SET status = $1, updated_at = NOW()
+               WHERE wa_message_id = $2
+               RETURNING id, conversation_id`,
+              [statusStr, waMessageId]
+            );
+
+            if (updatedMsg) {
+              // Emit to frontend with internal message ID
+              const io = getIO();
+              io.to(`user:${userId}`).emit('message:status', {
+                accountId,
+                messageId: updatedMsg.id,
+                waMessageId,
+                conversationId: updatedMsg.conversation_id,
+                status: statusStr,
+              });
+            }
+          } catch (error) {
+            console.error(`[WA] Failed to update message status:`, error);
+          }
         }
       }
     });
