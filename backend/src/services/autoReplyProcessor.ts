@@ -8,6 +8,7 @@ interface IncomingMessage {
   accountId: string;
   conversationId: string;
   contactWaId: string;
+  jidType?: 'lid' | 'pn';  // JID type for LID vs PN format
   content: string;
   userId: string;
 }
@@ -15,7 +16,7 @@ interface IncomingMessage {
 // Check and process auto-reply rules for an incoming message
 export async function processAutoReply(message: IncomingMessage): Promise<boolean> {
   try {
-    const { accountId, conversationId, contactWaId, content, userId } = message;
+    const { accountId, conversationId, contactWaId, jidType, content, userId } = message;
 
     if (!content || content.trim() === '') {
       return false;
@@ -99,6 +100,8 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
         const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
           type: 'text',
           content: responseContent,
+        }, {
+          jidType: jidType || 'pn',  // Use stored JID type for correct format
         });
 
         // Get last contact message timestamp for response time calculation

@@ -62,9 +62,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     const { content, contentType = 'text', mediaUrl, mediaMimeType } = req.body;
     const agentId = req.user!.userId;
 
-    // Verify ownership and get details
+    // Verify ownership and get details (including jid_type for LID vs PN format)
     const conversation = await queryOne(`
-      SELECT c.id, c.whatsapp_account_id, ct.wa_id, c.first_response_at
+      SELECT c.id, c.whatsapp_account_id, ct.wa_id, ct.jid_type, c.first_response_at
       FROM conversations c
       JOIN contacts ct ON c.contact_id = ct.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
@@ -127,6 +127,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
             content,
             mediaUrl,
             mediaMimeType,
+          },
+          {
+            jidType: conversation.jid_type || 'pn',  // Use stored JID type for correct format
           }
         );
 

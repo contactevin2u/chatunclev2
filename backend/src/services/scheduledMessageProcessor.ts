@@ -8,9 +8,9 @@ let processorInterval: NodeJS.Timeout | null = null;
 // Process pending scheduled messages
 async function processScheduledMessages() {
   try {
-    // Get all pending messages that are due
+    // Get all pending messages that are due (including jid_type for LID vs PN format)
     const pendingMessages = await query(`
-      SELECT sm.*, c.whatsapp_account_id, ct.wa_id, wa.user_id
+      SELECT sm.*, c.whatsapp_account_id, ct.wa_id, ct.jid_type, wa.user_id
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
       JOIN contacts ct ON c.contact_id = ct.id
@@ -49,6 +49,9 @@ async function processScheduledMessages() {
             content: msg.content,
             mediaUrl: msg.media_url,
             mediaMimeType: msg.media_mime_type,
+          },
+          {
+            jidType: msg.jid_type || 'pn',  // Use stored JID type for correct format
           }
         );
 

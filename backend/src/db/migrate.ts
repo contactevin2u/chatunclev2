@@ -203,6 +203,10 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()
 ALTER TABLE ai_conversation_context DROP CONSTRAINT IF EXISTS ai_conversation_context_conversation_id_key;
 ALTER TABLE ai_conversation_context ADD CONSTRAINT ai_conversation_context_conversation_id_key UNIQUE (conversation_id);
 
+-- Add jid_type to contacts for LID vs PN (phone number) format tracking
+-- 'pn' = phone number (@s.whatsapp.net), 'lid' = link id (@lid)
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS jid_type VARCHAR(10) DEFAULT 'pn';
+
 -- Index for faster conversation lookups
 CREATE INDEX IF NOT EXISTS idx_conversations_account ON conversations(whatsapp_account_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_user ON whatsapp_accounts(user_id);

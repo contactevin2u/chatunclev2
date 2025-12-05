@@ -10,6 +10,8 @@ import makeWASocket, {
   Browsers,
   isJidBroadcast,
   isJidGroup,
+  isLidUser,
+  isPnUser,
   getContentType,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
@@ -32,13 +34,12 @@ import pino from 'pino';
 /**
  * Check if JID is a user (supports both @s.whatsapp.net and @lid formats)
  * WhatsApp introduced LID (Link ID) format for privacy - we need to handle both
- * @see https://github.com/WhiskeySockets/Baileys/issues/1718
+ * Uses Baileys v7 built-in functions: isLidUser() and isPnUser()
  */
 function isUserJid(jid: string | null | undefined): boolean {
   if (!jid) return false;
-  // Traditional user format: 1234567890@s.whatsapp.net
-  // New LID format: 1234567890@lid
-  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+  // Use Baileys v7 functions to check both LID and PN (phone number) formats
+  return isLidUser(jid) === true || isPnUser(jid) === true;
 }
 
 /**
@@ -46,6 +47,22 @@ function isUserJid(jid: string | null | undefined): boolean {
  */
 function extractUserIdFromJid(jid: string): string {
   return jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+}
+
+/**
+ * Get the JID type from a JID using Baileys v7 functions
+ * Returns 'lid' for @lid format, 'pn' for @s.whatsapp.net (phone number)
+ */
+function getJidType(jid: string): 'lid' | 'pn' {
+  return isLidUser(jid) === true ? 'lid' : 'pn';
+}
+
+/**
+ * Construct a full JID from wa_id and jid_type
+ */
+function constructJid(waId: string, jidType: 'lid' | 'pn' = 'pn'): string {
+  if (waId.includes('@')) return waId;
+  return jidType === 'lid' ? `${waId}@lid` : `${waId}@s.whatsapp.net`;
 }
 
 // Create logger - use info level to see important logs
@@ -254,6 +271,7 @@ class SessionManager {
 
       // Process all message types: 'notify' (real-time) and 'append' (history)
       for (const msg of messages) {
+        if (!msg.key) continue;
         const remoteJid = msg.key.remoteJid;
         const fromMe = msg.key.fromMe;
         const messageId = msg.key.id;
@@ -364,15 +382,18 @@ class SessionManager {
             if (!contact.id || !isUserJid(contact.id)) continue;
 
             const waId = extractUserIdFromJid(contact.id);
+            const jidType = getJidType(contact.id);
+            const phoneNumber = jidType === 'pn' ? waId : null;
 
             await queryOne(
-              `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
-               VALUES ($1, $2, $3, $4)
+              `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+               VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT (whatsapp_account_id, wa_id) DO UPDATE SET
                name = COALESCE(EXCLUDED.name, contacts.name),
+               jid_type = EXCLUDED.jid_type,
                updated_at = NOW()
                RETURNING *`,
-              [accountId, waId, waId, contact.name || contact.notify || null]
+              [accountId, waId, phoneNumber, contact.name || contact.notify || null, jidType]
             );
             processedContactCount++;
           } catch (error) {
@@ -386,6 +407,7 @@ class SessionManager {
       if (messages && messages.length > 0) {
         let processedCount = 0;
         for (const msg of messages) {
+          if (!msg.key) continue;
           const remoteJid = msg.key.remoteJid;
 
           // Skip status broadcasts and groups using Baileys helpers
@@ -449,15 +471,18 @@ class SessionManager {
           if (!contact.id || !isUserJid(contact.id)) continue;
 
           const waId = extractUserIdFromJid(contact.id);
+          const jidType = getJidType(contact.id);
+          const phoneNumber = jidType === 'pn' ? waId : null;
 
           await queryOne(
-            `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+             VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (whatsapp_account_id, wa_id) DO UPDATE SET
              name = COALESCE(EXCLUDED.name, contacts.name),
+             jid_type = EXCLUDED.jid_type,
              updated_at = NOW()
              RETURNING *`,
-            [accountId, waId, waId, contact.name || contact.notify || null]
+            [accountId, waId, phoneNumber, contact.name || contact.notify || null, jidType]
           );
         } catch (error) {
           console.error(`[WA] Error upserting contact:`, error);
@@ -489,19 +514,22 @@ class SessionManager {
     msg: proto.IWebMessageInfo,
     isRealTime: boolean = true
   ): Promise<void> {
-    const remoteJid = msg.key.remoteJid;
+    if (!msg.key) return;
+    const msgKey = msg.key;  // Extract for TypeScript type narrowing
+    const remoteJid = msgKey.remoteJid;
 
     // Use Baileys helpers for jid validation
     if (!remoteJid || isJidBroadcast(remoteJid) || isJidGroup(remoteJid)) return;
     if (!isUserJid(remoteJid)) return;
 
-    // Extract phone number from jid
+    // Extract phone number from jid and determine JID type
     const waId = extractUserIdFromJid(remoteJid);
+    const jidType = getJidType(remoteJid);
 
     // Get pushName from the message (sender's WhatsApp display name)
     const pushName = msg.pushName || null;
 
-    console.log(`[WA] Processing message from ${waId}, pushName: ${pushName}, realtime: ${isRealTime}`);
+    console.log(`[WA] Processing message from ${waId} (${jidType}), pushName: ${pushName}, realtime: ${isRealTime}`);
 
     // Get or create contact
     let contact = await queryOne(
@@ -510,21 +538,47 @@ class SessionManager {
     );
 
     if (!contact) {
+      // For LID contacts, phone_number might not be the actual phone - store wa_id
+      // For PN contacts, wa_id IS the phone number
+      const phoneNumber = jidType === 'pn' ? waId : null;
       contact = await queryOne(
-        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [accountId, waId, waId, pushName]
+        [accountId, waId, phoneNumber, pushName, jidType]
       );
-      console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}`);
-    } else if (pushName && !contact.name) {
-      // Update contact name if we have pushName and contact doesn't have a name yet
-      await execute(
-        `UPDATE contacts SET name = $1, updated_at = NOW() WHERE id = $2`,
-        [pushName, contact.id]
-      );
-      contact.name = pushName;
-      console.log(`[WA] Updated contact ${contact.id} name to: ${pushName}`);
+      console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}, jid_type: ${jidType}`);
+    } else {
+      // Update contact if needed
+      let needsUpdate = false;
+      const updates: string[] = [];
+      const values: any[] = [];
+      let paramIndex = 1;
+
+      if (pushName && !contact.name) {
+        updates.push(`name = $${paramIndex++}`);
+        values.push(pushName);
+        needsUpdate = true;
+      }
+
+      // Update jid_type if it changed (might have been default 'pn')
+      if (contact.jid_type !== jidType) {
+        updates.push(`jid_type = $${paramIndex++}`);
+        values.push(jidType);
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        updates.push(`updated_at = NOW()`);
+        values.push(contact.id);
+        await execute(
+          `UPDATE contacts SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
+          values
+        );
+        contact.name = pushName || contact.name;
+        contact.jid_type = jidType;
+        console.log(`[WA] Updated contact ${contact.id}: name=${pushName}, jid_type=${jidType}`);
+      }
     }
 
     // Get or create conversation
@@ -553,11 +607,11 @@ class SessionManager {
     // Check if message already exists
     const existingMessage = await queryOne(
       'SELECT id FROM messages WHERE wa_message_id = $1',
-      [msg.key.id]
+      [msgKey.id]
     );
 
     if (existingMessage) {
-      console.log(`[WA] Message ${msg.key.id} already exists, skipping`);
+      console.log(`[WA] Message ${msgKey.id} already exists, skipping`);
       return;
     }
 
@@ -581,23 +635,30 @@ class SessionManager {
         break;
       case 'imageMessage':
         contentType = 'image';
-        content = messageContent?.imageMessage?.caption || '';
+        content = messageContent?.imageMessage?.caption || '[Image]';
         mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
         break;
       case 'videoMessage':
         contentType = 'video';
-        content = messageContent?.videoMessage?.caption || '';
+        content = messageContent?.videoMessage?.caption || '[Video]';
         mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
         break;
       case 'audioMessage':
         contentType = 'audio';
+        content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
         mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        break;
+      case 'ptvMessage':
+        // Circular video notes (push-to-talk video)
+        contentType = 'video';
+        content = '[Video Note]';
+        mediaMimeType = 'video/mp4';
         break;
       case 'documentMessage':
       case 'documentWithCaptionMessage':
         contentType = 'document';
         content = messageContent?.documentMessage?.fileName ||
-                  messageContent?.documentWithCaptionMessage?.message?.documentMessage?.fileName || '';
+                  messageContent?.documentWithCaptionMessage?.message?.documentMessage?.fileName || '[Document]';
         mediaMimeType = messageContent?.documentMessage?.mimetype ||
                         messageContent?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
                         'application/octet-stream';
@@ -608,27 +669,47 @@ class SessionManager {
         mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
         break;
       case 'contactMessage':
+      case 'contactsArrayMessage':
         contentType = 'text';
-        content = `[Contact: ${messageContent?.contactMessage?.displayName || 'Unknown'}]`;
+        content = `[Contact: ${messageContent?.contactMessage?.displayName || 'Shared Contact'}]`;
         break;
       case 'locationMessage':
+      case 'liveLocationMessage':
         contentType = 'text';
-        const loc = messageContent?.locationMessage;
-        content = `[Location: ${loc?.degreesLatitude}, ${loc?.degreesLongitude}]`;
+        const loc = messageContent?.locationMessage || messageContent?.liveLocationMessage;
+        content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
         break;
       case 'reactionMessage':
-        // Reactions are handled separately - skip them
-        console.log(`[WA] Skipping reaction message`);
-        return;
+        // Reactions update existing messages - save them as a special type
+        const reaction = messageContent?.reactionMessage;
+        if (reaction?.text) {
+          contentType = 'text';
+          content = `[Reacted: ${reaction.text}]`;
+          console.log(`[WA] Reaction: ${reaction.text}`);
+        } else {
+          console.log(`[WA] Skipping empty reaction`);
+          return;
+        }
+        break;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
         // Protocol messages - skip them
         console.log(`[WA] Skipping protocol message: ${msgType}`);
         return;
+      case 'pollCreationMessage':
+      case 'pollCreationMessageV2':
+      case 'pollCreationMessageV3':
+        contentType = 'text';
+        const poll = messageContent?.pollCreationMessage || messageContent?.pollCreationMessageV2 || messageContent?.pollCreationMessageV3;
+        content = `[Poll: ${poll?.name || 'Untitled Poll'}]`;
+        break;
+      case 'pollUpdateMessage':
+        console.log(`[WA] Skipping poll update`);
+        return;
       default:
-        // Unknown message type
+        // Unknown message type - log it but still save
         console.log(`[WA] Unknown message type: ${msgType}`, Object.keys(messageContent || {}));
-        content = '[Unsupported message type]';
+        if (!content) content = `[${msgType || 'Message'}]`;
     }
 
     // Get message timestamp
@@ -641,7 +722,7 @@ class SessionManager {
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
        VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7)
        RETURNING *`,
-      [conversation.id, msg.key.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
     );
 
     console.log(`[WA] Saved message ${savedMessage.id} (${contentType}): ${content.substring(0, 50)}...`);
@@ -667,6 +748,7 @@ class SessionManager {
             accountId,
             conversationId: conversation.id,
             contactWaId: waId,
+            jidType,
             content,
             userId,
           });
@@ -684,14 +766,17 @@ class SessionManager {
     msg: proto.IWebMessageInfo,
     isRealTime: boolean = true
   ): Promise<void> {
-    const remoteJid = msg.key.remoteJid;
+    if (!msg.key) return;
+    const msgKey = msg.key;  // Extract for TypeScript type narrowing
+    const remoteJid = msgKey.remoteJid;
 
     if (!remoteJid || isJidBroadcast(remoteJid) || isJidGroup(remoteJid)) return;
     if (!isUserJid(remoteJid)) return;
 
     const waId = extractUserIdFromJid(remoteJid);
+    const jidType = getJidType(remoteJid);
 
-    console.log(`[WA] Processing outgoing message to ${waId}, realtime: ${isRealTime}`);
+    console.log(`[WA] Processing outgoing message to ${waId} (${jidType}), realtime: ${isRealTime}`);
 
     // Get or create contact
     let contact = await queryOne(
@@ -700,12 +785,20 @@ class SessionManager {
     );
 
     if (!contact) {
+      const phoneNumber = jidType === 'pn' ? waId : null;
       contact = await queryOne(
-        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number)
-         VALUES ($1, $2, $3)
+        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, jid_type)
+         VALUES ($1, $2, $3, $4)
          RETURNING *`,
-        [accountId, waId, waId]
+        [accountId, waId, phoneNumber, jidType]
       );
+    } else if (contact.jid_type !== jidType) {
+      // Update jid_type if it changed
+      await execute(
+        `UPDATE contacts SET jid_type = $1, updated_at = NOW() WHERE id = $2`,
+        [jidType, contact.id]
+      );
+      contact.jid_type = jidType;
     }
 
     // Get or create conversation
@@ -728,7 +821,7 @@ class SessionManager {
       );
     }
 
-    // Parse message content
+    // Parse message content using Baileys getContentType helper
     const messageContent = msg.message;
     let contentType = 'text';
     let content = '';
@@ -736,6 +829,7 @@ class SessionManager {
     let mediaMimeType = null;
 
     const msgType = messageContent ? getContentType(messageContent) : undefined;
+    console.log(`[WA] Outgoing message content type: ${msgType}`);
 
     switch (msgType) {
       case 'conversation':
@@ -746,25 +840,80 @@ class SessionManager {
         break;
       case 'imageMessage':
         contentType = 'image';
-        content = messageContent?.imageMessage?.caption || '';
+        content = messageContent?.imageMessage?.caption || '[Image]';
         mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
         break;
       case 'videoMessage':
         contentType = 'video';
-        content = messageContent?.videoMessage?.caption || '';
+        content = messageContent?.videoMessage?.caption || '[Video]';
         mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
         break;
       case 'audioMessage':
         contentType = 'audio';
+        content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
         mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
         break;
-      case 'documentMessage':
-        contentType = 'document';
-        content = messageContent?.documentMessage?.fileName || '';
-        mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+      case 'ptvMessage':
+        // Circular video notes (push-to-talk video)
+        contentType = 'video';
+        content = '[Video Note]';
+        mediaMimeType = 'video/mp4';
         break;
+      case 'documentMessage':
+      case 'documentWithCaptionMessage':
+        contentType = 'document';
+        content = messageContent?.documentMessage?.fileName ||
+                  messageContent?.documentWithCaptionMessage?.message?.documentMessage?.fileName || '[Document]';
+        mediaMimeType = messageContent?.documentMessage?.mimetype ||
+                        messageContent?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
+                        'application/octet-stream';
+        break;
+      case 'stickerMessage':
+        contentType = 'image';
+        content = '[Sticker]';
+        mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
+        break;
+      case 'contactMessage':
+      case 'contactsArrayMessage':
+        contentType = 'text';
+        content = `[Contact: ${messageContent?.contactMessage?.displayName || 'Shared Contact'}]`;
+        break;
+      case 'locationMessage':
+      case 'liveLocationMessage':
+        contentType = 'text';
+        const loc = messageContent?.locationMessage || messageContent?.liveLocationMessage;
+        content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
+        break;
+      case 'reactionMessage':
+        // Reactions - save them as special type
+        const reaction = messageContent?.reactionMessage;
+        if (reaction?.text) {
+          contentType = 'text';
+          content = `[Reacted: ${reaction.text}]`;
+        } else {
+          console.log(`[WA] Skipping empty outgoing reaction`);
+          return;
+        }
+        break;
+      case 'protocolMessage':
+      case 'senderKeyDistributionMessage':
+        // Protocol messages - skip them
+        console.log(`[WA] Skipping outgoing protocol message: ${msgType}`);
+        return;
+      case 'pollCreationMessage':
+      case 'pollCreationMessageV2':
+      case 'pollCreationMessageV3':
+        contentType = 'text';
+        const poll = messageContent?.pollCreationMessage || messageContent?.pollCreationMessageV2 || messageContent?.pollCreationMessageV3;
+        content = `[Poll: ${poll?.name || 'Untitled Poll'}]`;
+        break;
+      case 'pollUpdateMessage':
+        console.log(`[WA] Skipping outgoing poll update`);
+        return;
       default:
-        if (!content) content = '[Message from phone]';
+        // Unknown message type - log it but still save
+        console.log(`[WA] Unknown outgoing message type: ${msgType}`, Object.keys(messageContent || {}));
+        if (!content) content = `[${msgType || 'Message'}]`;
     }
 
     // Get message timestamp
@@ -777,7 +926,7 @@ class SessionManager {
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
        VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7)
        RETURNING *`,
-      [conversation.id, msg.key.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
     );
 
     console.log(`[WA] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
@@ -802,7 +951,7 @@ class SessionManager {
     accountId: string,
     waId: string,
     payload: MessagePayload,
-    options: { skipAntiBan?: boolean } = {}
+    options: { skipAntiBan?: boolean; jidType?: 'lid' | 'pn' } = {}
   ): Promise<string> {
     const session = this.sessions.get(accountId);
     if (!session) {
@@ -824,7 +973,9 @@ class SessionManager {
       throw new Error('Session not connected - please reconnect');
     }
 
-    const jid = waId.includes('@') ? waId : `${waId}@s.whatsapp.net`;
+    // Construct JID using the stored jid_type (lid or pn format)
+    const jidType = options.jidType || 'pn';
+    const jid = constructJid(waId, jidType);
 
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
     console.log(`[WA] Connected as: ${sock.user?.id}`);
