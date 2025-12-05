@@ -37,10 +37,25 @@ app.use(cors({
 
     // Remove trailing slash for comparison
     const normalizedOrigin = origin.replace(/\/$/, '');
-    const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
 
-    // Allow if matches or if in development
-    if (normalizedOrigin === allowedOrigin || config.nodeEnv === 'development') {
+    // Allow in development
+    if (config.nodeEnv === 'development') {
+      return callback(null, true);
+    }
+
+    // Allow Vercel domains (production and preview)
+    if (normalizedOrigin.includes('vercel.app') || normalizedOrigin.includes('chatuncle')) {
+      return callback(null, true);
+    }
+
+    // Allow configured origin
+    const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
+    if (normalizedOrigin === allowedOrigin) {
+      return callback(null, true);
+    }
+
+    // Allow localhost for development
+    if (normalizedOrigin.includes('localhost')) {
       return callback(null, true);
     }
 
