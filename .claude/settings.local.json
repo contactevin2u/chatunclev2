@@ -13,7 +13,13 @@
       "WebFetch(domain:render.com)",
       "Bash(git rev-parse:*)",
       "Bash(npx vercel --prod)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "WebFetch(domain:community.vercel.com)",
+      "Bash(cat:*)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git restore:*)"
     ],
     "deny": [],
     "ask": []

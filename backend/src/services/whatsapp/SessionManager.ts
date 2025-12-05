@@ -12,6 +12,7 @@ import makeWASocket, {
   isJidBroadcast,
   isJidGroup,
   getContentType,
+  delay,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import * as fs from 'fs';
@@ -19,6 +20,15 @@ import * as path from 'path';
 import { query, queryOne, execute } from '../../config/database';
 import { getIO } from '../socket';
 import { processAutoReply } from '../autoReplyProcessor';
+import {
+  preSendCheck,
+  postSendRecord,
+  getTypingDuration,
+  sleep,
+  getRandomDelay,
+  getAntiBanStats,
+  isInWarmupPeriod,
+} from '../antiBan';
 import pino from 'pino';
 
 // Create logger - use info level to see important logs
@@ -594,7 +604,12 @@ class SessionManager {
     }
   }
 
-  async sendMessage(accountId: string, waId: string, payload: MessagePayload): Promise<string> {
+  async sendMessage(
+    accountId: string,
+    waId: string,
+    payload: MessagePayload,
+    options: { skipAntiBan?: boolean } = {}
+  ): Promise<string> {
     const session = this.sessions.get(accountId);
     if (!session) {
       throw new Error('Session not found');
@@ -619,6 +634,38 @@ class SessionManager {
 
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
     console.log(`[WA] Connected as: ${sock.user?.id}`);
+
+    // === ANTI-BAN MEASURES ===
+    if (!options.skipAntiBan) {
+      // 1. Pre-send check (rate limiting, daily limits, batch cooldowns)
+      const preCheck = await preSendCheck(accountId, waId);
+      if (!preCheck.canSend) {
+        console.warn(`[WA] Anti-ban blocked send: ${preCheck.reason}`);
+        throw new Error(`Message blocked: ${preCheck.reason}`);
+      }
+
+      // 2. Simulate reading the conversation (mark as "online" briefly)
+      try {
+        await sock.sendPresenceUpdate('available', jid);
+        await sleep(getRandomDelay(500, 1500));
+      } catch (e) {
+        console.log(`[WA] Presence update skipped:`, e);
+      }
+
+      // 3. Simulate typing indicator (human-like behavior)
+      const messageLength = payload.content?.length || 50;
+      const typingDuration = getTypingDuration(messageLength);
+      console.log(`[AntiBan] Simulating typing for ${typingDuration}ms`);
+
+      try {
+        await sock.sendPresenceUpdate('composing', jid);
+        await sleep(typingDuration);
+        await sock.sendPresenceUpdate('paused', jid);
+        await sleep(getRandomDelay(200, 500)); // Brief pause after typing
+      } catch (e) {
+        console.log(`[WA] Typing indicator skipped:`, e);
+      }
+    }
 
     let result;
 
@@ -690,11 +737,72 @@ class SessionManager {
         throw new Error('Message sent but no ID returned');
       }
 
+      // === POST-SEND ANTI-BAN RECORDING ===
+      if (!options.skipAntiBan) {
+        await postSendRecord(accountId, waId);
+
+        // Go back to "unavailable" after sending (don't stay online)
+        try {
+          await sleep(getRandomDelay(1000, 3000));
+          await sock.sendPresenceUpdate('unavailable', jid);
+        } catch (e) {
+          // Ignore presence errors
+        }
+      }
+
       return result.key.id;
     } catch (error) {
       console.error(`[WA] Failed to send message:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Mark messages as read (sends read receipt)
+   * Helps maintain a natural conversation appearance
+   */
+  async markAsRead(accountId: string, keys: WAMessageKey[]): Promise<void> {
+    const session = this.sessions.get(accountId);
+    if (!session?.isReady) return;
+
+    try {
+      await session.socket.readMessages(keys);
+      console.log(`[WA] Marked ${keys.length} messages as read`);
+    } catch (error) {
+      console.error(`[WA] Failed to mark messages as read:`, error);
+    }
+  }
+
+  /**
+   * Send presence update (online, offline, typing)
+   */
+  async sendPresence(
+    accountId: string,
+    jid: string,
+    presence: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused'
+  ): Promise<void> {
+    const session = this.sessions.get(accountId);
+    if (!session?.isReady) return;
+
+    try {
+      await session.socket.sendPresenceUpdate(presence, jid);
+    } catch (error) {
+      console.error(`[WA] Failed to send presence:`, error);
+    }
+  }
+
+  /**
+   * Get anti-ban statistics for an account
+   */
+  async getAntiBanStats(accountId: string) {
+    return getAntiBanStats(accountId);
+  }
+
+  /**
+   * Check if account is in warm-up period (higher risk)
+   */
+  async isInWarmupPeriod(accountId: string): Promise<boolean> {
+    return isInWarmupPeriod(accountId);
   }
 
   async reconnectSession(accountId: string, userId: string): Promise<void> {

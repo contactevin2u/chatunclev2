@@ -193,6 +193,15 @@ ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS channel_display_name VARC
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP;
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assigned_agent_id UUID REFERENCES users(id) ON DELETE SET NULL;
 
+-- Add agent tracking columns to messages table (for existing tables)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_auto_reply BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS response_time_ms INT;
+
+-- Add unique constraint on ai_conversation_context
+ALTER TABLE ai_conversation_context DROP CONSTRAINT IF EXISTS ai_conversation_context_conversation_id_key;
+ALTER TABLE ai_conversation_context ADD CONSTRAINT ai_conversation_context_conversation_id_key UNIQUE (conversation_id);
+
 -- Index for faster conversation lookups
 CREATE INDEX IF NOT EXISTS idx_conversations_account ON conversations(whatsapp_account_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_user ON whatsapp_accounts(user_id);

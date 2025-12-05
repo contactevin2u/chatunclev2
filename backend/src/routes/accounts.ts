@@ -3,6 +3,7 @@ import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { WhatsAppAccount } from '../types';
 import { sessionManager } from '../services/whatsapp/SessionManager';
+import { getAntiBanStats, ANTI_BAN_CONFIG } from '../services/antiBan';
 
 const router = Router();
 
@@ -178,5 +179,86 @@ router.post('/:id/reconnect', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to reconnect' });
   }
 });
+
+// Get anti-ban statistics for an account
+router.get('/:id/anti-ban-stats', async (req: Request, res: Response) => {
+  try {
+    // Check ownership
+    const account = await queryOne<WhatsAppAccount>(
+      'SELECT id, created_at FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    // Get anti-ban statistics
+    const stats = await getAntiBanStats(req.params.id);
+
+    res.json({
+      stats,
+      config: {
+        messagesPerMinute: ANTI_BAN_CONFIG.MESSAGES_PER_MINUTE,
+        batchSize: ANTI_BAN_CONFIG.BATCH_SIZE,
+        warmupPeriodDays: ANTI_BAN_CONFIG.WARMUP_PERIOD_DAYS,
+      },
+      recommendations: getRecommendations(stats),
+    });
+  } catch (error) {
+    console.error('Get anti-ban stats error:', error);
+    res.status(500).json({ error: 'Failed to get anti-ban stats' });
+  }
+});
+
+// Get anti-ban configuration
+router.get('/anti-ban/config', async (_req: Request, res: Response) => {
+  res.json({
+    config: ANTI_BAN_CONFIG,
+    tips: [
+      'New accounts should limit messaging to 20 contacts per day for the first week',
+      'Add random delays between messages to appear more human-like',
+      'Maintain a response rate of at least 30% to avoid spam detection',
+      'Avoid sending identical messages to many contacts',
+      'Personalize messages with contact names when possible',
+    ],
+  });
+});
+
+// Helper function for recommendations
+function getRecommendations(stats: any): string[] {
+  const recommendations: string[] = [];
+
+  if (stats.isWarmupPeriod) {
+    recommendations.push(
+      `Account is in warm-up period (${stats.accountAgeDays} days old). Limit messaging activity to avoid bans.`
+    );
+  }
+
+  if (stats.rateStatus === 'warning') {
+    recommendations.push(
+      `High usage detected (${stats.dailyNewContactsSent}/${stats.dailyLimit} daily limit). Consider slowing down.`
+    );
+  }
+
+  if (stats.messagesLastMinute >= ANTI_BAN_CONFIG.MESSAGES_PER_MINUTE - 2) {
+    recommendations.push(
+      'Approaching rate limit. Messages will be automatically delayed.'
+    );
+  }
+
+  if (stats.batchCount >= ANTI_BAN_CONFIG.BATCH_SIZE - 5) {
+    recommendations.push(
+      'Batch limit approaching. A cooldown period will be enforced soon.'
+    );
+  }
+
+  if (recommendations.length === 0) {
+    recommendations.push('Account is within safe messaging limits.');
+  }
+
+  return recommendations;
+}
 
 export default router;

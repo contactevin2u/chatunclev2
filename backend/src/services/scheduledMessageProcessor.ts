@@ -1,6 +1,7 @@
 import { query, queryOne, execute } from '../config/database';
 import { sessionManager } from './whatsapp/SessionManager';
 import { getIO } from './socket';
+import { getRandomDelay, sleep, needsBatchCooldown } from './antiBan';
 
 let processorInterval: NodeJS.Timeout | null = null;
 
@@ -19,11 +20,27 @@ async function processScheduledMessages() {
       LIMIT 10
     `);
 
-    for (const msg of pendingMessages) {
-      try {
-        console.log(`[Scheduler] Processing scheduled message ${msg.id}`);
+    for (let i = 0; i < pendingMessages.length; i++) {
+      const msg = pendingMessages[i];
 
-        // Send the message
+      try {
+        console.log(`[Scheduler] Processing scheduled message ${msg.id} (${i + 1}/${pendingMessages.length})`);
+
+        // === ANTI-BAN: Check batch cooldown for this account ===
+        const batchCheck = needsBatchCooldown(msg.whatsapp_account_id);
+        if (batchCheck.needed) {
+          console.log(`[Scheduler] Batch cooldown needed for ${msg.whatsapp_account_id}, waiting ${batchCheck.waitMs}ms`);
+          await sleep(batchCheck.waitMs);
+        }
+
+        // === ANTI-BAN: Add delay between scheduled messages ===
+        if (i > 0) {
+          const delay = getRandomDelay(3000, 8000); // 3-8 seconds between messages
+          console.log(`[Scheduler] Anti-ban delay: ${delay}ms before sending`);
+          await sleep(delay);
+        }
+
+        // Send the message (anti-ban measures built into sendMessage)
         const waMessageId = await sessionManager.sendMessage(
           msg.whatsapp_account_id,
           msg.wa_id,

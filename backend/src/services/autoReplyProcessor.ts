@@ -2,6 +2,7 @@ import { query, queryOne, execute } from '../config/database';
 import { sessionManager } from './whatsapp/SessionManager';
 import { generateAIResponse, isAIConfigured } from './ai';
 import { getIO } from './socket';
+import { getRandomDelay, sleep, isInWarmupPeriod } from './antiBan';
 
 interface IncomingMessage {
   accountId: string;
@@ -86,7 +87,15 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       });
 
       try {
-        // Send the auto-reply
+        // === ANTI-BAN: Add delay before auto-reply to simulate human reading ===
+        // This makes the bot appear more human-like
+        const isWarmup = await isInWarmupPeriod(accountId);
+        const baseDelay = isWarmup ? 5000 : 2000; // Longer delays during warm-up
+        const readingDelay = getRandomDelay(baseDelay, baseDelay + 3000);
+        console.log(`[AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup})`);
+        await sleep(readingDelay);
+
+        // Send the auto-reply (anti-ban measures are built into sendMessage)
         const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
           type: 'text',
           content: responseContent,
