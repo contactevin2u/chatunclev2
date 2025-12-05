@@ -476,7 +476,10 @@ class SessionManager {
     // Extract phone number from jid
     const waId = extractUserIdFromJid(remoteJid);
 
-    console.log(`[WA] Processing message from ${waId}, realtime: ${isRealTime}`);
+    // Get pushName from the message (sender's WhatsApp display name)
+    const pushName = msg.pushName || null;
+
+    console.log(`[WA] Processing message from ${waId}, pushName: ${pushName}, realtime: ${isRealTime}`);
 
     // Get or create contact
     let contact = await queryOne(
@@ -486,12 +489,20 @@ class SessionManager {
 
     if (!contact) {
       contact = await queryOne(
-        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number)
-         VALUES ($1, $2, $3)
+        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name)
+         VALUES ($1, $2, $3, $4)
          RETURNING *`,
-        [accountId, waId, waId]
+        [accountId, waId, waId, pushName]
       );
-      console.log(`[WA] Created new contact: ${contact.id}`);
+      console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}`);
+    } else if (pushName && !contact.name) {
+      // Update contact name if we have pushName and contact doesn't have a name yet
+      await execute(
+        `UPDATE contacts SET name = $1, updated_at = NOW() WHERE id = $2`,
+        [pushName, contact.id]
+      );
+      contact.name = pushName;
+      console.log(`[WA] Updated contact ${contact.id} name to: ${pushName}`);
     }
 
     // Get or create conversation

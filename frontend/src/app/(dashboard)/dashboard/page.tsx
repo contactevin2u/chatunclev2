@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
-import { conversations as conversationsApi, messages as messagesApi } from '@/lib/api';
-import { Conversation, Message } from '@/types';
+import { conversations as conversationsApi, messages as messagesApi, labels as labelsApi, contacts as contactsApi } from '@/lib/api';
+import { Conversation, Message, Label } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
 import InternalNotes from '@/components/chat/InternalNotes';
-import { MessageSquare, RefreshCw, StickyNote, Calendar } from 'lucide-react';
+import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -20,7 +20,53 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [allLabels, setAllLabels] = useState<Label[]>([]);
+  const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const selectedConversationRef = useRef<Conversation | null>(null);
+
+  // Load labels on mount
+  useEffect(() => {
+    if (!token) return;
+    labelsApi.list(token).then(res => setAllLabels(res.labels || [])).catch(console.error);
+  }, [token]);
+
+  // Get contact labels for selected conversation
+  const getContactLabels = (): Label[] => {
+    return selectedConversation?.labels || [];
+  };
+
+  // Add label to contact
+  const handleAddLabel = async (labelId: string) => {
+    if (!token || !selectedConversation) return;
+    try {
+      // Find the contact_id from the conversation (we need to get it from backend)
+      const convDetails = await conversationsApi.get(token, selectedConversation.id);
+      const contactId = convDetails.conversation?.contact_id;
+      if (contactId) {
+        await contactsApi.addLabel(token, contactId, labelId);
+        // Refresh conversations to get updated labels
+        loadConversations();
+      }
+      setShowLabelDropdown(false);
+    } catch (error) {
+      console.error('Failed to add label:', error);
+    }
+  };
+
+  // Remove label from contact
+  const handleRemoveLabel = async (labelId: string) => {
+    if (!token || !selectedConversation) return;
+    try {
+      const convDetails = await conversationsApi.get(token, selectedConversation.id);
+      const contactId = convDetails.conversation?.contact_id;
+      if (contactId) {
+        await contactsApi.removeLabel(token, contactId, labelId);
+        loadConversations();
+      }
+    } catch (error) {
+      console.error('Failed to remove label:', error);
+    }
+  };
 
   // Keep ref in sync with state for callbacks
   useEffect(() => {
@@ -232,33 +278,94 @@ export default function InboxPage() {
           {selectedConversation ? (
             <>
               {/* Chat header */}
-              <div className="bg-[#F0F2F5] px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-                    {selectedConversation.contact_name?.charAt(0).toUpperCase() ||
-                      selectedConversation.contact_phone?.charAt(0) ||
-                      '?'}
+              <div className="bg-[#F0F2F5] px-4 py-3 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+                      {selectedConversation.contact_name?.charAt(0).toUpperCase() ||
+                        selectedConversation.contact_phone?.charAt(0) ||
+                        '?'}
+                    </div>
+                    <div>
+                      <h2 className="font-medium text-gray-900">
+                        {selectedConversation.contact_name || selectedConversation.contact_phone}
+                      </h2>
+                      <p className="text-xs text-gray-500">
+                        {selectedConversation.contact_phone}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h2 className="font-medium text-gray-900">
-                      {selectedConversation.contact_name || selectedConversation.contact_phone}
-                    </h2>
-                    <p className="text-xs text-gray-500">
-                      {selectedConversation.contact_phone}
-                    </p>
+                  <div className="flex items-center space-x-2">
+                    {/* Label dropdown */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowLabelDropdown(!showLabelDropdown)}
+                        className={`p-2 rounded-lg transition-colors ${
+                          showLabelDropdown ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-500'
+                        }`}
+                        title="Add Label"
+                      >
+                        <Tag className="h-5 w-5" />
+                      </button>
+                      {showLabelDropdown && (
+                        <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border z-50">
+                          <div className="p-2 text-xs font-medium text-gray-500 border-b">Add Label</div>
+                          {allLabels.map((label) => {
+                            const isAdded = getContactLabels().some(l => l.id === label.id);
+                            return (
+                              <button
+                                key={label.id}
+                                onClick={() => isAdded ? handleRemoveLabel(label.id) : handleAddLabel(label.id)}
+                                className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between"
+                              >
+                                <span className="flex items-center space-x-2">
+                                  <span
+                                    className="w-3 h-3 rounded-full"
+                                    style={{ backgroundColor: label.color }}
+                                  />
+                                  <span>{label.name}</span>
+                                </span>
+                                {isAdded && <X className="h-3 w-3 text-gray-400" />}
+                              </button>
+                            );
+                          })}
+                          {allLabels.length === 0 && (
+                            <div className="px-3 py-2 text-sm text-gray-400">No labels yet</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowNotes(!showNotes)}
+                      className={`p-2 rounded-lg transition-colors ${
+                        showNotes ? 'bg-yellow-100 text-yellow-600' : 'hover:bg-gray-200 text-gray-500'
+                      }`}
+                      title="Internal Notes"
+                    >
+                      <StickyNote className="h-5 w-5" />
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setShowNotes(!showNotes)}
-                    className={`p-2 rounded-lg transition-colors ${
-                      showNotes ? 'bg-yellow-100 text-yellow-600' : 'hover:bg-gray-200 text-gray-500'
-                    }`}
-                    title="Internal Notes"
-                  >
-                    <StickyNote className="h-5 w-5" />
-                  </button>
-                </div>
+                {/* Labels display */}
+                {getContactLabels().length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2 ml-13">
+                    {getContactLabels().map((label) => (
+                      <span
+                        key={label.id}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-xs"
+                        style={{ backgroundColor: label.color + '20', color: label.color }}
+                      >
+                        {label.name}
+                        <button
+                          onClick={() => handleRemoveLabel(label.id)}
+                          className="ml-1 hover:opacity-70"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Messages */}

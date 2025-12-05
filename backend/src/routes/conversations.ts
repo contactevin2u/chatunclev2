@@ -46,7 +46,20 @@ router.get('/', async (req: Request, res: Response) => {
 
     const conversations = await query(sql, params);
 
-    res.json({ conversations });
+    // Get labels for each conversation's contact
+    const conversationsWithLabels = await Promise.all(
+      conversations.map(async (conv: any) => {
+        const labels = await query(`
+          SELECT l.id, l.name, l.color
+          FROM labels l
+          JOIN contact_labels cl ON l.id = cl.label_id
+          WHERE cl.contact_id = $1
+        `, [conv.contact_id]);
+        return { ...conv, labels };
+      })
+    );
+
+    res.json({ conversations: conversationsWithLabels });
   } catch (error) {
     console.error('List conversations error:', error);
     res.status(500).json({ error: 'Failed to list conversations' });
