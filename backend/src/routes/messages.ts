@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { sessionManager } from '../services/whatsapp/SessionManager';
+import { getIO } from '../services/socket';
 import { Message } from '../types';
 
 const router = Router();
@@ -55,7 +56,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
   }
 });
 
-// Send a message
+// Send a message (optimistic UI - returns immediately, sends in background)
 router.post('/conversation/:conversationId', async (req: Request, res: Response) => {
   try {
     const { content, contentType = 'text', mediaUrl, mediaMimeType } = req.body;
@@ -87,26 +88,17 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       ? Date.now() - new Date(lastContactMessage.created_at).getTime()
       : null;
 
-    // Send via WhatsApp
-    const waMessageId = await sessionManager.sendMessage(
-      conversation.whatsapp_account_id,
-      conversation.wa_id,
-      {
-        type: contentType,
-        content,
-        mediaUrl,
-        mediaMimeType,
-      }
-    );
+    // Get agent name
+    const agent = await queryOne('SELECT name FROM users WHERE id = $1', [agentId]);
 
-    // Save to database with agent tracking
+    // === OPTIMISTIC UI: Save message immediately with 'pending' status ===
     const message = await queryOne<Message>(`
-      INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, agent_id, response_time_ms)
-      VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7, $8)
+      INSERT INTO messages (conversation_id, sender_type, content_type, content, media_url, media_mime_type, status, agent_id, response_time_ms)
+      VALUES ($1, 'agent', $2, $3, $4, $5, 'pending', $6, $7)
       RETURNING *
-    `, [req.params.conversationId, waMessageId, contentType, content, mediaUrl, mediaMimeType, agentId, responseTimeMs]);
+    `, [req.params.conversationId, contentType, content, mediaUrl, mediaMimeType, agentId, responseTimeMs]);
 
-    // Update conversation (including first response time if not set)
+    // Update conversation immediately
     await execute(`
       UPDATE conversations
       SET last_message_at = NOW(),
@@ -116,21 +108,67 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       WHERE id = $1
     `, [req.params.conversationId, agentId]);
 
-    // Log agent activity
-    await execute(`
-      INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
-      VALUES ($1, 'message_sent', 'conversation', $2, $3)
-    `, [agentId, req.params.conversationId, JSON.stringify({ content_type: contentType, response_time_ms: responseTimeMs })]);
-
-    // Get agent name for response
-    const agent = await queryOne('SELECT name FROM users WHERE id = $1', [agentId]);
-
+    // Return immediately to frontend (optimistic response)
     res.status(201).json({
       message: {
         ...message,
         agent_name: agent?.name,
       }
     });
+
+    // === SEND IN BACKGROUND: Anti-ban delays happen here, not blocking UI ===
+    (async () => {
+      try {
+        const waMessageId = await sessionManager.sendMessage(
+          conversation.whatsapp_account_id,
+          conversation.wa_id,
+          {
+            type: contentType,
+            content,
+            mediaUrl,
+            mediaMimeType,
+          }
+        );
+
+        // Update message with WhatsApp ID and 'sent' status
+        await execute(`
+          UPDATE messages SET wa_message_id = $1, status = 'sent', updated_at = NOW()
+          WHERE id = $2
+        `, [waMessageId, message!.id]);
+
+        // Notify frontend of successful send via Socket.io
+        const io = getIO();
+        io.to(`user:${agentId}`).emit('message:status', {
+          messageId: message!.id,
+          waMessageId,
+          status: 'sent',
+        });
+
+        // Log agent activity
+        await execute(`
+          INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
+          VALUES ($1, 'message_sent', 'conversation', $2, $3)
+        `, [agentId, req.params.conversationId, JSON.stringify({ content_type: contentType, response_time_ms: responseTimeMs })]);
+
+      } catch (error: any) {
+        console.error('Background send error:', error);
+
+        // Update message status to 'failed'
+        await execute(`
+          UPDATE messages SET status = 'failed', updated_at = NOW()
+          WHERE id = $1
+        `, [message!.id]);
+
+        // Notify frontend of failure
+        const io = getIO();
+        io.to(`user:${agentId}`).emit('message:status', {
+          messageId: message!.id,
+          status: 'failed',
+          error: error.message,
+        });
+      }
+    })();
+
   } catch (error) {
     console.error('Send message error:', error);
     res.status(500).json({ error: 'Failed to send message' });
