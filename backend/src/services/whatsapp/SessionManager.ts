@@ -494,6 +494,28 @@ class SessionManager {
       console.log(`[WA] contacts.update - count: ${updates.length}`);
     });
 
+    // Handle LID-to-PN mapping updates (Baileys v7 feature)
+    // This event provides mappings between LID and phone number formats
+    sock.ev.on('lid-mapping.update', async (mappings) => {
+      console.log(`[WA] lid-mapping.update - mappings received:`, Object.keys(mappings).length);
+
+      // Update contacts with LID->PN mappings
+      for (const [lid, pn] of Object.entries(mappings)) {
+        try {
+          // If we have a contact with this LID, update their phone number
+          await execute(
+            `UPDATE contacts
+             SET phone_number = $1, jid_type = 'pn', updated_at = NOW()
+             WHERE whatsapp_account_id = $2 AND wa_id = $3`,
+            [pn, accountId, lid.replace('@lid', '')]
+          );
+          console.log(`[WA] Updated LID->PN mapping: ${lid} -> ${pn}`);
+        } catch (error) {
+          console.error(`[WA] Error updating LID mapping:`, error);
+        }
+      }
+    });
+
     console.log(`[WA] Session ${accountId} event handlers registered`);
   }
 
