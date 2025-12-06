@@ -37,6 +37,11 @@ import {
 } from '../cloudinary';
 import pino from 'pino';
 
+// Performance services
+import { messageStore } from './MessageStore';
+import { groupMetadataCache } from './GroupMetadataCache';
+import { messageQueue } from './MessageQueue';
+
 /**
  * Check if JID is a user (supports both @s.whatsapp.net and @lid formats)
  * WhatsApp introduced LID (Link ID) format for privacy - we need to handle both
@@ -120,7 +125,12 @@ class SessionManager {
         }
       }
 
-      console.log('[WA] All sessions closed gracefully');
+      // Cleanup all caches
+      messageStore.cleanup();
+      groupMetadataCache.cleanupAll();
+      messageQueue.cleanupAll();
+
+      console.log('[WA] All sessions and caches closed gracefully');
     };
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -173,21 +183,11 @@ class SessionManager {
       // Disable link preview generation (reduces processing overhead)
       generateHighQualityLinkPreview: false,
       // getMessage callback for poll decryption and message retries
-      // This should return the message content from your database
-      getMessage: async (key: WAMessageKey) => {
-        try {
-          const msg = await queryOne(
-            'SELECT content, content_type FROM messages WHERE wa_message_id = $1',
-            [key.id]
-          );
-          if (msg?.content) {
-            return proto.Message.fromObject({ conversation: msg.content });
-          }
-        } catch (error) {
-          console.error('[WA] Error fetching message for retry:', error);
-        }
-        return proto.Message.fromObject({});
-      },
+      // Uses MessageStore for caching with DB fallback (better retry handling)
+      getMessage: messageStore.createGetMessageCallback(accountId),
+      // cachedGroupMetadata for faster group operations (5-min TTL cache)
+      // Reduces API calls to WhatsApp servers and improves performance
+      cachedGroupMetadata: groupMetadataCache.createCacheFunction(accountId),
     });
 
     // Create session state with ready promise
@@ -869,6 +869,11 @@ class SessionManager {
 
     console.log(`[WA] Saved message ${savedMessage.id} (${contentType}): ${content.substring(0, 50)}...`);
 
+    // Cache message in MessageStore for retry handling
+    if (msg.message) {
+      messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
+    }
+
     // Only emit to frontend for real-time messages
     if (isRealTime) {
       const io = getIO();
@@ -1178,6 +1183,11 @@ class SessionManager {
 
     console.log(`[WA] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
 
+    // Cache message in MessageStore for retry handling
+    if (msg.message) {
+      messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
+    }
+
     // Emit to frontend
     if (isRealTime) {
       const io = getIO();
@@ -1404,6 +1414,11 @@ class SessionManager {
         console.error(`[WA] Error ending socket:`, error);
       }
       this.sessions.delete(accountId);
+
+      // Cleanup caches for this account
+      messageStore.clearAccount(accountId);
+      groupMetadataCache.cleanup(accountId);
+      messageQueue.cleanup(accountId);
     }
   }
 
