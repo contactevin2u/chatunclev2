@@ -43,15 +43,25 @@ async function getOrderOpsToken(): Promise<string> {
     throw new Error(`OrderOps login failed: ${errorText}`);
   }
 
-  const data = await response.json() as { access_token?: string; token?: string; expires_in?: number };
-  cachedToken = data.access_token || data.token || null;
+  // OrderOps returns the token in Set-Cookie header, not in JSON body
+  const setCookie = response.headers.get('set-cookie');
+  if (setCookie) {
+    // Parse token from "token=xxx; ..." format
+    const tokenMatch = setCookie.match(/token=([^;]+)/);
+    if (tokenMatch) {
+      cachedToken = tokenMatch[1];
+    }
+  }
 
-  // Default to 1 hour expiry if not specified
-  const expiresIn = data.expires_in || 3600;
-  tokenExpiry = Date.now() + expiresIn * 1000;
+  if (!cachedToken) {
+    throw new Error('OrderOps login succeeded but no token returned');
+  }
+
+  // Default to 1 hour expiry
+  tokenExpiry = Date.now() + 3600 * 1000;
 
   console.log('[OrderOps] Login successful, token cached');
-  return cachedToken!;
+  return cachedToken;
 }
 
 router.use(authenticate);
