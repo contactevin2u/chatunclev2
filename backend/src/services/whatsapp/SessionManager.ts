@@ -1,6 +1,5 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
   WASocket,
   proto,
   downloadMediaMessage,
@@ -15,8 +14,7 @@ import makeWASocket, {
   getContentType,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
-import * as fs from 'fs';
-import * as path from 'path';
+import { usePostgresAuthState, clearPostgresAuthState } from './PostgresAuthState';
 import { query, queryOne, execute } from '../../config/database';
 import { getIO } from '../socket';
 import { processAutoReply } from '../autoReplyProcessor';
@@ -94,14 +92,39 @@ interface SessionState {
 
 class SessionManager {
   private sessions: Map<string, SessionState> = new Map();
-  private sessionsDir: string;
+  private isShuttingDown: boolean = false;
 
   constructor() {
-    this.sessionsDir = path.join(process.cwd(), 'sessions');
+    // Setup graceful shutdown handlers
+    this.setupShutdownHandlers();
+  }
 
-    if (!fs.existsSync(this.sessionsDir)) {
-      fs.mkdirSync(this.sessionsDir, { recursive: true });
-    }
+  /**
+   * Setup handlers for graceful shutdown
+   * Ensures sessions are properly saved before process exits
+   */
+  private setupShutdownHandlers() {
+    const shutdown = async (signal: string) => {
+      if (this.isShuttingDown) return;
+      this.isShuttingDown = true;
+
+      console.log(`[WA] Received ${signal}, gracefully shutting down sessions...`);
+
+      // Destroy all sessions gracefully (this saves state)
+      const accountIds = Array.from(this.sessions.keys());
+      for (const accountId of accountIds) {
+        try {
+          await this.destroySession(accountId);
+        } catch (e) {
+          console.error(`[WA] Error destroying session ${accountId}:`, e);
+        }
+      }
+
+      console.log('[WA] All sessions closed gracefully');
+    };
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
   }
 
   // Wait for session to be ready with timeout
@@ -126,13 +149,12 @@ class SessionManager {
   async createSession(accountId: string, userId: string): Promise<void> {
     console.log(`[WA] Creating session for account ${accountId}, user ${userId}`);
 
-    const sessionPath = path.join(this.sessionsDir, accountId);
-
     // Fetch latest WhatsApp Web version
     const { version, isLatest } = await fetchLatestBaileysVersion();
     console.log(`[WA] Using WA Web v${version.join('.')}, isLatest: ${isLatest}`);
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    // Use PostgreSQL-based auth state (persists across deploys)
+    const { state, saveCreds } = await usePostgresAuthState(accountId);
 
     // Create socket with proper configuration based on latest Baileys documentation
     const sock = makeWASocket({
@@ -1385,31 +1407,46 @@ class SessionManager {
     }
   }
 
-  private cleanupSession(accountId: string): void {
-    console.log(`[WA] Cleaning up session files for ${accountId}`);
-    const sessionPath = path.join(this.sessionsDir, accountId);
-
-    if (fs.existsSync(sessionPath)) {
-      fs.rmSync(sessionPath, { recursive: true, force: true });
-    }
+  private async cleanupSession(accountId: string): Promise<void> {
+    console.log(`[WA] Cleaning up session data for ${accountId}`);
+    // Clear PostgreSQL auth state on logout
+    await clearPostgresAuthState(accountId);
   }
 
   async restoreAllSessions(): Promise<void> {
     try {
+      // Wait 3 seconds before restoring sessions (let database connections stabilize)
+      console.log('[WA] Waiting 3s before restoring sessions...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       const accounts = await query<{ id: string; user_id: string }>(
         "SELECT id, user_id FROM whatsapp_accounts WHERE status = 'connected'"
       );
 
       console.log(`[WA] Restoring ${accounts.length} WhatsApp sessions...`);
 
-      for (const account of accounts) {
+      for (let i = 0; i < accounts.length; i++) {
+        const account = accounts[i];
         try {
-          console.log(`[WA] Restoring session for account ${account.id}`);
+          console.log(`[WA] Restoring session ${i + 1}/${accounts.length} for account ${account.id}`);
           await this.createSession(account.id, account.user_id);
+
+          // Add 2 second delay between session restorations to avoid rapid connections
+          if (i < accounts.length - 1) {
+            console.log('[WA] Waiting 2s before next session...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         } catch (error) {
           console.error(`[WA] Failed to restore session ${account.id}:`, error);
+          // Mark as disconnected if restoration fails
+          await execute(
+            "UPDATE whatsapp_accounts SET status = 'disconnected' WHERE id = $1",
+            [account.id]
+          );
         }
       }
+
+      console.log('[WA] Session restoration complete');
     } catch (error) {
       console.error('[WA] Failed to restore sessions:', error);
     }
