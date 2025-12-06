@@ -385,10 +385,9 @@ CREATE INDEX IF NOT EXISTS idx_messages_last
 CREATE INDEX IF NOT EXISTS idx_messages_created_brin
   ON messages USING BRIN (created_at) WITH (pages_per_range = 32);
 
--- 4. Partial index for recent conversations (hot data)
-CREATE INDEX IF NOT EXISTS idx_conversations_recent
-  ON conversations(last_message_at DESC)
-  WHERE last_message_at > NOW() - INTERVAL '7 days';
+-- 4. Index for conversation sorting (replacing partial index - NOW() not IMMUTABLE)
+CREATE INDEX IF NOT EXISTS idx_conversations_last_message
+  ON conversations(last_message_at DESC NULLS LAST);
 
 -- 5. Expression indexes for case-insensitive search
 CREATE INDEX IF NOT EXISTS idx_contacts_name_lower ON contacts(LOWER(name));
