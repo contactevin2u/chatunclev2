@@ -164,7 +164,19 @@ export default function MessageThread({ messages, conversationId }: MessageThrea
                 <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                   {parseResult?.id === message.id ? (
                     <div className={`text-xs ${parseResult.success ? 'text-green-600' : 'text-red-600'}`}>
-                      {parseResult.success ? '✓ Sent to OrderOps' : '✗ Failed'}
+                      {parseResult.success ? (
+                        <div className="space-y-1">
+                          <div className="font-medium">✓ {parseResult.data?.order_code || parseResult.data?.mother_order_code || 'Order'} created</div>
+                          {parseResult.data?.type && (
+                            <div className="text-gray-500">Type: {parseResult.data.type}</div>
+                          )}
+                          {parseResult.data?.message && (
+                            <div className="text-gray-500">{parseResult.data.message}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>✗ {parseResult.data?.message || parseResult.data || 'Failed'}</div>
+                      )}
                     </div>
                   ) : (
                     <button

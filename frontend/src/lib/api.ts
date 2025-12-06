@@ -688,7 +688,7 @@ export const knowledge = {
 export const orderops = {
   // Parse message into order
   parseMessage: (token: string, messageId: string, conversationId: string) =>
-    request<{ success: boolean; result: any }>('/api/orderops/parse', {
+    request<{ success: boolean; result: any; message: string }>('/api/orderops/parse', {
       method: 'POST',
       body: { messageId, conversationId },
       token,
@@ -701,6 +701,14 @@ export const orderops = {
       body: { messageId },
       token,
     }),
+
+  // Get orders linked to a contact
+  getContactOrders: (token: string, contactId: string) =>
+    request<{ success: boolean; orders: any[] }>(`/api/orderops/contact/${contactId}/orders`, { token }),
+
+  // Get order details from OrderOps
+  getOrder: (token: string, orderId: number) =>
+    request<{ success: boolean; order: any }>(`/api/orderops/order/${orderId}`, { token }),
 };
 
 // Re-export API_URL for use in other places

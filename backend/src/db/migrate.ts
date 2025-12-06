@@ -342,6 +342,32 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_docs_account ON knowledge_documents(wha
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_account ON knowledge_chunks(whatsapp_account_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_ai_logs_account ON ai_logs(whatsapp_account_id, created_at DESC);
+
+-- ============================================================
+-- ORDEROPS INTEGRATION TABLES
+-- ============================================================
+
+-- Contact orders table (links OrderOps orders to contacts)
+CREATE TABLE IF NOT EXISTS contact_orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+  orderops_order_id INT NOT NULL,
+  order_code VARCHAR(50),
+  order_type VARCHAR(50),
+  customer_name VARCHAR(255),
+  total DECIMAL(10, 2),
+  status VARCHAR(50),
+  parsed_data JSONB,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes and constraints for contact_orders
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_orders_orderops_id ON contact_orders(orderops_order_id);
+CREATE INDEX IF NOT EXISTS idx_contact_orders_contact ON contact_orders(contact_id);
+CREATE INDEX IF NOT EXISTS idx_contact_orders_code ON contact_orders(order_code);
 `;
 
 async function runMigrations() {

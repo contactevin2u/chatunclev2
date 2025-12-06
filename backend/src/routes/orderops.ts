@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { queryOne } from '../config/database';
+import { queryOne, query } from '../config/database';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -134,13 +134,52 @@ router.post('/parse', async (req: Request, res: Response) => {
     }
 
     const result = await response.json();
+    const data = result.data || result;
 
-    console.log('[OrderOps] Parse result:', JSON.stringify(result).substring(0, 200));
+    console.log('[OrderOps] Parse result:', JSON.stringify(data).substring(0, 300));
+
+    // Store order reference if parsing was successful
+    if (data.status === 'success' && (data.order_id || data.mother_order_id)) {
+      const orderId = data.order_id || data.mother_order_id;
+      const orderCode = data.order_code || data.mother_order_code;
+
+      // Get contact_id from conversation
+      const conv = await queryOne(`
+        SELECT contact_id FROM conversations WHERE id = $1
+      `, [conversationId]);
+
+      if (conv) {
+        await query(`
+          INSERT INTO contact_orders (
+            contact_id, conversation_id, message_id,
+            orderops_order_id, order_code, order_type,
+            customer_name, status, parsed_data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (orderops_order_id) DO UPDATE SET
+            order_code = EXCLUDED.order_code,
+            status = EXCLUDED.status,
+            parsed_data = EXCLUDED.parsed_data,
+            updated_at = NOW()
+        `, [
+          conv.contact_id,
+          conversationId,
+          messageId,
+          orderId,
+          orderCode,
+          data.type || 'delivery',
+          data.parsed_data?.customer_name || null,
+          data.status,
+          JSON.stringify(data)
+        ]);
+
+        console.log('[OrderOps] Order stored:', orderCode);
+      }
+    }
 
     res.json({
-      success: true,
-      result,
-      message: 'Message sent to OrderOps for parsing',
+      success: data.status === 'success',
+      result: data,
+      message: data.message || 'Message sent to OrderOps for parsing',
     });
   } catch (error: any) {
     console.error('[OrderOps] Error:', error);
@@ -205,6 +244,66 @@ router.post('/quotation', async (req: Request, res: Response) => {
     res.json({ success: true, result });
   } catch (error: any) {
     console.error('[OrderOps] Quotation error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get orders for a contact
+ * GET /api/orderops/contact/:contactId/orders
+ */
+router.get('/contact/:contactId/orders', async (req: Request, res: Response) => {
+  try {
+    const { contactId } = req.params;
+
+    const orders = await query(`
+      SELECT * FROM contact_orders
+      WHERE contact_id = $1
+      ORDER BY created_at DESC
+    `, [contactId]);
+
+    res.json({ success: true, orders: orders.rows });
+  } catch (error: any) {
+    console.error('[OrderOps] Fetch orders error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Get order details from OrderOps
+ * GET /api/orderops/order/:orderId
+ */
+router.get('/order/:orderId', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+
+    // Get auth token
+    let token: string;
+    try {
+      token = await getOrderOpsToken();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    // Fetch from OrderOps
+    const response = await fetch(`${ORDEROPS_API_URL}/orders/${orderId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      res.status(response.status).json({ error: 'OrderOps API error', details: errorText });
+      return;
+    }
+
+    const result = await response.json();
+    res.json({ success: true, order: result.data || result });
+  } catch (error: any) {
+    console.error('[OrderOps] Fetch order error:', error);
     res.status(500).json({ error: error.message });
   }
 });
