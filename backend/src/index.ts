@@ -24,6 +24,7 @@ import activityLogsRoutes from './routes/activity-logs';
 import aalyxRoutes from './routes/aalyx';
 import mediaRoutes from './routes/media';
 import knowledgeRoutes from './routes/knowledge';
+import orderopsRoutes from './routes/orderops';
 
 const app = express();
 const httpServer = createServer(app);
@@ -91,6 +92,7 @@ app.use('/api/activity-logs', activityLogsRoutes);
 app.use('/api/aalyx', aalyxRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
+app.use('/api/orderops', orderopsRoutes);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

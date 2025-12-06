@@ -1,21 +1,43 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2 } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { orderops } from '@/lib/api';
 
 interface MessageThreadProps {
   messages: Message[];
+  conversationId?: string;
 }
 
-export default function MessageThread({ messages }: MessageThreadProps) {
+export default function MessageThread({ messages, conversationId }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const { token } = useAuth();
+  const [parsingId, setParsingId] = useState<string | null>(null);
+  const [parseResult, setParseResult] = useState<{ id: string; success: boolean; data?: any } | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const handleSendToOrderOps = async (messageId: string) => {
+    if (!token || !conversationId) return;
+
+    setParsingId(messageId);
+    setParseResult(null);
+
+    try {
+      const result = await orderops.parseMessage(token, messageId, conversationId);
+      setParseResult({ id: messageId, success: result.success, data: result.result });
+    } catch (error: any) {
+      setParseResult({ id: messageId, success: false, data: error.message });
+    } finally {
+      setParsingId(null);
+    }
+  };
 
   if (messages.length === 0) {
     return (
@@ -136,6 +158,35 @@ export default function MessageThread({ messages }: MessageThreadProps) {
                 </span>
                 {isSent && getStatusIcon(message.status)}
               </div>
+
+              {/* OrderOps button - only for contact messages with text content */}
+              {!isSent && message.content_type === 'text' && message.content && message.content.length > 20 && (
+                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                  {parseResult?.id === message.id ? (
+                    <div className={`text-xs ${parseResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                      {parseResult.success ? '✓ Sent to OrderOps' : '✗ Failed'}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleSendToOrderOps(message.id)}
+                      disabled={parsingId === message.id}
+                      className="flex items-center space-x-1 text-xs text-purple-600 hover:text-purple-700 disabled:text-gray-400"
+                    >
+                      {parsingId === message.id ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>Parsing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-3 w-3" />
+                          <span>Send to OrderOps</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );

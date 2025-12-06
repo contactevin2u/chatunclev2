@@ -684,5 +684,24 @@ export const knowledge = {
     request<{ logs: any[] }>(`/api/knowledge/logs/${accountId}${limit ? `?limit=${limit}` : ''}`, { token }),
 };
 
+// OrderOps integration - send messages for order parsing
+export const orderops = {
+  // Parse message into order
+  parseMessage: (token: string, messageId: string, conversationId: string) =>
+    request<{ success: boolean; result: any }>('/api/orderops/parse', {
+      method: 'POST',
+      body: { messageId, conversationId },
+      token,
+    }),
+
+  // Parse as quotation only
+  parseQuotation: (token: string, messageId: string) =>
+    request<{ success: boolean; result: any }>('/api/orderops/quotation', {
+      method: 'POST',
+      body: { messageId },
+      token,
+    }),
+};
+
 // Re-export API_URL for use in other places
 export { API_URL };

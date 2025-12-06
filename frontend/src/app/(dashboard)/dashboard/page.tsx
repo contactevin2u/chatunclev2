@@ -643,7 +643,7 @@ export default function InboxPage() {
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-2 md:p-4">
-                <MessageThread messages={messagesList} />
+                <MessageThread messages={messagesList} conversationId={selectedConversation?.id} />
               </div>
 
               {/* Input */}
