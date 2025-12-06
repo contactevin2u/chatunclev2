@@ -20,6 +20,7 @@ import {
   X,
   Sun,
   Moon,
+  Brain,
 } from 'lucide-react';
 
 export default function DashboardLayout({
@@ -65,6 +66,7 @@ export default function DashboardLayout({
     { name: 'Accounts', href: '/dashboard/accounts', icon: Smartphone },
     { name: 'Scheduled', href: '/dashboard/scheduled', icon: Clock },
     { name: 'Auto-Reply', href: '/dashboard/auto-reply', icon: Bot },
+    { name: 'AI Knowledge', href: '/dashboard/knowledge', icon: Brain },
     { name: 'Templates', href: '/dashboard/templates', icon: FileText },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];

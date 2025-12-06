@@ -284,6 +284,64 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_conversation ON scheduled_messages(conv
 -- Composite indexes for common JOIN patterns
 CREATE INDEX IF NOT EXISTS idx_conv_list_query ON conversations(whatsapp_account_id, last_message_at DESC NULLS LAST)
   INCLUDE (contact_id, unread_count);
+
+-- ============================================================
+-- AI SETTINGS AND KNOWLEDGE BANK TABLES
+-- ============================================================
+
+-- AI settings per WhatsApp account
+CREATE TABLE IF NOT EXISTS ai_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE UNIQUE,
+  enabled BOOLEAN DEFAULT FALSE,
+  auto_reply BOOLEAN DEFAULT FALSE,
+  model VARCHAR(50) DEFAULT 'gpt-4o-mini',
+  temperature DECIMAL(3,2) DEFAULT 0.7,
+  max_tokens INT DEFAULT 100,
+  max_consecutive_replies INT DEFAULT 2,
+  custom_prompt TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Knowledge documents table
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100),
+  content_length INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Knowledge chunks for RAG
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  document_id UUID REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+  document_name VARCHAR(255),
+  content TEXT NOT NULL,
+  chunk_index INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- AI interaction logs for monitoring
+CREATE TABLE IF NOT EXISTS ai_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  customer_message TEXT,
+  ai_response TEXT,
+  model VARCHAR(50),
+  tokens_used INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Indexes for knowledge bank
+CREATE INDEX IF NOT EXISTS idx_knowledge_docs_account ON knowledge_documents(whatsapp_account_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_account ON knowledge_chunks(whatsapp_account_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_doc ON knowledge_chunks(document_id);
+CREATE INDEX IF NOT EXISTS idx_ai_logs_account ON ai_logs(whatsapp_account_id, created_at DESC);
 `;
 
 async function runMigrations() {

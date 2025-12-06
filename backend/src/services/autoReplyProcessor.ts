@@ -1,8 +1,14 @@
 import { query, queryOne, execute } from '../config/database';
 import { sessionManager } from './whatsapp/SessionManager';
-import { generateAIResponse, isAIConfigured } from './ai';
+import { generateResponse, getAISettings } from './ai';
 import { getIO } from './socket';
 import { getRandomDelay, sleep, isInWarmupPeriod } from './antiBan';
+
+// Legacy function for backward compatibility
+async function generateAIResponse(conversationId: string, content: string, aiPrompt?: string) {
+  return { content: '' };
+}
+function isAIConfigured() { return !!process.env.OPENAI_API_KEY; }
 
 interface IncomingMessage {
   accountId: string;
@@ -157,6 +163,82 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       } catch (error) {
         console.error(`[AutoReply] Failed to send auto-reply:`, error);
       }
+    }
+
+    // === AI AUTO-REPLY (when no rules matched) ===
+    // Try AI-powered response using GPT if enabled for this account
+    try {
+      const contact = await queryOne(`
+        SELECT name FROM contacts c
+        JOIN conversations conv ON conv.contact_id = c.id
+        WHERE conv.id = $1
+      `, [conversationId]);
+
+      const aiResponse = await generateResponse(
+        accountId,
+        conversationId,
+        content,
+        contact?.name
+      );
+
+      if (aiResponse) {
+        // Add delay to seem human
+        const isWarmup = await isInWarmupPeriod(accountId);
+        const baseDelay = isWarmup ? 4000 : 2000;
+        const readingDelay = getRandomDelay(baseDelay, baseDelay + 2000);
+        console.log(`[AI AutoReply] Waiting ${readingDelay}ms before responding`);
+        await sleep(readingDelay);
+
+        // Send AI response
+        const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
+          type: 'text',
+          content: aiResponse,
+        }, {
+          jidType: jidType || 'pn',
+        });
+
+        // Calculate response time
+        const lastContactMessage = await queryOne(`
+          SELECT created_at FROM messages
+          WHERE conversation_id = $1 AND sender_type = 'contact'
+          ORDER BY created_at DESC LIMIT 1
+        `, [conversationId]);
+
+        const responseTimeMs = lastContactMessage
+          ? Date.now() - new Date(lastContactMessage.created_at).getTime()
+          : null;
+
+        // Save message
+        const savedMessage = await queryOne(`
+          INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, status, is_auto_reply, response_time_ms)
+          VALUES ($1, $2, 'agent', 'text', $3, 'sent', TRUE, $4)
+          RETURNING *
+        `, [conversationId, waMessageId, aiResponse, responseTimeMs]);
+
+        // Update conversation
+        await execute(`
+          UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1
+        `, [conversationId]);
+
+        await execute(`
+          UPDATE conversations SET first_response_at = COALESCE(first_response_at, NOW()) WHERE id = $1
+        `, [conversationId]);
+
+        // Notify frontend
+        const io = getIO();
+        io.to(`user:${userId}`).emit('message:new', {
+          accountId,
+          conversationId,
+          message: savedMessage,
+          isAutoReply: true,
+          ruleName: 'AI Assistant',
+        });
+
+        console.log(`[AI AutoReply] Sent AI response: ${aiResponse.substring(0, 50)}...`);
+        return true;
+      }
+    } catch (error) {
+      console.error('[AI AutoReply] Error:', error);
     }
 
     return false;

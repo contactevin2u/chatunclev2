@@ -1,6 +1,6 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://chatuncle-api.onrender.com';
 
-type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 interface RequestOptions {
   method?: HttpMethod;
@@ -619,6 +619,69 @@ export const media = {
 
     return response.json() as Promise<{ url: string; mimeType: string; duration?: number }>;
   },
+};
+
+// Knowledge Bank & AI Settings
+export const knowledge = {
+  // AI Settings
+  getSettings: (token: string, accountId: string) =>
+    request<{ settings: any }>(`/api/knowledge/settings/${accountId}`, { token }),
+
+  updateSettings: (token: string, accountId: string, settings: {
+    enabled?: boolean;
+    auto_reply?: boolean;
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+    max_consecutive_replies?: number;
+    custom_prompt?: string;
+  }) =>
+    request<{ settings: any }>(`/api/knowledge/settings/${accountId}`, {
+      method: 'PUT',
+      body: settings,
+      token,
+    }),
+
+  // Documents
+  listDocuments: (token: string, accountId: string) =>
+    request<{ documents: any[] }>(`/api/knowledge/documents/${accountId}`, { token }),
+
+  uploadDocument: async (token: string, accountId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_URL}/api/knowledge/documents/${accountId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Upload failed');
+    }
+
+    return response.json() as Promise<{ message: string; name: string; chunks: number }>;
+  },
+
+  addTextContent: (token: string, accountId: string, name: string, content: string) =>
+    request<{ message: string; name: string; chunks: number }>(`/api/knowledge/documents/${accountId}/text`, {
+      method: 'POST',
+      body: { name, content },
+      token,
+    }),
+
+  deleteDocument: (token: string, accountId: string, documentId: string) =>
+    request<{ message: string }>(`/api/knowledge/documents/${accountId}/${documentId}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // AI Logs
+  getLogs: (token: string, accountId: string, limit?: number) =>
+    request<{ logs: any[] }>(`/api/knowledge/logs/${accountId}${limit ? `?limit=${limit}` : ''}`, { token }),
 };
 
 // Re-export API_URL for use in other places
