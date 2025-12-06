@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, execute, transaction } from '../config/database';
 import { authenticate } from '../middleware/auth';
+import { executeSequence } from '../services/sequenceExecutor';
 
 interface Template {
   id: string;
@@ -379,6 +380,38 @@ router.delete('/sequences/:id', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Delete sequence error:', error);
     res.status(500).json({ error: 'Failed to delete sequence' });
+  }
+});
+
+// Execute a template sequence (send all items with delays)
+router.post('/sequences/:id/execute', async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.body;
+
+    if (!conversationId) {
+      res.status(400).json({ error: 'conversationId is required' });
+      return;
+    }
+
+    // Start execution in background (returns immediately)
+    res.json({
+      message: 'Sequence execution started',
+      sequenceId: req.params.id,
+      conversationId
+    });
+
+    // Execute sequence asynchronously
+    executeSequence(req.params.id, conversationId, req.user!.userId)
+      .then(result => {
+        console.log(`[Templates] Sequence execution result:`, result);
+      })
+      .catch(error => {
+        console.error(`[Templates] Sequence execution error:`, error);
+      });
+
+  } catch (error) {
+    console.error('Execute sequence error:', error);
+    res.status(500).json({ error: 'Failed to execute sequence' });
   }
 });
 

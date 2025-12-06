@@ -263,6 +263,16 @@ export const templateSequences = {
       method: 'DELETE',
       token,
     }),
+
+  execute: (token: string, id: string, conversationId: string) =>
+    request<{ message: string; sequenceId: string; conversationId: string }>(
+      `/api/templates/sequences/${id}/execute`,
+      {
+        method: 'POST',
+        body: { conversationId },
+        token,
+      }
+    ),
 };
 
 // Admin
