@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "migrate": "tsx src/db/migrate.ts",
+    "optimize": "tsx src/db/optimize.ts",
     "seed": "tsx src/db/seed.ts"
   },
   "dependencies": {

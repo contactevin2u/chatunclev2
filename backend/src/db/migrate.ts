@@ -207,7 +207,11 @@ ALTER TABLE ai_conversation_context ADD CONSTRAINT ai_conversation_context_conve
 -- 'pn' = phone number (@s.whatsapp.net), 'lid' = link id (@lid)
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS jid_type VARCHAR(10) DEFAULT 'pn';
 
--- Index for faster conversation lookups
+-- ============================================================
+-- PERFORMANCE INDEXES
+-- ============================================================
+
+-- Core lookup indexes
 CREATE INDEX IF NOT EXISTS idx_conversations_account ON conversations(whatsapp_account_id, last_message_at DESC);
 CREATE INDEX IF NOT EXISTS idx_whatsapp_accounts_user ON whatsapp_accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_scheduled_messages_pending ON scheduled_messages(scheduled_at) WHERE status = 'pending';
@@ -215,6 +219,35 @@ CREATE INDEX IF NOT EXISTS idx_auto_reply_rules_active ON auto_reply_rules(whats
 CREATE INDEX IF NOT EXISTS idx_agent_activity_logs_agent ON agent_activity_logs(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_aalyx_orders_conversation ON aalyx_orders(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_agent ON messages(agent_id, created_at DESC);
+
+-- Contacts table indexes (frequently searched/filtered)
+CREATE INDEX IF NOT EXISTS idx_contacts_wa_id ON contacts(wa_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone_number) WHERE phone_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_account ON contacts(whatsapp_account_id);
+
+-- Messages table indexes (most queried table)
+CREATE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id) WHERE wa_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_sender_type ON messages(conversation_id, sender_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status) WHERE status != 'read';
+CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at DESC);
+
+-- Conversations table indexes
+CREATE INDEX IF NOT EXISTS idx_conversations_contact ON conversations(contact_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_unread ON conversations(whatsapp_account_id, unread_count DESC) WHERE unread_count > 0;
+
+-- Labels and contact_labels indexes
+CREATE INDEX IF NOT EXISTS idx_labels_user ON labels(user_id);
+CREATE INDEX IF NOT EXISTS idx_contact_labels_label ON contact_labels(label_id);
+
+-- Internal notes index
+CREATE INDEX IF NOT EXISTS idx_notes_conversation ON internal_notes(conversation_id, created_at DESC);
+
+-- Scheduled messages indexes
+CREATE INDEX IF NOT EXISTS idx_scheduled_conversation ON scheduled_messages(conversation_id);
+
+-- Composite indexes for common JOIN patterns
+CREATE INDEX IF NOT EXISTS idx_conv_list_query ON conversations(whatsapp_account_id, last_message_at DESC NULLS LAST)
+  INCLUDE (contact_id, unread_count);
 `;
 
 async function runMigrations() {
