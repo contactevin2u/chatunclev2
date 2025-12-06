@@ -311,3 +311,112 @@ body {
   transform: rotate(-180deg);
   opacity: 0;
 }
+
+/* ============================================
+   IMPROVED DARK MODE CONTRAST
+   ============================================ */
+
+/* Card borders - more visible */
+.dark .border {
+  border-color: rgb(75, 85, 99) !important;
+}
+
+/* Dashed borders - more visible for upload areas */
+.dark .border-dashed {
+  border-color: rgb(107, 114, 128) !important;
+}
+
+.dark .border-gray-300 {
+  border-color: rgb(75, 85, 99) !important;
+}
+
+/* Purple badges - better contrast */
+.dark .bg-purple-100 {
+  background-color: rgba(126, 34, 206, 0.4) !important;
+}
+
+.dark .text-purple-700 {
+  color: rgb(216, 180, 254) !important;
+}
+
+/* Blue badges - better contrast */
+.dark .text-blue-700 {
+  color: rgb(147, 197, 253) !important;
+}
+
+/* Green hover states */
+.dark .hover\:border-whatsapp-dark:hover {
+  border-color: rgb(37, 211, 102) !important;
+}
+
+.dark .hover\:bg-green-50:hover {
+  background-color: rgba(6, 78, 59, 0.4) !important;
+}
+
+/* WhatsApp green buttons - ensure visibility */
+.dark .bg-whatsapp-dark {
+  background-color: rgb(0, 128, 105) !important;
+}
+
+.dark .hover\:bg-whatsapp-teal:hover {
+  background-color: rgb(0, 150, 120) !important;
+}
+
+/* Modal overlay - darker */
+.dark .bg-black.bg-opacity-50 {
+  background-color: rgba(0, 0, 0, 0.75) !important;
+}
+
+/* Modal content - proper dark bg */
+.dark .shadow-xl {
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.5) !important;
+}
+
+/* Recording indicator */
+.dark .bg-red-500 {
+  background-color: rgb(239, 68, 68) !important;
+}
+
+/* Text on cards and in modals */
+.dark .text-gray-300 {
+  color: rgb(209, 213, 219) !important;
+}
+
+/* Disabled states */
+.dark .disabled\:opacity-50:disabled {
+  opacity: 0.6 !important;
+}
+
+/* Tab buttons */
+.dark .bg-white.text-gray-900.shadow-sm {
+  background-color: rgb(55, 65, 81) !important;
+  color: rgb(243, 244, 246) !important;
+}
+
+/* Inactive tabs */
+.dark .text-gray-600:not(:hover) {
+  color: rgb(156, 163, 175) !important;
+}
+
+/* Audio/Video controls */
+.dark audio,
+.dark video {
+  filter: invert(0.9) hue-rotate(180deg);
+  border-radius: 8px;
+}
+
+/* File input area hover */
+.dark .rounded-lg.bg-gray-100 {
+  background-color: rgb(31, 41, 55) !important;
+}
+
+/* Sequence item cards */
+.dark .bg-gray-50.border.rounded-lg {
+  background-color: rgb(31, 41, 55) !important;
+  border-color: rgb(75, 85, 99) !important;
+}
+
+/* Clock icon and delay text */
+.dark .text-gray-400 {
+  color: rgb(156, 163, 175) !important;
+}
