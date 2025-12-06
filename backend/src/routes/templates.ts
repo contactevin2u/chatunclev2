@@ -174,12 +174,26 @@ router.get('/sequences', async (req: Request, res: Response) => {
       [req.user!.userId]
     );
 
-    // Load items for each sequence
-    for (const seq of sequences) {
-      seq.items = await query<TemplateSequenceItem>(
-        'SELECT * FROM template_sequence_items WHERE sequence_id = $1 ORDER BY order_index ASC',
-        [seq.id]
+    // Batch fetch items for all sequences (fixes N+1 query)
+    if (sequences.length > 0) {
+      const sequenceIds = sequences.map(s => s.id);
+      const allItems = await query<TemplateSequenceItem & { sequence_id: string }>(
+        'SELECT * FROM template_sequence_items WHERE sequence_id = ANY($1) ORDER BY sequence_id, order_index ASC',
+        [sequenceIds]
       );
+
+      // Group items by sequence_id
+      const itemsBySequence = new Map<string, TemplateSequenceItem[]>();
+      for (const item of allItems) {
+        const existing = itemsBySequence.get(item.sequence_id) || [];
+        existing.push(item);
+        itemsBySequence.set(item.sequence_id, existing);
+      }
+
+      // Attach items to sequences
+      for (const seq of sequences) {
+        seq.items = itemsBySequence.get(seq.id) || [];
+      }
     }
 
     res.json({ sequences });

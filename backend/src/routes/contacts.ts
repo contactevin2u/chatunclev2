@@ -48,15 +48,28 @@ router.get('/', async (req: Request, res: Response) => {
 
     const contacts = await query(sql, params);
 
-    // Get labels for each contact
-    for (const contact of contacts) {
-      const labels = await query(`
-        SELECT l.id, l.name, l.color
+    // Batch fetch labels for all contacts (fixes N+1 query)
+    if (contacts.length > 0) {
+      const contactIds = contacts.map((c: any) => c.id);
+      const allLabels = await query(`
+        SELECT cl.contact_id, l.id, l.name, l.color
         FROM labels l
         JOIN contact_labels cl ON l.id = cl.label_id
-        WHERE cl.contact_id = $1
-      `, [contact.id]);
-      contact.labels = labels;
+        WHERE cl.contact_id = ANY($1)
+      `, [contactIds]);
+
+      // Group labels by contact_id
+      const labelsByContact = new Map<string, any[]>();
+      for (const label of allLabels) {
+        const existing = labelsByContact.get(label.contact_id) || [];
+        existing.push({ id: label.id, name: label.name, color: label.color });
+        labelsByContact.set(label.contact_id, existing);
+      }
+
+      // Attach labels to contacts
+      for (const contact of contacts) {
+        (contact as any).labels = labelsByContact.get(contact.id) || [];
+      }
     }
 
     res.json({ contacts });

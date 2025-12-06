@@ -46,20 +46,31 @@ router.get('/', async (req: Request, res: Response) => {
 
     const conversations = await query(sql, params);
 
-    // Get labels for each conversation's contact
-    const conversationsWithLabels = await Promise.all(
-      conversations.map(async (conv: any) => {
-        const labels = await query(`
-          SELECT l.id, l.name, l.color
-          FROM labels l
-          JOIN contact_labels cl ON l.id = cl.label_id
-          WHERE cl.contact_id = $1
-        `, [conv.contact_id]);
-        return { ...conv, labels };
-      })
-    );
+    // Batch fetch labels for all contacts (fixes N+1 query)
+    if (conversations.length > 0) {
+      const contactIds = conversations.map((c: any) => c.contact_id);
+      const allLabels = await query(`
+        SELECT cl.contact_id, l.id, l.name, l.color
+        FROM labels l
+        JOIN contact_labels cl ON l.id = cl.label_id
+        WHERE cl.contact_id = ANY($1)
+      `, [contactIds]);
 
-    res.json({ conversations: conversationsWithLabels });
+      // Group labels by contact_id
+      const labelsByContact = new Map<string, any[]>();
+      for (const label of allLabels) {
+        const existing = labelsByContact.get(label.contact_id) || [];
+        existing.push({ id: label.id, name: label.name, color: label.color });
+        labelsByContact.set(label.contact_id, existing);
+      }
+
+      // Attach labels to conversations
+      for (const conv of conversations) {
+        (conv as any).labels = labelsByContact.get(conv.contact_id) || [];
+      }
+    }
+
+    res.json({ conversations });
   } catch (error) {
     console.error('List conversations error:', error);
     res.status(500).json({ error: 'Failed to list conversations' });
