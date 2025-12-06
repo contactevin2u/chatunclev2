@@ -370,6 +370,62 @@ CREATE INDEX IF NOT EXISTS idx_contact_orders_contact ON contact_orders(contact_
 CREATE INDEX IF NOT EXISTS idx_contact_orders_code ON contact_orders(order_code);
 
 -- ============================================================
+-- WHATSAPP GROUPS SUPPORT
+-- ============================================================
+
+-- Groups table - stores WhatsApp group metadata
+CREATE TABLE IF NOT EXISTS groups (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  group_jid VARCHAR(100) NOT NULL,
+  name VARCHAR(255),
+  description TEXT,
+  owner_jid VARCHAR(100),
+  participant_count INT DEFAULT 0,
+  profile_pic_url TEXT,
+  creation_timestamp TIMESTAMP,
+  is_announce BOOLEAN DEFAULT FALSE,
+  is_restrict BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(whatsapp_account_id, group_jid)
+);
+
+-- Group participants table
+CREATE TABLE IF NOT EXISTS group_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+  participant_jid VARCHAR(100) NOT NULL,
+  is_admin BOOLEAN DEFAULT FALSE,
+  is_superadmin BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(group_id, participant_jid)
+);
+
+-- Add updated_at to group_participants for existing tables
+ALTER TABLE group_participants ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+-- Add group support to conversations table
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_group BOOLEAN DEFAULT FALSE;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES groups(id) ON DELETE SET NULL;
+
+-- Modify contact_id to be nullable for group conversations
+ALTER TABLE conversations ALTER COLUMN contact_id DROP NOT NULL;
+
+-- Add sender_jid to messages for group messages (to identify who sent it)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_jid VARCHAR(100);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name VARCHAR(255);
+
+-- Indexes for groups
+CREATE INDEX IF NOT EXISTS idx_groups_account ON groups(whatsapp_account_id);
+CREATE INDEX IF NOT EXISTS idx_groups_jid ON groups(group_jid);
+CREATE INDEX IF NOT EXISTS idx_group_participants_group ON group_participants(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_participants_jid ON group_participants(participant_jid);
+CREATE INDEX IF NOT EXISTS idx_conversations_group ON conversations(group_id) WHERE group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_is_group ON conversations(whatsapp_account_id, is_group);
+
+-- ============================================================
 -- POSTGRESQL 18 PERFORMANCE OPTIMIZATIONS
 -- ============================================================
 

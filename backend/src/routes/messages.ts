@@ -9,16 +9,19 @@ const router = Router();
 
 router.use(authenticate);
 
-// Get messages for a conversation
+// Get messages for a conversation (supports both 1:1 and group conversations)
 router.get('/conversation/:conversationId', async (req: Request, res: Response) => {
   try {
     const { limit = 50, before } = req.query;
 
-    // Verify ownership
+    // Verify ownership (handles both 1:1 and group conversations)
     const conversation = await queryOne(`
-      SELECT c.id, c.whatsapp_account_id, ct.wa_id
+      SELECT c.id, c.whatsapp_account_id, c.is_group, c.group_id,
+             ct.wa_id, ct.jid_type,
+             g.group_jid
       FROM conversations c
-      JOIN contacts ct ON c.contact_id = ct.id
+      LEFT JOIN contacts ct ON c.contact_id = ct.id
+      LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
       WHERE c.id = $1 AND wa.user_id = $2
     `, [req.params.conversationId, req.user!.userId]);
@@ -28,10 +31,12 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
       return;
     }
 
+    // Include sender_jid and sender_name for group messages
     let sql = `
       SELECT m.id, m.wa_message_id, m.sender_type, m.content_type, m.content,
              m.media_url, m.media_mime_type, m.status, m.created_at,
              m.agent_id, m.is_auto_reply, m.response_time_ms,
+             m.sender_jid, m.sender_name,
              u.name as agent_name
       FROM messages m
       LEFT JOIN users u ON m.agent_id = u.id
@@ -49,7 +54,10 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
 
     const messages = await query<Message>(sql, params);
 
-    res.json({ messages: messages.reverse() });
+    res.json({
+      messages: messages.reverse(),
+      is_group: conversation.is_group || false,
+    });
   } catch (error) {
     console.error('Get messages error:', error);
     res.status(500).json({ error: 'Failed to get messages' });

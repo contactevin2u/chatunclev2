@@ -76,6 +76,31 @@ function constructJid(waId: string, jidType: 'lid' | 'pn' = 'pn'): string {
   return jidType === 'lid' ? `${waId}@lid` : `${waId}@s.whatsapp.net`;
 }
 
+/**
+ * Generate account-specific delay for human-like behavior
+ * Each account gets a consistent offset based on its ID
+ * This prevents multiple accounts from acting synchronously
+ */
+function getAccountSpecificDelay(accountId: string, baseDelay: number = 500, maxExtra: number = 3000): number {
+  // Simple hash of accountId to get consistent offset per account
+  let hash = 0;
+  for (let i = 0; i < accountId.length; i++) {
+    const char = accountId.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  const accountOffset = Math.abs(hash) % maxExtra;
+  const randomVariation = Math.floor(Math.random() * 1000);
+  return baseDelay + accountOffset + randomVariation;
+}
+
+/**
+ * Extract group JID parts
+ */
+function extractGroupId(groupJid: string): string {
+  return groupJid.replace('@g.us', '');
+}
+
 // Create logger - use info level to see important logs
 const logger = pino({
   level: process.env.NODE_ENV === 'development' ? 'debug' : 'info',
@@ -311,9 +336,45 @@ class SessionManager {
         // Skip status broadcasts using Baileys helper
         if (!remoteJid || isJidBroadcast(remoteJid)) continue;
 
-        // Skip group messages using Baileys helper
-        if (isJidGroup(remoteJid)) continue;
+        // ============ GROUP MESSAGES ============
+        if (isJidGroup(remoteJid)) {
+          // Add account-specific delay for human-like behavior (prevents sync patterns)
+          const groupDelay = getAccountSpecificDelay(accountId, 200, 2000);
+          await sleep(groupDelay);
 
+          // Handle our own sent messages in groups
+          if (fromMe) {
+            console.log(`[WA] Sent group message from self: ${messageId}`);
+            const existingMsg = await queryOne(
+              'SELECT id FROM messages WHERE wa_message_id = $1',
+              [messageId]
+            );
+            if (existingMsg) {
+              await execute(
+                `UPDATE messages SET status = 'sent', updated_at = NOW() WHERE wa_message_id = $1`,
+                [messageId]
+              );
+            } else {
+              try {
+                await this.handleGroupOutgoingMessage(accountId, userId, msg, type === 'notify');
+              } catch (error) {
+                console.error(`[WA] Error saving outgoing group message:`, error);
+              }
+            }
+            continue;
+          }
+
+          // Handle incoming group messages
+          try {
+            await this.handleGroupIncomingMessage(accountId, userId, msg, type === 'notify');
+            console.log(`[WA] Group message ${messageId} processed successfully`);
+          } catch (error) {
+            console.error(`[WA] Error processing group message ${messageId}:`, error);
+          }
+          continue;
+        }
+
+        // ============ 1:1 USER MESSAGES ============
         // Only process user messages
         if (!isUserJid(remoteJid)) continue;
 
@@ -522,6 +583,174 @@ class SessionManager {
 
     sock.ev.on('contacts.update', async (updates) => {
       console.log(`[WA] contacts.update - count: ${updates.length}`);
+    });
+
+    // ============ GROUP EVENT HANDLERS ============
+
+    // Handle group metadata updates (name, description, profile pic, etc.)
+    sock.ev.on('groups.update', async (updates) => {
+      console.log(`[WA] groups.update - count: ${updates.length}`);
+
+      for (const update of updates) {
+        try {
+          const groupJid = update.id;
+          if (!groupJid) continue;
+
+          console.log(`[WA][Group] Metadata update for ${extractGroupId(groupJid)}:`, {
+            subject: update.subject,
+            desc: update.desc?.slice(0, 50),
+            announce: update.announce,
+            restrict: update.restrict,
+          });
+
+          // Update group in database
+          await execute(
+            `UPDATE groups
+             SET name = COALESCE($1, name),
+                 description = COALESCE($2, description),
+                 is_announce = COALESCE($3, is_announce),
+                 is_restrict = COALESCE($4, is_restrict),
+                 updated_at = NOW()
+             WHERE whatsapp_account_id = $5 AND group_jid = $6`,
+            [
+              update.subject || null,
+              update.desc || null,
+              update.announce !== undefined ? update.announce : null,
+              update.restrict !== undefined ? update.restrict : null,
+              accountId,
+              groupJid,
+            ]
+          );
+
+          // Update cache
+          groupMetadataCache.handleGroupUpdate(accountId, groupJid, {
+            subject: update.subject,
+            desc: update.desc,
+            announce: update.announce,
+            restrict: update.restrict,
+          });
+
+          // Emit to frontend
+          const io = getIO();
+          io.to(`user:${userId}`).emit('group:update', {
+            accountId,
+            groupJid,
+            updates: {
+              name: update.subject,
+              description: update.desc,
+              isAnnounce: update.announce,
+              isRestrict: update.restrict,
+            },
+          });
+        } catch (error) {
+          console.error(`[WA][Group] Error updating group metadata:`, error);
+        }
+      }
+    });
+
+    // Handle group participant updates (join, leave, promote, demote)
+    sock.ev.on('group-participants.update', async (update) => {
+      console.log(`[WA] group-participants.update:`, {
+        groupJid: update.id,
+        action: update.action,
+        participants: update.participants?.length,
+      });
+
+      try {
+        const groupJid = update.id;
+        const action = update.action;
+
+        // Extract participant JIDs - Baileys may return objects or strings depending on version
+        const rawParticipants = update.participants || [];
+        const participants: string[] = rawParticipants.map((p: any) =>
+          typeof p === 'string' ? p : (p.id || p.jid || String(p))
+        );
+
+        // Skip 'modify' action (not a standard participant change)
+        if (action !== 'add' && action !== 'remove' && action !== 'promote' && action !== 'demote') {
+          console.log(`[WA][Group] Skipping action: ${action}`);
+          return;
+        }
+
+        // Add account-specific delay to prevent synchronized behavior
+        const delay = getAccountSpecificDelay(accountId, 100, 1000);
+        await sleep(delay);
+
+        // Get the group record
+        const group = await queryOne(
+          'SELECT id FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+          [accountId, groupJid]
+        );
+
+        if (!group) {
+          console.log(`[WA][Group] Group not found in DB for participant update: ${groupJid}`);
+          return;
+        }
+
+        // Update participants in database
+        for (const participantJid of participants) {
+          switch (action) {
+            case 'add':
+              await queryOne(
+                `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
+                 VALUES ($1, $2, FALSE, FALSE)
+                 ON CONFLICT (group_id, participant_jid) DO NOTHING
+                 RETURNING *`,
+                [group.id, participantJid]
+              );
+              break;
+
+            case 'remove':
+              await execute(
+                `DELETE FROM group_participants WHERE group_id = $1 AND participant_jid = $2`,
+                [group.id, participantJid]
+              );
+              break;
+
+            case 'promote':
+              await execute(
+                `UPDATE group_participants SET is_admin = TRUE, updated_at = NOW()
+                 WHERE group_id = $1 AND participant_jid = $2`,
+                [group.id, participantJid]
+              );
+              break;
+
+            case 'demote':
+              await execute(
+                `UPDATE group_participants SET is_admin = FALSE, updated_at = NOW()
+                 WHERE group_id = $1 AND participant_jid = $2`,
+                [group.id, participantJid]
+              );
+              break;
+          }
+        }
+
+        // Update participant count
+        const countResult = await queryOne(
+          `SELECT COUNT(*) as count FROM group_participants WHERE group_id = $1`,
+          [group.id]
+        );
+        await execute(
+          `UPDATE groups SET participant_count = $1, updated_at = NOW() WHERE id = $2`,
+          [countResult?.count || 0, group.id]
+        );
+
+        // Update cache (only for standard actions)
+        groupMetadataCache.handleParticipantUpdate(accountId, groupJid, participants, action);
+
+        console.log(`[WA][Group] Processed ${action} for ${participants.length} participants in ${extractGroupId(groupJid)}`);
+
+        // Emit to frontend
+        const io = getIO();
+        io.to(`user:${userId}`).emit('group:participants', {
+          accountId,
+          groupJid,
+          action,
+          participants,
+        });
+      } catch (error) {
+        console.error(`[WA][Group] Error updating participants:`, error);
+      }
     });
 
     // Handle LID-to-PN mapping updates (Baileys v7 feature)
@@ -1347,6 +1576,302 @@ class SessionManager {
     } catch (error) {
       console.error(`[WA] Failed to send message:`, error);
       throw error;
+    }
+  }
+
+  // ============ GROUP MESSAGE HANDLERS ============
+
+  /**
+   * Handle incoming group messages
+   * Stores the message but does NOT trigger AI auto-reply
+   */
+  private async handleGroupIncomingMessage(
+    accountId: string,
+    userId: string,
+    msg: proto.IWebMessageInfo,
+    isRealTime: boolean = true
+  ): Promise<void> {
+    if (!msg.key) return;
+    const msgKey = msg.key;
+    const groupJid = msgKey.remoteJid;
+
+    if (!groupJid || !isJidGroup(groupJid)) return;
+
+    // Extract sender info (who sent the message in the group)
+    const senderJid = msgKey.participant || '';
+    const senderWaId = senderJid ? extractUserIdFromJid(senderJid) : '';
+    const pushName = msg.pushName || null;
+
+    console.log(`[WA][Group] Incoming from ${senderWaId} in group ${extractGroupId(groupJid)}, pushName: ${pushName}`);
+
+    // Get or create group record
+    let group = await queryOne(
+      'SELECT * FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      [accountId, groupJid]
+    );
+
+    if (!group) {
+      // Create group record - we'll get full metadata from group events
+      group = await queryOne(
+        `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
+         VALUES ($1, $2, $3, 0)
+         RETURNING *`,
+        [accountId, groupJid, `Group ${extractGroupId(groupJid)}`]
+      );
+      console.log(`[WA][Group] Created new group record: ${group.id}`);
+    }
+
+    // Get or create group conversation
+    let conversation = await queryOne(
+      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+      [accountId, group.id]
+    );
+
+    if (!conversation) {
+      conversation = await queryOne(
+        `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, unread_count, last_message_at)
+         VALUES ($1, $2, TRUE, $3, NOW())
+         RETURNING *`,
+        [accountId, group.id, isRealTime ? 1 : 0]
+      );
+      console.log(`[WA][Group] Created new group conversation: ${conversation.id}`);
+    } else if (isRealTime) {
+      await execute(
+        `UPDATE conversations
+         SET unread_count = unread_count + 1, last_message_at = NOW(), updated_at = NOW()
+         WHERE id = $1`,
+        [conversation.id]
+      );
+    }
+
+    // Check if message already exists
+    const existingMessage = await queryOne(
+      'SELECT id FROM messages WHERE wa_message_id = $1',
+      [msgKey.id]
+    );
+
+    if (existingMessage) {
+      console.log(`[WA][Group] Message ${msgKey.id} already exists, skipping`);
+      return;
+    }
+
+    // Parse message content (reuse logic from 1:1 messages)
+    const messageContent = msg.message;
+    let contentType = 'text';
+    let content = '';
+    let mediaUrl: string | null = null;
+    let mediaMimeType: string | null = null;
+
+    const msgType = messageContent ? getContentType(messageContent) : undefined;
+
+    switch (msgType) {
+      case 'conversation':
+        content = messageContent?.conversation || '';
+        break;
+      case 'extendedTextMessage':
+        content = messageContent?.extendedTextMessage?.text || '';
+        break;
+      case 'imageMessage':
+        contentType = 'image';
+        content = messageContent?.imageMessage?.caption || '[Image]';
+        mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        break;
+      case 'videoMessage':
+        contentType = 'video';
+        content = messageContent?.videoMessage?.caption || '[Video]';
+        mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        break;
+      case 'audioMessage':
+        contentType = 'audio';
+        content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
+        mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        break;
+      case 'documentMessage':
+      case 'documentWithCaptionMessage':
+        contentType = 'document';
+        content = messageContent?.documentMessage?.fileName || '[Document]';
+        mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+        break;
+      case 'stickerMessage':
+        contentType = 'sticker';
+        content = '[Sticker]';
+        break;
+      case 'protocolMessage':
+      case 'senderKeyDistributionMessage':
+        console.log(`[WA][Group] Skipping protocol message: ${msgType}`);
+        return;
+      default:
+        if (!content) content = `[${msgType || 'Message'}]`;
+    }
+
+    // Get message timestamp
+    const messageTimestamp = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000)
+      : new Date();
+
+    // Save message with sender info (sender_jid and sender_name for groups)
+    const savedMessage = await queryOne(
+      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, sender_jid, sender_name, created_at)
+       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7, $8, $9)
+       RETURNING *`,
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, senderJid, pushName, messageTimestamp]
+    );
+
+    console.log(`[WA][Group] Saved message ${savedMessage.id} from ${pushName || senderWaId}: ${content.substring(0, 50)}...`);
+
+    // Cache message for retry handling
+    if (msg.message) {
+      messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
+    }
+
+    // Emit to frontend for real-time messages
+    if (isRealTime) {
+      const io = getIO();
+      io.to(`user:${userId}`).emit('message:new', {
+        accountId,
+        conversationId: conversation.id,
+        isGroup: true,
+        message: savedMessage,
+        group: {
+          id: group.id,
+          name: group.name,
+          group_jid: group.group_jid,
+        },
+        sender: {
+          jid: senderJid,
+          name: pushName,
+        },
+      });
+    }
+
+    // NOTE: We do NOT trigger auto-reply for group messages (as per requirements)
+  }
+
+  /**
+   * Handle outgoing group messages (sent from phone or other devices)
+   * Stores the message for display in inbox
+   */
+  private async handleGroupOutgoingMessage(
+    accountId: string,
+    userId: string,
+    msg: proto.IWebMessageInfo,
+    isRealTime: boolean = true
+  ): Promise<void> {
+    if (!msg.key) return;
+    const msgKey = msg.key;
+    const groupJid = msgKey.remoteJid;
+
+    if (!groupJid || !isJidGroup(groupJid)) return;
+
+    console.log(`[WA][Group] Outgoing message to group ${extractGroupId(groupJid)}`);
+
+    // Get or create group record
+    let group = await queryOne(
+      'SELECT * FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      [accountId, groupJid]
+    );
+
+    if (!group) {
+      group = await queryOne(
+        `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
+         VALUES ($1, $2, $3, 0)
+         RETURNING *`,
+        [accountId, groupJid, `Group ${extractGroupId(groupJid)}`]
+      );
+    }
+
+    // Get or create group conversation
+    let conversation = await queryOne(
+      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+      [accountId, group.id]
+    );
+
+    if (!conversation) {
+      conversation = await queryOne(
+        `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+         VALUES ($1, $2, TRUE, NOW())
+         RETURNING *`,
+        [accountId, group.id]
+      );
+    } else {
+      await execute(
+        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
+        [conversation.id]
+      );
+    }
+
+    // Parse message content
+    const messageContent = msg.message;
+    let contentType = 'text';
+    let content = '';
+    let mediaUrl = null;
+    let mediaMimeType = null;
+
+    const msgType = messageContent ? getContentType(messageContent) : undefined;
+
+    switch (msgType) {
+      case 'conversation':
+        content = messageContent?.conversation || '';
+        break;
+      case 'extendedTextMessage':
+        content = messageContent?.extendedTextMessage?.text || '';
+        break;
+      case 'imageMessage':
+        contentType = 'image';
+        content = messageContent?.imageMessage?.caption || '[Image]';
+        break;
+      case 'videoMessage':
+        contentType = 'video';
+        content = messageContent?.videoMessage?.caption || '[Video]';
+        break;
+      case 'audioMessage':
+        contentType = 'audio';
+        content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
+        break;
+      case 'documentMessage':
+        contentType = 'document';
+        content = messageContent?.documentMessage?.fileName || '[Document]';
+        break;
+      case 'protocolMessage':
+      case 'senderKeyDistributionMessage':
+        return;
+      default:
+        if (!content) content = `[${msgType || 'Message'}]`;
+    }
+
+    const messageTimestamp = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000)
+      : new Date();
+
+    // Save message as sent by agent (our account)
+    const savedMessage = await queryOne(
+      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
+       VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7)
+       RETURNING *`,
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
+    );
+
+    console.log(`[WA][Group] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
+
+    // Cache message
+    if (msg.message) {
+      messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
+    }
+
+    // Emit to frontend
+    if (isRealTime) {
+      const io = getIO();
+      io.to(`user:${userId}`).emit('message:new', {
+        accountId,
+        conversationId: conversation.id,
+        isGroup: true,
+        message: savedMessage,
+        group: {
+          id: group.id,
+          name: group.name,
+          group_jid: group.group_jid,
+        },
+      });
     }
   }
 

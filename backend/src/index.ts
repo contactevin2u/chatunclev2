@@ -25,6 +25,7 @@ import aalyxRoutes from './routes/aalyx';
 import mediaRoutes from './routes/media';
 import knowledgeRoutes from './routes/knowledge';
 import orderopsRoutes from './routes/orderops';
+import groupsRoutes from './routes/groups';
 
 const app = express();
 const httpServer = createServer(app);
@@ -93,6 +94,7 @@ app.use('/api/aalyx', aalyxRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/orderops', orderopsRoutes);
+app.use('/api/groups', groupsRoutes);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
