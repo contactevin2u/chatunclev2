@@ -45,6 +45,7 @@ export default function MessageThread({ messages }: MessageThreadProps) {
   const getMediaIcon = (contentType: Message['content_type']) => {
     switch (contentType) {
       case 'image':
+      case 'sticker':
         return <Image className="h-4 w-4" />;
       case 'video':
         return <Video className="h-4 w-4" />;
@@ -82,11 +83,33 @@ export default function MessageThread({ messages }: MessageThreadProps) {
               )}
 
               {/* Media preview */}
-              {message.media_url && message.content_type === 'image' && (
+              {message.media_url && (message.content_type === 'image' || message.content_type === 'sticker') && (
                 <img
                   src={message.media_url}
-                  alt="Image"
+                  alt={message.content_type === 'sticker' ? 'Sticker' : 'Image'}
+                  className={clsx(
+                    'max-w-full rounded-lg mb-2',
+                    message.content_type === 'sticker' && 'max-w-[200px]'
+                  )}
+                />
+              )}
+
+              {/* Audio/Voice note player */}
+              {message.media_url && message.content_type === 'audio' && (
+                <audio
+                  controls
+                  src={message.media_url}
+                  className="max-w-full mb-2"
+                />
+              )}
+
+              {/* Video player */}
+              {message.media_url && message.content_type === 'video' && (
+                <video
+                  controls
+                  src={message.media_url}
                   className="max-w-full rounded-lg mb-2"
+                  style={{ maxHeight: '300px' }}
                 />
               )}
 
