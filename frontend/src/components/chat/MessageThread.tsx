@@ -159,8 +159,8 @@ export default function MessageThread({ messages, conversationId }: MessageThrea
                 {isSent && getStatusIcon(message.status)}
               </div>
 
-              {/* OrderOps button - only for contact messages with text content */}
-              {!isSent && message.content_type === 'text' && message.content && message.content.length > 20 && (
+              {/* OrderOps button - for any text message with sufficient content */}
+              {message.content_type === 'text' && message.content && message.content.length > 20 && (
                 <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                   {parseResult?.id === message.id ? (
                     <div className={`text-xs ${parseResult.success ? 'text-green-600' : 'text-red-600'}`}>
