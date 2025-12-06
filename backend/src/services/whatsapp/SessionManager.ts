@@ -642,12 +642,12 @@ class SessionManager {
     const messageContent = msg.message;
     let contentType = 'text';
     let content = '';
-    let mediaUrl = null;
-    let mediaMimeType = null;
+    let mediaUrl: string | null = null;
+    let mediaMimeType: string | null = null;
 
     // Use Baileys getContentType to detect message type
     const msgType = messageContent ? getContentType(messageContent) : undefined;
-    console.log(`[WA] Message content type: ${msgType}`);
+    console.log(`[WA] Message content type: ${msgType}`, msgType ? '' : Object.keys(messageContent || {}));
 
     switch (msgType) {
       case 'conversation':
@@ -660,16 +660,54 @@ class SessionManager {
         contentType = 'image';
         content = messageContent?.imageMessage?.caption || '[Image]';
         mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        // Download image media
+        try {
+          const imgBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (imgBuffer) {
+            const base64 = Buffer.from(imgBuffer).toString('base64');
+            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+            console.log(`[WA] Downloaded image: ${base64.length} chars`);
+          }
+        } catch (e) {
+          console.error(`[WA] Failed to download image:`, e);
+        }
         break;
       case 'videoMessage':
         contentType = 'video';
         content = messageContent?.videoMessage?.caption || '[Video]';
         mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        // Download video media (only if small enough for base64)
+        try {
+          const videoSize = messageContent?.videoMessage?.fileLength;
+          if (!videoSize || Number(videoSize) < 5 * 1024 * 1024) { // Only download if < 5MB
+            const vidBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+            if (vidBuffer) {
+              const base64 = Buffer.from(vidBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA] Downloaded video: ${base64.length} chars`);
+            }
+          } else {
+            console.log(`[WA] Video too large to download: ${videoSize} bytes`);
+          }
+        } catch (e) {
+          console.error(`[WA] Failed to download video:`, e);
+        }
         break;
       case 'audioMessage':
         contentType = 'audio';
         content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
         mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        // Download audio media
+        try {
+          const audioBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (audioBuffer) {
+            const base64 = Buffer.from(audioBuffer).toString('base64');
+            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+            console.log(`[WA] Downloaded audio: ${base64.length} chars`);
+          }
+        } catch (e) {
+          console.error(`[WA] Failed to download audio:`, e);
+        }
         break;
       case 'ptvMessage':
         // Circular video notes (push-to-talk video)
@@ -687,9 +725,20 @@ class SessionManager {
                         'application/octet-stream';
         break;
       case 'stickerMessage':
-        contentType = 'image';
+        contentType = 'sticker';
         content = '[Sticker]';
         mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
+        // Download sticker media
+        try {
+          const buffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (buffer) {
+            const base64 = Buffer.from(buffer).toString('base64');
+            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+            console.log(`[WA] Downloaded sticker: ${base64.length} chars`);
+          }
+        } catch (e) {
+          console.error(`[WA] Failed to download sticker:`, e);
+        }
         break;
       case 'contactMessage':
       case 'contactsArrayMessage':
