@@ -179,14 +179,25 @@ export const templates = {
   list: (token: string) =>
     request<{ templates: any[] }>('/api/templates', { token }),
 
-  create: (token: string, name: string, content: string, shortcut?: string) =>
+  create: (token: string, name: string, content: string, shortcut?: string, options?: {
+    content_type?: string;
+    media_url?: string;
+    media_mime_type?: string;
+  }) =>
     request<{ template: any }>('/api/templates', {
       method: 'POST',
-      body: { name, content, shortcut },
+      body: { name, content, shortcut, ...options },
       token,
     }),
 
-  update: (token: string, id: string, data: { name?: string; content?: string; shortcut?: string }) =>
+  update: (token: string, id: string, data: {
+    name?: string;
+    content?: string;
+    shortcut?: string;
+    content_type?: string;
+    media_url?: string;
+    media_mime_type?: string;
+  }) =>
     request<{ template: any }>(`/api/templates/${id}`, {
       method: 'PATCH',
       body: data,
@@ -195,6 +206,60 @@ export const templates = {
 
   delete: (token: string, id: string) =>
     request<{ message: string }>(`/api/templates/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+};
+
+// Template Sequences (multi-part with delays)
+export const templateSequences = {
+  list: (token: string) =>
+    request<{ sequences: any[] }>('/api/templates/sequences', { token }),
+
+  get: (token: string, id: string) =>
+    request<{ sequence: any }>(`/api/templates/sequences/${id}`, { token }),
+
+  create: (token: string, data: {
+    name: string;
+    description?: string;
+    shortcut?: string;
+    items: Array<{
+      content_type: string;
+      content?: string;
+      media_url?: string;
+      media_mime_type?: string;
+      delay_min_seconds?: number;
+      delay_max_seconds?: number;
+    }>;
+  }) =>
+    request<{ sequence: any }>('/api/templates/sequences', {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  update: (token: string, id: string, data: {
+    name?: string;
+    description?: string;
+    shortcut?: string;
+    is_active?: boolean;
+    items?: Array<{
+      content_type: string;
+      content?: string;
+      media_url?: string;
+      media_mime_type?: string;
+      delay_min_seconds?: number;
+      delay_max_seconds?: number;
+    }>;
+  }) =>
+    request<{ sequence: any }>(`/api/templates/sequences/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  delete: (token: string, id: string) =>
+    request<{ message: string }>(`/api/templates/sequences/${id}`, {
       method: 'DELETE',
       token,
     }),

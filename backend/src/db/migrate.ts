@@ -86,15 +86,46 @@ CREATE TABLE IF NOT EXISTS messages (
 -- Index for faster message queries
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at DESC);
 
--- Templates table
+-- Templates table (updated with media support)
 CREATE TABLE IF NOT EXISTS templates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES users(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   content TEXT NOT NULL,
   shortcut VARCHAR(50),
+  content_type VARCHAR(50) DEFAULT 'text',
+  media_url TEXT,
+  media_mime_type VARCHAR(100),
   created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Template sequences table (for multi-part templates with delays)
+CREATE TABLE IF NOT EXISTS template_sequences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  shortcut VARCHAR(50),
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Template sequence items (individual messages in a sequence)
+CREATE TABLE IF NOT EXISTS template_sequence_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sequence_id UUID REFERENCES template_sequences(id) ON DELETE CASCADE,
+  order_index INT NOT NULL DEFAULT 0,
+  content_type VARCHAR(50) NOT NULL DEFAULT 'text',
+  content TEXT,
+  media_url TEXT,
+  media_mime_type VARCHAR(100),
+  delay_min_seconds INT DEFAULT 0,
+  delay_max_seconds INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_template_sequence_items_order ON template_sequence_items(sequence_id, order_index);
 
 -- Scheduled messages table
 CREATE TABLE IF NOT EXISTS scheduled_messages (
@@ -206,6 +237,11 @@ ALTER TABLE ai_conversation_context ADD CONSTRAINT ai_conversation_context_conve
 -- Add jid_type to contacts for LID vs PN (phone number) format tracking
 -- 'pn' = phone number (@s.whatsapp.net), 'lid' = link id (@lid)
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS jid_type VARCHAR(10) DEFAULT 'pn';
+
+-- Add media support to templates table (for existing databases)
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS content_type VARCHAR(50) DEFAULT 'text';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_mime_type VARCHAR(100);
 
 -- ============================================================
 -- PERFORMANCE INDEXES
