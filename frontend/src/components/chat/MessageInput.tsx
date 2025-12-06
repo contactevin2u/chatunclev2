@@ -169,19 +169,19 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end space-x-2">
-        {/* Emoji button */}
+      <form onSubmit={handleSubmit} className="flex items-end space-x-1 md:space-x-2">
+        {/* Emoji button - hidden on mobile */}
         <button
           type="button"
-          className="p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
+          className="hidden md:block p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
         >
           <Smile className="h-6 w-6" />
         </button>
 
-        {/* Attachment button */}
+        {/* Attachment button - hidden on mobile */}
         <button
           type="button"
-          className="p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
+          className="hidden md:block p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
         >
           <Paperclip className="h-6 w-6" />
         </button>
@@ -196,33 +196,33 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
               setSelectedIndex(0);
             }
           }}
-          className={`relative p-2 rounded-full transition-colors ${
+          className={`relative p-2.5 md:p-2 rounded-full transition-colors active:scale-95 ${
             templates.length > 0
-              ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+              ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200 active:bg-gray-300'
               : 'text-gray-300 cursor-not-allowed'
           }`}
           title={templates.length > 0 ? `Quick replies (${templates.length}) - type / to search` : 'No templates - create one in Templates page'}
         >
-          <FileText className="h-6 w-6" />
+          <FileText className="h-5 w-5 md:h-6 md:w-6" />
           {templates.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-whatsapp-dark text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 bg-whatsapp-dark text-white text-[10px] rounded-full h-4 w-4 flex items-center justify-center">
               {templates.length}
             </span>
           )}
         </button>
 
         {/* Input */}
-        <div className="flex-1 bg-white rounded-lg border border-gray-200 px-4 py-2">
+        <div className="flex-1 bg-white rounded-2xl md:rounded-lg border border-gray-200 px-3 md:px-4 py-2">
           <textarea
             ref={inputRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message or / for quick replies"
+            placeholder="Type a message..."
             disabled={disabled}
             rows={1}
-            className="w-full resize-none outline-none text-gray-900 placeholder-gray-500 disabled:opacity-50"
-            style={{ minHeight: '24px', maxHeight: '120px' }}
+            className="w-full resize-none outline-none text-gray-900 placeholder-gray-500 disabled:opacity-50 text-sm md:text-base"
+            style={{ minHeight: '22px', maxHeight: '100px' }}
           />
         </div>
 
@@ -231,16 +231,16 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
           <button
             type="submit"
             disabled={disabled}
-            className="p-2 bg-whatsapp-dark text-white rounded-full hover:bg-whatsapp-teal transition-colors disabled:opacity-50"
+            className="p-2.5 md:p-2 bg-whatsapp-dark text-white rounded-full hover:bg-whatsapp-teal active:scale-95 transition-colors disabled:opacity-50"
           >
-            <Send className="h-6 w-6" />
+            <Send className="h-5 w-5 md:h-6 md:w-6" />
           </button>
         ) : (
           <button
             type="button"
-            className="p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
+            className="p-2.5 md:p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 active:bg-gray-300 transition-colors"
           >
-            <Mic className="h-6 w-6" />
+            <Mic className="h-5 w-5 md:h-6 md:w-6" />
           </button>
         )}
       </form>
