@@ -6,31 +6,18 @@ async function seed() {
 
   try {
     // Create admin user
-    const adminPassword = await bcrypt.hash('admin123', 12);
+    const adminPassword = await bcrypt.hash('EwhBxMzSYM007!', 12);
 
     await pool.query(`
       INSERT INTO users (email, password_hash, name, role)
       VALUES ($1, $2, $3, $4)
-      ON CONFLICT (email) DO NOTHING
-    `, ['admin@chatuncle.com', adminPassword, 'Admin User', 'admin']);
+      ON CONFLICT (email) DO UPDATE SET
+        password_hash = EXCLUDED.password_hash,
+        role = EXCLUDED.role
+    `, ['admin@chatuncle.com', adminPassword, 'Admin', 'admin']);
 
-    console.log('✓ Admin user created');
+    console.log('✓ Admin user created/updated');
     console.log('  Email: admin@chatuncle.com');
-    console.log('  Password: admin123');
-    console.log('  (Change this password after first login!)');
-
-    // Create a sample agent
-    const agentPassword = await bcrypt.hash('agent123', 12);
-
-    await pool.query(`
-      INSERT INTO users (email, password_hash, name, role)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (email) DO NOTHING
-    `, ['agent@chatuncle.com', agentPassword, 'Sales Agent', 'agent']);
-
-    console.log('✓ Sample agent created');
-    console.log('  Email: agent@chatuncle.com');
-    console.log('  Password: agent123');
 
     console.log('\nSeeding completed!');
   } catch (error) {
