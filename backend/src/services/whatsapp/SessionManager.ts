@@ -30,6 +30,13 @@ import {
   getAntiBanStats,
   isInWarmupPeriod,
 } from '../antiBan';
+import {
+  isCloudinaryConfigured,
+  uploadImage,
+  uploadSticker,
+  uploadAudio,
+  uploadVideo,
+} from '../cloudinary';
 import pino from 'pino';
 
 /**
@@ -660,13 +667,24 @@ class SessionManager {
         contentType = 'image';
         content = messageContent?.imageMessage?.caption || '[Image]';
         mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
-        // Download image media
+        // Download and upload image media
         try {
           const imgBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (imgBuffer) {
-            const base64 = Buffer.from(imgBuffer).toString('base64');
-            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
-            console.log(`[WA] Downloaded image: ${base64.length} chars`);
+            // Try Cloudinary first, fall back to Base64
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadImage(Buffer.from(imgBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA] Uploaded image to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            // Fallback to Base64 if Cloudinary fails or not configured
+            if (!mediaUrl) {
+              const base64 = Buffer.from(imgBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA] Stored image as Base64: ${base64.length} chars`);
+            }
           }
         } catch (e) {
           console.error(`[WA] Failed to download image:`, e);
@@ -676,15 +694,27 @@ class SessionManager {
         contentType = 'video';
         content = messageContent?.videoMessage?.caption || '[Video]';
         mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
-        // Download video media (only if small enough for base64)
+        // Download and upload video media
         try {
           const videoSize = messageContent?.videoMessage?.fileLength;
-          if (!videoSize || Number(videoSize) < 5 * 1024 * 1024) { // Only download if < 5MB
+          // With Cloudinary: download up to 100MB, without: limit to 5MB for Base64
+          const maxSize = isCloudinaryConfigured() ? 100 * 1024 * 1024 : 5 * 1024 * 1024;
+          if (!videoSize || Number(videoSize) < maxSize) {
             const vidBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
             if (vidBuffer) {
-              const base64 = Buffer.from(vidBuffer).toString('base64');
-              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
-              console.log(`[WA] Downloaded video: ${base64.length} chars`);
+              if (isCloudinaryConfigured()) {
+                const cloudUrl = await uploadVideo(Buffer.from(vidBuffer), msgKey.id || undefined);
+                if (cloudUrl) {
+                  mediaUrl = cloudUrl;
+                  console.log(`[WA] Uploaded video to Cloudinary: ${cloudUrl}`);
+                }
+              }
+              // Fallback to Base64 only for small videos
+              if (!mediaUrl && Number(videoSize || 0) < 5 * 1024 * 1024) {
+                const base64 = Buffer.from(vidBuffer).toString('base64');
+                mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+                console.log(`[WA] Stored video as Base64: ${base64.length} chars`);
+              }
             }
           } else {
             console.log(`[WA] Video too large to download: ${videoSize} bytes`);
@@ -697,13 +727,22 @@ class SessionManager {
         contentType = 'audio';
         content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
         mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
-        // Download audio media
+        // Download and upload audio media
         try {
           const audioBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (audioBuffer) {
-            const base64 = Buffer.from(audioBuffer).toString('base64');
-            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
-            console.log(`[WA] Downloaded audio: ${base64.length} chars`);
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadAudio(Buffer.from(audioBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA] Uploaded audio to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(audioBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA] Stored audio as Base64: ${base64.length} chars`);
+            }
           }
         } catch (e) {
           console.error(`[WA] Failed to download audio:`, e);
@@ -728,13 +767,22 @@ class SessionManager {
         contentType = 'sticker';
         content = '[Sticker]';
         mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
-        // Download sticker media
+        // Download and upload sticker media
         try {
-          const buffer = await downloadMediaMessage(msg as any, 'buffer', {});
-          if (buffer) {
-            const base64 = Buffer.from(buffer).toString('base64');
-            mediaUrl = `data:${mediaMimeType};base64,${base64}`;
-            console.log(`[WA] Downloaded sticker: ${base64.length} chars`);
+          const stickerBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (stickerBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadSticker(Buffer.from(stickerBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA] Uploaded sticker to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(stickerBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA] Stored sticker as Base64: ${base64.length} chars`);
+            }
           }
         } catch (e) {
           console.error(`[WA] Failed to download sticker:`, e);
