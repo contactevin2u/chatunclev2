@@ -64,6 +64,44 @@ async function getOrderOpsToken(): Promise<string> {
   return cachedToken;
 }
 
+/**
+ * Clear cached token (for retry on 401)
+ */
+function clearCachedToken() {
+  cachedToken = null;
+  tokenExpiry = 0;
+}
+
+/**
+ * Make an authenticated request to OrderOps with 401 retry
+ */
+async function orderOpsRequest(path: string, options: RequestInit = {}): Promise<Response> {
+  let token = await getOrderOpsToken();
+
+  const makeRequest = async (authToken: string) => {
+    return fetch(`${ORDEROPS_API_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        ...options.headers,
+      },
+    });
+  };
+
+  let response = await makeRequest(token);
+
+  // Retry once on 401 (token expired)
+  if (response.status === 401) {
+    console.log('[OrderOps] Token expired, refreshing...');
+    clearCachedToken();
+    token = await getOrderOpsToken();
+    response = await makeRequest(token);
+  }
+
+  return response;
+}
+
 router.use(authenticate);
 
 /**
@@ -77,20 +115,19 @@ router.post('/parse', async (req: Request, res: Response) => {
   try {
     const { messageId, conversationId } = req.body;
 
-    if (!messageId) {
-      res.status(400).json({ error: 'messageId is required' });
+    if (!messageId || !conversationId) {
+      res.status(400).json({ error: 'messageId and conversationId are required' });
       return;
     }
 
-    // Get the message content
+    // Get the message content with contact info
     const message = await queryOne(`
-      SELECT m.*, c.name as contact_name, ct.phone_number as contact_phone
+      SELECT m.*, c.name as contact_name, c.phone_number as contact_phone
       FROM messages m
       JOIN conversations conv ON m.conversation_id = conv.id
-      JOIN contacts ct ON conv.contact_id = ct.id
-      LEFT JOIN contacts c ON conv.contact_id = c.id
-      WHERE m.id = $1
-    `, [messageId]);
+      JOIN contacts c ON conv.contact_id = c.id
+      WHERE m.id = $1 AND m.conversation_id = $2
+    `, [messageId, conversationId]);
 
     if (!message) {
       res.status(404).json({ error: 'Message not found' });
@@ -102,25 +139,10 @@ router.post('/parse', async (req: Request, res: Response) => {
       return;
     }
 
-    // Get auth token (will login if needed)
-    let token: string;
-    try {
-      token = await getOrderOpsToken();
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-      return;
-    }
-
-    // Call OrderOps API - /parse/advanced with JSON body
-    const response = await fetch(`${ORDEROPS_API_URL}/parse/advanced`, {
+    // Call OrderOps API with auto-retry on 401
+    const response = await orderOpsRequest('/parse/advanced', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        message: message.content,
-      }),
+      body: JSON.stringify({ message: message.content }),
     });
 
     if (!response.ok) {
@@ -201,11 +223,10 @@ router.post('/quotation', async (req: Request, res: Response) => {
     }
 
     const message = await queryOne(`
-      SELECT m.*, c.name as contact_name, ct.phone_number as contact_phone
+      SELECT m.*, c.name as contact_name, c.phone_number as contact_phone
       FROM messages m
       JOIN conversations conv ON m.conversation_id = conv.id
-      JOIN contacts ct ON conv.contact_id = ct.id
-      LEFT JOIN contacts c ON conv.contact_id = c.id
+      JOIN contacts c ON conv.contact_id = c.id
       WHERE m.id = $1
     `, [messageId]);
 
@@ -214,24 +235,15 @@ router.post('/quotation', async (req: Request, res: Response) => {
       return;
     }
 
-    // Get auth token (will login if needed)
-    let token: string;
-    try {
-      token = await getOrderOpsToken();
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    if (!message.content) {
+      res.status(400).json({ error: 'Message has no text content' });
       return;
     }
 
-    const response = await fetch(`${ORDEROPS_API_URL}/parse/quotation`, {
+    // Call OrderOps API with auto-retry on 401
+    const response = await orderOpsRequest('/parse/quotation', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        message: message.content,
-      }),
+      body: JSON.stringify({ message: message.content }),
     });
 
     if (!response.ok) {
@@ -255,12 +267,16 @@ router.post('/quotation', async (req: Request, res: Response) => {
 router.get('/contact/:contactId/orders', async (req: Request, res: Response) => {
   try {
     const { contactId } = req.params;
+    const userId = req.user!.userId;
 
+    // Verify the contact belongs to user's whatsapp account
     const orders = await query(`
-      SELECT * FROM contact_orders
-      WHERE contact_id = $1
-      ORDER BY created_at DESC
-    `, [contactId]);
+      SELECT co.* FROM contact_orders co
+      JOIN contacts c ON co.contact_id = c.id
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE co.contact_id = $1 AND wa.user_id = $2
+      ORDER BY co.created_at DESC
+    `, [contactId, userId]);
 
     res.json({ success: true, orders: orders.rows });
   } catch (error: any) {
@@ -277,21 +293,15 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
   try {
     const { orderId } = req.params;
 
-    // Get auth token
-    let token: string;
-    try {
-      token = await getOrderOpsToken();
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    // Validate orderId is numeric
+    if (!/^\d+$/.test(orderId)) {
+      res.status(400).json({ error: 'Invalid order ID' });
       return;
     }
 
-    // Fetch from OrderOps
-    const response = await fetch(`${ORDEROPS_API_URL}/orders/${orderId}`, {
+    // Fetch from OrderOps with auto-retry on 401
+    const response = await orderOpsRequest(`/orders/${orderId}`, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
     });
 
     if (!response.ok) {
