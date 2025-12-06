@@ -6,18 +6,66 @@ const router = Router();
 
 // OrderOps API configuration
 const ORDEROPS_API_URL = process.env.ORDEROPS_API_URL || 'https://orderops-api-v1.onrender.com';
-const ORDEROPS_API_KEY = process.env.ORDEROPS_API_KEY || '';
+const ORDEROPS_USERNAME = process.env.ORDEROPS_USERNAME || '';
+const ORDEROPS_PASSWORD = process.env.ORDEROPS_PASSWORD || '';
+
+// Token cache
+let cachedToken: string | null = null;
+let tokenExpiry: number = 0;
+
+/**
+ * Get a valid OrderOps token, logging in if needed
+ */
+async function getOrderOpsToken(): Promise<string> {
+  // Return cached token if still valid (with 5 min buffer)
+  if (cachedToken && Date.now() < tokenExpiry - 5 * 60 * 1000) {
+    return cachedToken;
+  }
+
+  if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
+    throw new Error('OrderOps credentials not configured. Set ORDEROPS_USERNAME and ORDEROPS_PASSWORD env variables.');
+  }
+
+  console.log('[OrderOps] Logging in to get fresh token...');
+
+  const response = await fetch(`${ORDEROPS_API_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username: ORDEROPS_USERNAME,
+      password: ORDEROPS_PASSWORD,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[OrderOps] Login failed:', response.status, errorText);
+    throw new Error(`OrderOps login failed: ${errorText}`);
+  }
+
+  const data = await response.json();
+  cachedToken = data.access_token || data.token;
+
+  // Default to 1 hour expiry if not specified
+  const expiresIn = data.expires_in || 3600;
+  tokenExpiry = Date.now() + expiresIn * 1000;
+
+  console.log('[OrderOps] Login successful, token cached');
+  return cachedToken!;
+}
 
 router.use(authenticate);
 
 /**
  * Send a message to OrderOps for parsing
  * POST /api/orderops/parse
+ *
+ * Uses the /parse/advanced endpoint which is a 4-stage LLM parsing pipeline
+ * for complex WhatsApp messages (deliveries, returns, buybacks, etc.)
  */
 router.post('/parse', async (req: Request, res: Response) => {
   try {
     const { messageId, conversationId } = req.body;
-    const userId = req.user!.userId;
 
     if (!messageId) {
       res.status(400).json({ error: 'messageId is required' });
@@ -39,28 +87,29 @@ router.post('/parse', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!ORDEROPS_API_KEY) {
-      res.status(500).json({ error: 'OrderOps API key not configured' });
+    if (!message.content) {
+      res.status(400).json({ error: 'Message has no text content' });
       return;
     }
 
-    // Call OrderOps API
+    // Get auth token (will login if needed)
+    let token: string;
+    try {
+      token = await getOrderOpsToken();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+      return;
+    }
+
+    // Call OrderOps API - /parse/advanced with JSON body
     const response = await fetch(`${ORDEROPS_API_URL}/parse/advanced`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ORDEROPS_API_KEY}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
         message: message.content,
-        customer_name: message.contact_name || '',
-        customer_phone: message.contact_phone || '',
-        // Add any additional context
-        metadata: {
-          source: 'chatuncle',
-          message_id: messageId,
-          conversation_id: conversationId,
-        }
       }),
     });
 
@@ -116,8 +165,12 @@ router.post('/quotation', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!ORDEROPS_API_KEY) {
-      res.status(500).json({ error: 'OrderOps API key not configured' });
+    // Get auth token (will login if needed)
+    let token: string;
+    try {
+      token = await getOrderOpsToken();
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
       return;
     }
 
@@ -125,12 +178,10 @@ router.post('/quotation', async (req: Request, res: Response) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${ORDEROPS_API_KEY}`,
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
         message: message.content,
-        customer_name: message.contact_name || '',
-        customer_phone: message.contact_phone || '',
       }),
     });
 
