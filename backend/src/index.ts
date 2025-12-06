@@ -22,6 +22,7 @@ import searchRoutes from './routes/search';
 import autoReplyRoutes from './routes/auto-reply';
 import activityLogsRoutes from './routes/activity-logs';
 import aalyxRoutes from './routes/aalyx';
+import mediaRoutes from './routes/media';
 
 const app = express();
 const httpServer = createServer(app);
@@ -87,6 +88,7 @@ app.use('/api/search', searchRoutes);
 app.use('/api/auto-reply', autoReplyRoutes);
 app.use('/api/activity-logs', activityLogsRoutes);
 app.use('/api/aalyx', aalyxRoutes);
+app.use('/api/media', mediaRoutes);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

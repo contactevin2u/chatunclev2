@@ -557,5 +557,52 @@ export const contactsExtended = {
     }),
 };
 
+
+// Media Upload
+export const media = {
+  upload: async (token: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_URL}/api/media/upload`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Upload failed');
+    }
+
+    return response.json() as Promise<{ url: string; mimeType: string; filename: string; size: number }>;
+  },
+
+  uploadVoice: async (token: string, audioBlob: Blob, duration?: number) => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'voice-note.webm');
+    if (duration) {
+      formData.append('duration', duration.toString());
+    }
+
+    const response = await fetch(`${API_URL}/api/media/upload-voice`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || 'Upload failed');
+    }
+
+    return response.json() as Promise<{ url: string; mimeType: string; duration?: number }>;
+  },
+};
+
 // Re-export API_URL for use in other places
 export { API_URL };

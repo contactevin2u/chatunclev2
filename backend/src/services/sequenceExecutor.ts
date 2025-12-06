@@ -6,7 +6,7 @@ interface SequenceItem {
   id: string;
   sequence_id: string;
   order_index: number;
-  content_type: string;
+  content_type: 'text' | 'image' | 'video' | 'audio' | 'document';
   content?: string;
   media_url?: string;
   media_mime_type?: string;
@@ -18,7 +18,7 @@ interface ExecutionContext {
   conversationId: string;
   waAccountId: string;
   waId: string;
-  jidType: string;
+  jidType: 'lid' | 'pn';
   agentId: string;
   agentName?: string;
 }
