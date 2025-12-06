@@ -341,6 +341,23 @@ export const analytics = {
     const query = accountId ? `?accountId=${accountId}` : '';
     return request<{ hours: any[] }>(`/api/analytics/hourly-activity${query}`, { token });
   },
+
+  getChatStats: (token: string, params?: { accountId?: string; startDate?: string; endDate?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.accountId) searchParams.set('accountId', params.accountId);
+    if (params?.startDate) searchParams.set('startDate', params.startDate);
+    if (params?.endDate) searchParams.set('endDate', params.endDate);
+    const query = searchParams.toString();
+    return request<{
+      new_contacts: number;
+      existing_contacts: number;
+      total_conversations: number;
+      total_messages: number;
+      messages_sent: number;
+      messages_received: number;
+      daily_breakdown: any[];
+    }>(`/api/analytics/chat-stats${query ? `?${query}` : ''}`, { token });
+  },
 };
 
 // Scheduled Messages

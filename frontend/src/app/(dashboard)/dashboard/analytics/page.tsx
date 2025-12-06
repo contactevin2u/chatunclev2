@@ -10,6 +10,10 @@ import {
   Clock,
   TrendingUp,
   Bot,
+  UserPlus,
+  UserCheck,
+  Send,
+  Inbox,
 } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 
@@ -18,6 +22,7 @@ export default function AnalyticsPage() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>('');
   const [overview, setOverview] = useState<any>(null);
+  const [chatStats, setChatStats] = useState<any>(null);
   const [agentStats, setAgentStats] = useState<any[]>([]);
   const [dailyStats, setDailyStats] = useState<any[]>([]);
   const [hourlyStats, setHourlyStats] = useState<any[]>([]);
@@ -49,8 +54,13 @@ export default function AnalyticsPage() {
   const loadAnalytics = async () => {
     setIsLoading(true);
     try {
-      const [overviewRes, agentsRes, dailyRes, hourlyRes] = await Promise.all([
+      const [overviewRes, chatStatsRes, agentsRes, dailyRes, hourlyRes] = await Promise.all([
         analytics.getOverview(token!, {
+          accountId: selectedAccount || undefined,
+          startDate: dateRange.start,
+          endDate: dateRange.end,
+        }),
+        analytics.getChatStats(token!, {
           accountId: selectedAccount || undefined,
           startDate: dateRange.start,
           endDate: dateRange.end,
@@ -67,6 +77,7 @@ export default function AnalyticsPage() {
       ]);
 
       setOverview(overviewRes.overview);
+      setChatStats(chatStatsRes);
       setAgentStats(agentsRes.agents || []);
       setDailyStats(dailyRes.days || []);
       setHourlyStats(hourlyRes.hours || []);
@@ -144,34 +155,110 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Overview Stats */}
-        {overview && (
+        {/* Chat Stats - New vs Existing */}
+        {chatStats && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard
+              title="New Contacts"
+              value={chatStats.new_contacts?.toLocaleString() || 0}
+              icon={UserPlus}
+              subtitle="First-time conversations"
+              color="bg-emerald-500"
+            />
+            <StatCard
+              title="Returning Contacts"
+              value={chatStats.existing_contacts?.toLocaleString() || 0}
+              icon={UserCheck}
+              subtitle="Existing customer chats"
+              color="bg-blue-500"
+            />
+            <StatCard
               title="Total Messages"
-              value={overview.total_messages?.toLocaleString() || 0}
+              value={chatStats.total_messages?.toLocaleString() || 0}
               icon={MessageSquare}
-              subtitle={`${overview.messages_sent || 0} sent / ${overview.messages_received || 0} received`}
+              subtitle={`${chatStats.messages_sent || 0} sent / ${chatStats.messages_received || 0} received`}
             />
             <StatCard
               title="Conversations"
-              value={overview.total_conversations?.toLocaleString() || 0}
+              value={chatStats.total_conversations?.toLocaleString() || 0}
               icon={Users}
+              color="bg-purple-500"
+            />
+          </div>
+        )}
+
+        {/* Message Breakdown */}
+        {chatStats && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatCard
+              title="Messages Sent"
+              value={chatStats.messages_sent?.toLocaleString() || 0}
+              icon={Send}
               color="bg-green-500"
             />
             <StatCard
+              title="Messages Received"
+              value={chatStats.messages_received?.toLocaleString() || 0}
+              icon={Inbox}
+              color="bg-indigo-500"
+            />
+            <StatCard
               title="Avg Response Time"
-              value={formatResponseTime(overview.avg_response_time_ms)}
+              value={formatResponseTime(overview?.avg_response_time_ms)}
               icon={Clock}
-              color="bg-purple-500"
+              color="bg-amber-500"
             />
             <StatCard
               title="Auto Replies"
-              value={overview.auto_replies?.toLocaleString() || 0}
+              value={overview?.auto_replies?.toLocaleString() || 0}
               icon={Bot}
-              subtitle={`${((overview.auto_replies / overview.messages_sent) * 100 || 0).toFixed(1)}% of sent`}
+              subtitle={overview?.messages_sent ? `${((overview.auto_replies / overview.messages_sent) * 100).toFixed(1)}% of sent` : ''}
               color="bg-orange-500"
             />
+          </div>
+        )}
+
+        {/* New vs Returning Contacts Chart */}
+        {chatStats?.daily_breakdown?.length > 0 && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">New vs Returning Contacts</h3>
+            <div className="flex items-center space-x-4 mb-4">
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-emerald-500 rounded" />
+                <span className="text-sm text-gray-600">New Contacts</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-blue-500 rounded" />
+                <span className="text-sm text-gray-600">Returning Contacts</span>
+              </div>
+            </div>
+            <div className="h-48 flex items-end space-x-1">
+              {chatStats.daily_breakdown.map((day: any, i: number) => {
+                const maxVal = Math.max(...chatStats.daily_breakdown.map((d: any) =>
+                  (parseInt(d.new_contacts) || 0) + (parseInt(d.existing_contacts) || 0)
+                ));
+                const newHeight = maxVal > 0 ? ((parseInt(day.new_contacts) || 0) / maxVal) * 100 : 0;
+                const existingHeight = maxVal > 0 ? ((parseInt(day.existing_contacts) || 0) / maxVal) * 100 : 0;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center">
+                    <div
+                      className="w-full bg-blue-500"
+                      style={{ height: `${existingHeight}%`, minHeight: existingHeight > 0 ? '2px' : '0' }}
+                      title={`${format(new Date(day.date), 'MMM d')}: ${day.existing_contacts || 0} returning`}
+                    />
+                    <div
+                      className="w-full bg-emerald-500 rounded-t"
+                      style={{ height: `${newHeight}%`, minHeight: newHeight > 0 ? '2px' : '0' }}
+                      title={`${format(new Date(day.date), 'MMM d')}: ${day.new_contacts || 0} new`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-xs text-gray-400 mt-2">
+              <span>{chatStats.daily_breakdown[0]?.date ? format(new Date(chatStats.daily_breakdown[0].date), 'MMM d') : ''}</span>
+              <span>{chatStats.daily_breakdown[chatStats.daily_breakdown.length - 1]?.date ? format(new Date(chatStats.daily_breakdown[chatStats.daily_breakdown.length - 1].date), 'MMM d') : ''}</span>
+            </div>
           </div>
         )}
 
@@ -179,17 +266,33 @@ export default function AnalyticsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           {/* Daily Activity */}
           <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Activity (Last 30 Days)</h3>
-            <div className="h-64 flex items-end space-x-1">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Messages</h3>
+            <div className="flex items-center space-x-4 mb-4">
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-green-500 rounded" />
+                <span className="text-sm text-gray-600">Sent</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-indigo-500 rounded" />
+                <span className="text-sm text-gray-600">Received</span>
+              </div>
+            </div>
+            <div className="h-48 flex items-end space-x-1">
               {dailyStats.slice(-30).map((day, i) => {
-                const maxVal = Math.max(...dailyStats.map(d => d.messages_sent + d.messages_received));
-                const height = maxVal > 0 ? ((day.messages_sent + day.messages_received) / maxVal) * 100 : 0;
+                const maxVal = Math.max(...dailyStats.map(d => Math.max(d.sent || 0, d.received || 0)));
+                const sentHeight = maxVal > 0 ? ((day.sent || 0) / maxVal) * 100 : 0;
+                const receivedHeight = maxVal > 0 ? ((day.received || 0) / maxVal) * 100 : 0;
                 return (
-                  <div key={i} className="flex-1 flex flex-col items-center">
+                  <div key={i} className="flex-1 flex space-x-0.5">
                     <div
-                      className="w-full bg-blue-500 rounded-t"
-                      style={{ height: `${height}%`, minHeight: height > 0 ? '4px' : '0' }}
-                      title={`${format(new Date(day.date), 'MMM d')}: ${day.messages_sent + day.messages_received} messages`}
+                      className="flex-1 bg-green-500 rounded-t self-end"
+                      style={{ height: `${sentHeight}%`, minHeight: sentHeight > 0 ? '2px' : '0' }}
+                      title={`${format(new Date(day.date), 'MMM d')}: ${day.sent || 0} sent`}
+                    />
+                    <div
+                      className="flex-1 bg-indigo-500 rounded-t self-end"
+                      style={{ height: `${receivedHeight}%`, minHeight: receivedHeight > 0 ? '2px' : '0' }}
+                      title={`${format(new Date(day.date), 'MMM d')}: ${day.received || 0} received`}
                     />
                   </div>
                 );
@@ -204,16 +307,16 @@ export default function AnalyticsPage() {
           {/* Hourly Activity */}
           <div className="bg-white rounded-lg shadow p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Hourly Activity</h3>
-            <div className="h-64 flex items-end space-x-1">
+            <div className="h-48 flex items-end space-x-1">
               {Array.from({ length: 24 }, (_, hour) => {
                 const hourData = hourlyStats.find(h => h.hour === hour);
-                const count = hourData?.messages || 0;
-                const maxVal = Math.max(...hourlyStats.map(h => h.messages || 0));
+                const count = hourData?.messages || hourData?.message_count || 0;
+                const maxVal = Math.max(...hourlyStats.map(h => h.messages || h.message_count || 0));
                 const height = maxVal > 0 ? (count / maxVal) * 100 : 0;
                 return (
                   <div key={hour} className="flex-1 flex flex-col items-center">
                     <div
-                      className="w-full bg-green-500 rounded-t"
+                      className="w-full bg-amber-500 rounded-t"
                       style={{ height: `${height}%`, minHeight: height > 0 ? '4px' : '0' }}
                       title={`${hour}:00 - ${count} messages`}
                     />

@@ -307,4 +307,160 @@ router.get('/hourly-activity', async (req: Request, res: Response) => {
   }
 });
 
+// Get chat statistics (new vs existing contacts)
+router.get('/chat-stats', async (req: Request, res: Response) => {
+  try {
+    const { accountId, startDate, endDate } = req.query;
+    const userId = req.user!.userId;
+    const isAdmin = req.user!.role === 'admin';
+
+    let accountFilter = '';
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (accountId) {
+      params.push(accountId);
+      accountFilter = `AND wa.id = $${paramIndex++}`;
+    } else if (!isAdmin) {
+      params.push(userId);
+      accountFilter = `AND wa.user_id = $${paramIndex++}`;
+    }
+
+    let dateFilter = '';
+    if (startDate) {
+      params.push(startDate);
+      dateFilter += ` AND c.created_at >= $${paramIndex++}`;
+    }
+    if (endDate) {
+      params.push(endDate);
+      dateFilter += ` AND c.created_at <= ($${paramIndex++}::date + interval '1 day')`;
+    }
+
+    // New contacts: contacts whose first conversation falls within the date range
+    const newContactsResult = await queryOne(`
+      SELECT COUNT(DISTINCT ct.id) as count
+      FROM contacts ct
+      JOIN conversations c ON ct.id = c.contact_id
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE c.created_at = (
+        SELECT MIN(c2.created_at)
+        FROM conversations c2
+        WHERE c2.contact_id = ct.id
+      )
+      ${accountFilter} ${dateFilter}
+    `, params);
+
+    // Existing contacts: contacts who had conversations before the date range
+    const existingContactsResult = await queryOne(`
+      SELECT COUNT(DISTINCT c.contact_id) as count
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE EXISTS (
+        SELECT 1 FROM conversations c2
+        WHERE c2.contact_id = c.contact_id
+        AND c2.created_at < c.created_at
+      )
+      ${accountFilter} ${dateFilter}
+    `, params);
+
+    // Total conversations in date range
+    const totalConversationsResult = await queryOne(`
+      SELECT COUNT(*) as count
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE 1=1 ${accountFilter} ${dateFilter}
+    `, params);
+
+    // Total messages in date range
+    let messageDateFilter = '';
+    const messageParams: any[] = [];
+    let msgParamIndex = 1;
+
+    if (accountId) {
+      messageParams.push(accountId);
+      accountFilter = `AND wa.id = $${msgParamIndex++}`;
+    } else if (!isAdmin) {
+      messageParams.push(userId);
+      accountFilter = `AND wa.user_id = $${msgParamIndex++}`;
+    } else {
+      accountFilter = '';
+    }
+
+    if (startDate) {
+      messageParams.push(startDate);
+      messageDateFilter += ` AND m.created_at >= $${msgParamIndex++}`;
+    }
+    if (endDate) {
+      messageParams.push(endDate);
+      messageDateFilter += ` AND m.created_at <= ($${msgParamIndex++}::date + interval '1 day')`;
+    }
+
+    const totalMessagesResult = await queryOne(`
+      SELECT
+        COUNT(*) as total,
+        COUNT(CASE WHEN m.sender_type = 'agent' THEN 1 END) as sent,
+        COUNT(CASE WHEN m.sender_type = 'contact' THEN 1 END) as received
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE 1=1 ${accountFilter} ${messageDateFilter}
+    `, messageParams);
+
+    // Daily breakdown of new vs existing
+    const dailyParams: any[] = [];
+    let dailyParamIndex = 1;
+    let dailyAccountFilter = '';
+    let dailyDateFilter = '';
+
+    if (accountId) {
+      dailyParams.push(accountId);
+      dailyAccountFilter = `AND wa.id = $${dailyParamIndex++}`;
+    } else if (!isAdmin) {
+      dailyParams.push(userId);
+      dailyAccountFilter = `AND wa.user_id = $${dailyParamIndex++}`;
+    }
+
+    if (startDate) {
+      dailyParams.push(startDate);
+      dailyDateFilter += ` AND c.created_at >= $${dailyParamIndex++}`;
+    }
+    if (endDate) {
+      dailyParams.push(endDate);
+      dailyDateFilter += ` AND c.created_at <= ($${dailyParamIndex++}::date + interval '1 day')`;
+    }
+
+    const dailyBreakdown = await query(`
+      SELECT
+        DATE(c.created_at) as date,
+        COUNT(DISTINCT CASE
+          WHEN c.created_at = (SELECT MIN(c2.created_at) FROM conversations c2 WHERE c2.contact_id = c.contact_id)
+          THEN c.contact_id
+        END) as new_contacts,
+        COUNT(DISTINCT CASE
+          WHEN c.created_at > (SELECT MIN(c2.created_at) FROM conversations c2 WHERE c2.contact_id = c.contact_id)
+          THEN c.contact_id
+        END) as existing_contacts,
+        COUNT(*) as total_conversations
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE 1=1 ${dailyAccountFilter} ${dailyDateFilter}
+      GROUP BY DATE(c.created_at)
+      ORDER BY date ASC
+    `, dailyParams);
+
+    res.json({
+      new_contacts: parseInt(newContactsResult?.count || '0'),
+      existing_contacts: parseInt(existingContactsResult?.count || '0'),
+      total_conversations: parseInt(totalConversationsResult?.count || '0'),
+      total_messages: parseInt(totalMessagesResult?.total || '0'),
+      messages_sent: parseInt(totalMessagesResult?.sent || '0'),
+      messages_received: parseInt(totalMessagesResult?.received || '0'),
+      daily_breakdown: dailyBreakdown,
+    });
+  } catch (error) {
+    console.error('Analytics chat-stats error:', error);
+    res.status(500).json({ error: 'Failed to get chat statistics' });
+  }
+});
+
 export default router;
