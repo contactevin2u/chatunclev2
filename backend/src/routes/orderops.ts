@@ -43,8 +43,8 @@ async function getOrderOpsToken(): Promise<string> {
     throw new Error(`OrderOps login failed: ${errorText}`);
   }
 
-  const data = await response.json();
-  cachedToken = data.access_token || data.token;
+  const data = await response.json() as { access_token?: string; token?: string; expires_in?: number };
+  cachedToken = data.access_token || data.token || null;
 
   // Default to 1 hour expiry if not specified
   const expiresIn = data.expires_in || 3600;
