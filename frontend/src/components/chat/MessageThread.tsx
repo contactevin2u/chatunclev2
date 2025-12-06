@@ -82,15 +82,23 @@ export default function MessageThread({ messages }: MessageThreadProps) {
                 </div>
               )}
 
-              {/* Media preview */}
-              {message.media_url && (message.content_type === 'image' || message.content_type === 'sticker') && (
+              {/* Image preview */}
+              {message.media_url && message.content_type === 'image' && (
                 <img
                   src={message.media_url}
-                  alt={message.content_type === 'sticker' ? 'Sticker' : 'Image'}
-                  className={clsx(
-                    'max-w-full rounded-lg mb-2',
-                    message.content_type === 'sticker' && 'max-w-[200px]'
-                  )}
+                  alt="Image"
+                  className="rounded-lg mb-2"
+                  style={{ maxWidth: '220px', maxHeight: '220px', objectFit: 'contain' }}
+                />
+              )}
+
+              {/* Sticker preview - smaller size */}
+              {message.media_url && message.content_type === 'sticker' && (
+                <img
+                  src={message.media_url}
+                  alt="Sticker"
+                  className="mb-1"
+                  style={{ maxWidth: '120px', maxHeight: '120px', objectFit: 'contain' }}
                 />
               )}
 
@@ -99,7 +107,8 @@ export default function MessageThread({ messages }: MessageThreadProps) {
                 <audio
                   controls
                   src={message.media_url}
-                  className="max-w-full mb-2"
+                  className="mb-2"
+                  style={{ maxWidth: '200px', height: '36px' }}
                 />
               )}
 
@@ -108,8 +117,8 @@ export default function MessageThread({ messages }: MessageThreadProps) {
                 <video
                   controls
                   src={message.media_url}
-                  className="max-w-full rounded-lg mb-2"
-                  style={{ maxHeight: '300px' }}
+                  className="rounded-lg mb-2"
+                  style={{ maxWidth: '220px', maxHeight: '180px', objectFit: 'contain' }}
                 />
               )}
 
