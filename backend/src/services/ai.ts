@@ -29,8 +29,14 @@ Jawab dengan tepat guna maklumat perniagaan.
 Kalau tiada info khusus, jujur sahaja.`;
 
 // Rate limiting per conversation - IMPORTANT for ban prevention
+// Research: https://waha.devlike.pro/docs/overview/how-to-avoid-blocking/
+// - Max 4 messages per hour per contact
+// - 30-60 second delays for auto-replies
+// - Never initiate, only reply
 const conversationCooldowns = new Map<string, number>();
-const COOLDOWN_MS = 5000; // 5 second minimum between AI replies
+const conversationHourlyCount = new Map<string, { count: number; resetTime: number }>();
+const COOLDOWN_MS = 10000; // 10 second minimum between AI replies (increased from 5s)
+const MAX_REPLIES_PER_HOUR = 4; // Max 4 AI messages per hour per contact
 
 // Check if human agent recently replied (human takeover)
 async function isHumanTakeover(conversationId: string, minutesThreshold: number = 30): Promise<boolean> {
@@ -83,12 +89,46 @@ function isRateLimited(conversationId: string): boolean {
   return false;
 }
 
+// Check hourly rate limit (max 4 per hour per contact)
+function isHourlyLimitReached(conversationId: string): boolean {
+  const now = Date.now();
+  const hourData = conversationHourlyCount.get(conversationId);
+
+  if (!hourData || now > hourData.resetTime) {
+    // Reset counter for new hour
+    return false;
+  }
+
+  return hourData.count >= MAX_REPLIES_PER_HOUR;
+}
+
 function setRateLimit(conversationId: string): void {
-  conversationCooldowns.set(conversationId, Date.now());
+  const now = Date.now();
+
+  // Set cooldown
+  conversationCooldowns.set(conversationId, now);
+
+  // Update hourly count
+  const hourData = conversationHourlyCount.get(conversationId);
+  if (!hourData || now > hourData.resetTime) {
+    conversationHourlyCount.set(conversationId, {
+      count: 1,
+      resetTime: now + 3600000, // 1 hour from now
+    });
+  } else {
+    hourData.count++;
+  }
+
+  // Cleanup old entries
   if (conversationCooldowns.size > 1000) {
     const cutoff = Date.now() - 60000;
     for (const [key, time] of conversationCooldowns) {
       if (time < cutoff) conversationCooldowns.delete(key);
+    }
+  }
+  if (conversationHourlyCount.size > 1000) {
+    for (const [key, data] of conversationHourlyCount) {
+      if (now > data.resetTime) conversationHourlyCount.delete(key);
     }
   }
 }
@@ -167,17 +207,23 @@ export async function generateResponse(
 
     // 2. Check rate limit (prevent rapid fire - BAN PREVENTION)
     if (isRateLimited(conversationId)) {
-      console.log('[AI] Rate limited, skipping');
+      console.log('[AI] Rate limited (cooldown), skipping');
       return null;
     }
 
-    // 3. Check for human takeover
+    // 3. Check hourly limit (max 4 per hour per contact - BAN PREVENTION)
+    if (isHourlyLimitReached(conversationId)) {
+      console.log('[AI] Hourly limit reached (4/hour), skipping to prevent spam');
+      return null;
+    }
+
+    // 4. Check for human takeover
     if (await isHumanTakeover(conversationId)) {
       console.log('[AI] Human takeover active');
       return null;
     }
 
-    // 4. Check consecutive AI replies (max 2 - BAN PREVENTION)
+    // 5. Check consecutive AI replies (max 2 - BAN PREVENTION)
     const consecutiveReplies = await getConsecutiveAIReplies(conversationId);
     const maxReplies = settings.max_consecutive_replies || 2;
     if (consecutiveReplies >= maxReplies) {
@@ -185,7 +231,7 @@ export async function generateResponse(
       return null;
     }
 
-    // 5. Check API key
+    // 6. Check API key
     if (!process.env.OPENAI_API_KEY) {
       console.error('[AI] No OpenAI API key');
       return null;
