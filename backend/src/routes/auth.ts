@@ -8,63 +8,8 @@ import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-// Register new user
-router.post('/register', async (req: Request, res: Response) => {
-  try {
-    const { email, password, name } = req.body;
-
-    if (!email || !password || !name) {
-      res.status(400).json({ error: 'Email, password, and name are required' });
-      return;
-    }
-
-    // Check if user already exists
-    const existingUser = await queryOne<User>(
-      'SELECT id FROM users WHERE email = $1',
-      [email.toLowerCase()]
-    );
-
-    if (existingUser) {
-      res.status(400).json({ error: 'Email already registered' });
-      return;
-    }
-
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    // Create user
-    const user = await queryOne<User>(
-      `INSERT INTO users (email, password_hash, name, role)
-       VALUES ($1, $2, $3, 'agent')
-       RETURNING id, email, name, role, created_at`,
-      [email.toLowerCase(), passwordHash, name]
-    );
-
-    // Generate token
-    const payload: JwtPayload = {
-      userId: user!.id,
-      email: user!.email,
-      role: user!.role,
-    };
-
-    const token = jwt.sign(payload, config.jwtSecret, {
-      expiresIn: config.jwtExpiresIn as string,
-    } as jwt.SignOptions);
-
-    res.status(201).json({
-      user: {
-        id: user!.id,
-        email: user!.email,
-        name: user!.name,
-        role: user!.role,
-      },
-      token,
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ error: 'Registration failed' });
-  }
-});
+// Public registration disabled - use admin panel to create users
+// POST /admin/agents (requires admin authentication)
 
 // Login
 router.post('/login', async (req: Request, res: Response) => {

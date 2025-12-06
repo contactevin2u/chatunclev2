@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { MessageSquare } from 'lucide-react';
 
@@ -94,11 +93,8 @@ export default function LoginPage() {
             {isLoading ? 'Signing in...' : 'Sign in'}
           </button>
 
-          <p className="text-center text-sm text-gray-600">
-            Don&apos;t have an account?{' '}
-            <Link href="/register" className="font-medium text-whatsapp-dark hover:text-whatsapp-teal">
-              Register here
-            </Link>
+          <p className="text-center text-sm text-gray-500 text-xs">
+            Contact administrator to create an account
           </p>
         </form>
       </div>
