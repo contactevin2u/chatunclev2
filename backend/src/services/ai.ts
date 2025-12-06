@@ -237,9 +237,6 @@ export async function generateResponse(
       return null;
     }
 
-    // Set rate limit now
-    setRateLimit(conversationId);
-
     // Get knowledge and context
     const knowledge = await searchKnowledge(accountId, customerMessage);
     const knowledgeContext = knowledge.length > 0
@@ -274,6 +271,9 @@ export async function generateResponse(
     const response = completion.choices[0]?.message?.content;
 
     if (response) {
+      // Set rate limit AFTER successful response (not before)
+      setRateLimit(conversationId);
+
       console.log('[AI] Response:', response.substring(0, 40));
 
       // Log the interaction

@@ -95,10 +95,12 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
 
       try {
         // === ANTI-BAN: Add delay before auto-reply to simulate human reading ===
+        // Research: 30-60s recommended, but we balance with UX (5-15s normal, 10-25s warmup)
         // This makes the bot appear more human-like
         const isWarmup = await isInWarmupPeriod(accountId);
-        const baseDelay = isWarmup ? 5000 : 2000; // Longer delays during warm-up
-        const readingDelay = getRandomDelay(baseDelay, baseDelay + 3000);
+        const baseDelay = isWarmup ? 10000 : 5000; // 10s warmup, 5s normal (min)
+        const maxDelay = isWarmup ? 25000 : 15000; // 25s warmup, 15s normal (max)
+        const readingDelay = getRandomDelay(baseDelay, maxDelay);
         console.log(`[AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup})`);
         await sleep(readingDelay);
 
@@ -182,11 +184,12 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       );
 
       if (aiResponse) {
-        // Add delay to seem human
+        // Add delay to seem human (5-15s normal, 10-25s warmup)
         const isWarmup = await isInWarmupPeriod(accountId);
-        const baseDelay = isWarmup ? 4000 : 2000;
-        const readingDelay = getRandomDelay(baseDelay, baseDelay + 2000);
-        console.log(`[AI AutoReply] Waiting ${readingDelay}ms before responding`);
+        const baseDelay = isWarmup ? 10000 : 5000;
+        const maxDelay = isWarmup ? 25000 : 15000;
+        const readingDelay = getRandomDelay(baseDelay, maxDelay);
+        console.log(`[AI AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup})`);
         await sleep(readingDelay);
 
         // Send AI response
