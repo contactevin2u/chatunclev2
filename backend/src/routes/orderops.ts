@@ -74,11 +74,12 @@ function clearCachedToken() {
 
 /**
  * Make an authenticated request to OrderOps with 401 retry
+ * Returns the fetch Response (not Express Response)
  */
-async function orderOpsRequest(path: string, options: RequestInit = {}): Promise<Response> {
+async function orderOpsRequest(path: string, options: RequestInit = {}): Promise<globalThis.Response> {
   let token = await getOrderOpsToken();
 
-  const makeRequest = async (authToken: string) => {
+  const makeRequest = async (authToken: string): Promise<globalThis.Response> => {
     return fetch(`${ORDEROPS_API_URL}${path}`, {
       ...options,
       headers: {
@@ -89,17 +90,17 @@ async function orderOpsRequest(path: string, options: RequestInit = {}): Promise
     });
   };
 
-  let response = await makeRequest(token);
+  let fetchResponse = await makeRequest(token);
 
   // Retry once on 401 (token expired)
-  if (response.status === 401) {
+  if (fetchResponse.status === 401) {
     console.log('[OrderOps] Token expired, refreshing...');
     clearCachedToken();
     token = await getOrderOpsToken();
-    response = await makeRequest(token);
+    fetchResponse = await makeRequest(token);
   }
 
-  return response;
+  return fetchResponse;
 }
 
 router.use(authenticate);
@@ -140,22 +141,22 @@ router.post('/parse', async (req: Request, res: Response) => {
     }
 
     // Call OrderOps API with auto-retry on 401
-    const response = await orderOpsRequest('/parse/advanced', {
+    const fetchRes = await orderOpsRequest('/parse/advanced', {
       method: 'POST',
       body: JSON.stringify({ message: message.content }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('[OrderOps] API error:', response.status, errorText);
-      res.status(response.status).json({
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      console.error('[OrderOps] API error:', fetchRes.status, errorText);
+      res.status(fetchRes.status).json({
         error: 'OrderOps API error',
         details: errorText
       });
       return;
     }
 
-    const result = await response.json();
+    const result = await fetchRes.json() as any;
     const data = result.data || result;
 
     console.log('[OrderOps] Parse result:', JSON.stringify(data).substring(0, 300));
@@ -241,18 +242,18 @@ router.post('/quotation', async (req: Request, res: Response) => {
     }
 
     // Call OrderOps API with auto-retry on 401
-    const response = await orderOpsRequest('/parse/quotation', {
+    const fetchRes = await orderOpsRequest('/parse/quotation', {
       method: 'POST',
       body: JSON.stringify({ message: message.content }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      res.status(response.status).json({ error: 'OrderOps API error', details: errorText });
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      res.status(fetchRes.status).json({ error: 'OrderOps API error', details: errorText });
       return;
     }
 
-    const result = await response.json();
+    const result = await fetchRes.json() as any;
     res.json({ success: true, result });
   } catch (error: any) {
     console.error('[OrderOps] Quotation error:', error);
@@ -278,7 +279,7 @@ router.get('/contact/:contactId/orders', async (req: Request, res: Response) => 
       ORDER BY co.created_at DESC
     `, [contactId, userId]);
 
-    res.json({ success: true, orders: orders.rows });
+    res.json({ success: true, orders });
   } catch (error: any) {
     console.error('[OrderOps] Fetch orders error:', error);
     res.status(500).json({ error: error.message });
@@ -300,17 +301,17 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
     }
 
     // Fetch from OrderOps with auto-retry on 401
-    const response = await orderOpsRequest(`/orders/${orderId}`, {
+    const fetchRes = await orderOpsRequest(`/orders/${orderId}`, {
       method: 'GET',
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      res.status(response.status).json({ error: 'OrderOps API error', details: errorText });
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      res.status(fetchRes.status).json({ error: 'OrderOps API error', details: errorText });
       return;
     }
 
-    const result = await response.json();
+    const result = await fetchRes.json() as any;
     res.json({ success: true, order: result.data || result });
   } catch (error: any) {
     console.error('[OrderOps] Fetch order error:', error);
