@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
 import {
   MessageSquare,
   Smartphone,
@@ -17,6 +18,8 @@ import {
   Bot,
   Menu,
   X,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export default function DashboardLayout({
@@ -25,6 +28,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, isLoading, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -164,8 +168,32 @@ export default function DashboardLayout({
           )}
         </nav>
 
-        {/* User section */}
+        {/* Theme toggle & User section */}
         <div className="p-3 border-t border-gray-200">
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center justify-between px-3 py-2.5 mb-2 rounded-lg text-gray-600 hover:bg-gray-100 active:bg-gray-200 transition-colors"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            <span className="flex items-center space-x-3">
+              {theme === 'dark' ? (
+                <Moon className="h-5 w-5" />
+              ) : (
+                <Sun className="h-5 w-5" />
+              )}
+              <span className="text-sm">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
+            </span>
+            <div className={`relative w-10 h-5 rounded-full transition-colors ${
+              theme === 'dark' ? 'bg-green-600' : 'bg-gray-300'
+            }`}>
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                theme === 'dark' ? 'translate-x-5' : 'translate-x-0.5'
+              }`} />
+            </div>
+          </button>
+
+          {/* User info */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2 min-w-0">
               <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white text-sm font-medium flex-shrink-0">

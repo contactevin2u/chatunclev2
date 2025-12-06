@@ -2,39 +2,312 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   THEME VARIABLES - Light Mode (Default)
+   ============================================ */
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-rgb: 255, 255, 255;
+  /* Background colors */
+  --bg-primary: 255, 255, 255;
+  --bg-secondary: 249, 250, 251;
+  --bg-tertiary: 243, 244, 246;
+  --bg-chat: 229, 221, 213;
+
+  /* Text colors */
+  --text-primary: 17, 24, 39;
+  --text-secondary: 107, 114, 128;
+  --text-tertiary: 156, 163, 175;
+
+  /* Border colors */
+  --border-primary: 229, 231, 235;
+  --border-secondary: 209, 213, 219;
+
+  /* Chat bubble colors */
+  --bubble-sent: 220, 248, 198;
+  --bubble-received: 255, 255, 255;
+
+  /* Accent colors */
+  --accent-primary: 37, 99, 235;
+  --accent-success: 22, 163, 74;
+  --accent-danger: 239, 68, 68;
+
+  /* Sidebar */
+  --sidebar-bg: 255, 255, 255;
+  --sidebar-hover: 243, 244, 246;
+  --sidebar-active: 240, 253, 244;
+
+  /* Input */
+  --input-bg: 255, 255, 255;
+  --input-border: 209, 213, 219;
+
+  /* Scrollbar */
+  --scrollbar-track: 241, 241, 241;
+  --scrollbar-thumb: 193, 193, 193;
+  --scrollbar-hover: 168, 168, 168;
 }
 
+/* ============================================
+   DARK MODE VARIABLES
+   ============================================ */
+.dark {
+  /* Background colors */
+  --bg-primary: 17, 24, 39;
+  --bg-secondary: 31, 41, 55;
+  --bg-tertiary: 55, 65, 81;
+  --bg-chat: 30, 30, 30;
+
+  /* Text colors */
+  --text-primary: 243, 244, 246;
+  --text-secondary: 156, 163, 175;
+  --text-tertiary: 107, 114, 128;
+
+  /* Border colors */
+  --border-primary: 55, 65, 81;
+  --border-secondary: 75, 85, 99;
+
+  /* Chat bubble colors */
+  --bubble-sent: 0, 92, 75;
+  --bubble-received: 38, 45, 53;
+
+  /* Sidebar */
+  --sidebar-bg: 17, 24, 39;
+  --sidebar-hover: 31, 41, 55;
+  --sidebar-active: 6, 78, 59;
+
+  /* Input */
+  --input-bg: 31, 41, 55;
+  --input-border: 55, 65, 81;
+
+  /* Scrollbar */
+  --scrollbar-track: 31, 41, 55;
+  --scrollbar-thumb: 75, 85, 99;
+  --scrollbar-hover: 107, 114, 128;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-rgb));
+  color: rgb(var(--text-primary));
+  background: rgb(var(--bg-secondary));
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Custom scrollbar */
+/* ============================================
+   CUSTOM SCROLLBAR
+   ============================================ */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: rgb(var(--scrollbar-track));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: rgb(var(--scrollbar-thumb));
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: rgb(var(--scrollbar-hover));
 }
 
-/* Chat bubble styles */
+/* ============================================
+   CHAT BUBBLE STYLES
+   ============================================ */
 .chat-bubble-sent {
-  @apply bg-[#DCF8C6] rounded-lg rounded-tr-none;
+  background-color: rgb(var(--bubble-sent));
+  @apply rounded-lg rounded-tr-none;
 }
 
 .chat-bubble-received {
-  @apply bg-white rounded-lg rounded-tl-none;
+  background-color: rgb(var(--bubble-received));
+  @apply rounded-lg rounded-tl-none;
+}
+
+/* ============================================
+   DARK MODE OVERRIDES
+   ============================================ */
+.dark .bg-white {
+  background-color: rgb(var(--bg-primary)) !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: rgb(var(--bg-secondary)) !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: rgb(var(--bg-tertiary)) !important;
+}
+
+.dark .border-gray-200 {
+  border-color: rgb(var(--border-primary)) !important;
+}
+
+.dark .border-gray-100 {
+  border-color: rgb(var(--border-primary)) !important;
+}
+
+.dark .text-gray-900 {
+  color: rgb(var(--text-primary)) !important;
+}
+
+.dark .text-gray-700 {
+  color: rgb(var(--text-secondary)) !important;
+}
+
+.dark .text-gray-600 {
+  color: rgb(var(--text-secondary)) !important;
+}
+
+.dark .text-gray-500 {
+  color: rgb(var(--text-tertiary)) !important;
+}
+
+.dark .text-gray-400 {
+  color: rgb(var(--text-tertiary)) !important;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: rgb(var(--bg-secondary)) !important;
+}
+
+.dark .hover\:bg-gray-100:hover {
+  background-color: rgb(var(--bg-tertiary)) !important;
+}
+
+.dark .hover\:bg-gray-200:hover {
+  background-color: rgb(var(--bg-tertiary)) !important;
+}
+
+.dark .active\:bg-gray-100:active {
+  background-color: rgb(var(--bg-tertiary)) !important;
+}
+
+.dark .active\:bg-gray-200:active {
+  background-color: rgb(75, 85, 99) !important;
+}
+
+.dark .active\:bg-gray-300:active {
+  background-color: rgb(107, 114, 128) !important;
+}
+
+/* Input fields in dark mode */
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: rgb(var(--input-bg)) !important;
+  border-color: rgb(var(--input-border)) !important;
+  color: rgb(var(--text-primary)) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgb(var(--text-tertiary)) !important;
+}
+
+/* Chat background */
+.dark .bg-\[\#E5DDD5\] {
+  background-color: rgb(var(--bg-chat)) !important;
+}
+
+.dark .bg-\[\#F0F2F5\] {
+  background-color: rgb(var(--bg-secondary)) !important;
+}
+
+/* Shadows in dark mode */
+.dark .shadow-sm {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3) !important;
+}
+
+.dark .shadow-md {
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.3) !important;
+}
+
+.dark .shadow-lg {
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3) !important;
+}
+
+/* Dropdown/Modal backgrounds */
+.dark .bg-black\/20 {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Gray background variations */
+.dark .bg-gray-200 {
+  background-color: rgb(var(--bg-tertiary)) !important;
+}
+
+.dark .bg-gray-300 {
+  background-color: rgb(75, 85, 99) !important;
+}
+
+/* WhatsApp green tints in dark mode */
+.dark .bg-green-50 {
+  background-color: rgba(6, 78, 59, 0.3) !important;
+}
+
+.dark .bg-green-100 {
+  background-color: rgba(6, 78, 59, 0.5) !important;
+}
+
+/* Blue tints in dark mode */
+.dark .bg-blue-50 {
+  background-color: rgba(30, 58, 138, 0.3) !important;
+}
+
+.dark .bg-blue-100 {
+  background-color: rgba(30, 58, 138, 0.5) !important;
+}
+
+/* Yellow tints in dark mode */
+.dark .bg-yellow-100 {
+  background-color: rgba(113, 63, 18, 0.5) !important;
+}
+
+/* Red tints in dark mode */
+.dark .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.3) !important;
+}
+
+/* Avatar/icon backgrounds */
+.dark .bg-gray-300.rounded-full {
+  background-color: rgb(75, 85, 99) !important;
+}
+
+/* Dividers */
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(var(--border-primary)) !important;
+}
+
+/* ============================================
+   THEME TOGGLE ANIMATION
+   ============================================ */
+.theme-toggle-icon {
+  transition: transform 0.3s ease, opacity 0.2s ease;
+}
+
+.dark .theme-toggle-sun {
+  transform: rotate(180deg);
+  opacity: 0;
+}
+
+.dark .theme-toggle-moon {
+  transform: rotate(0deg);
+  opacity: 1;
+}
+
+.theme-toggle-sun {
+  transform: rotate(0deg);
+  opacity: 1;
+}
+
+.theme-toggle-moon {
+  transform: rotate(-180deg);
+  opacity: 0;
 }
