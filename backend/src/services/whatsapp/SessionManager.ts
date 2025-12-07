@@ -1675,16 +1675,82 @@ class SessionManager {
         contentType = 'image';
         content = messageContent?.imageMessage?.caption || '[Image]';
         mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        // Download and upload image media
+        try {
+          const imgBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (imgBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadImage(Buffer.from(imgBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded image to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(imgBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored image as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download image:', e);
+        }
         break;
       case 'videoMessage':
         contentType = 'video';
         content = messageContent?.videoMessage?.caption || '[Video]';
         mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        // Download and upload video media
+        try {
+          const videoSize = messageContent?.videoMessage?.fileLength;
+          const maxSize = isCloudinaryConfigured() ? 100 * 1024 * 1024 : 5 * 1024 * 1024;
+          if (!videoSize || Number(videoSize) < maxSize) {
+            const vidBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+            if (vidBuffer) {
+              if (isCloudinaryConfigured()) {
+                const cloudUrl = await uploadVideo(Buffer.from(vidBuffer), msgKey.id || undefined);
+                if (cloudUrl) {
+                  mediaUrl = cloudUrl;
+                  console.log(`[WA][Group] Uploaded video to Cloudinary: ${cloudUrl}`);
+                }
+              }
+              if (!mediaUrl && Number(videoSize || 0) < 5 * 1024 * 1024) {
+                const base64 = Buffer.from(vidBuffer).toString('base64');
+                mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+                console.log(`[WA][Group] Stored video as Base64: ${base64.length} chars`);
+              }
+            }
+          } else {
+            console.log(`[WA][Group] Skipping large video: ${videoSize} bytes`);
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download video:', e);
+        }
         break;
       case 'audioMessage':
         contentType = 'audio';
         content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
         mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        // Download and upload audio media
+        try {
+          const audioBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (audioBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadAudio(Buffer.from(audioBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded audio to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(audioBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored audio as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download audio:', e);
+        }
         break;
       case 'documentMessage':
       case 'documentWithCaptionMessage':
@@ -1695,6 +1761,27 @@ class SessionManager {
       case 'stickerMessage':
         contentType = 'sticker';
         content = '[Sticker]';
+        mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
+        // Download and upload sticker media
+        try {
+          const stickerBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (stickerBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadSticker(Buffer.from(stickerBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded sticker to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(stickerBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored sticker as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download sticker:', e);
+        }
         break;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
@@ -1819,18 +1906,112 @@ class SessionManager {
       case 'imageMessage':
         contentType = 'image';
         content = messageContent?.imageMessage?.caption || '[Image]';
+        mediaMimeType = messageContent?.imageMessage?.mimetype || 'image/jpeg';
+        // Download and upload image
+        try {
+          const imgBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (imgBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadImage(Buffer.from(imgBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded outgoing image to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(imgBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored outgoing image as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download outgoing image:', e);
+        }
         break;
       case 'videoMessage':
         contentType = 'video';
         content = messageContent?.videoMessage?.caption || '[Video]';
+        mediaMimeType = messageContent?.videoMessage?.mimetype || 'video/mp4';
+        // Download and upload video (skip if too large)
+        try {
+          const videoSize = messageContent?.videoMessage?.fileLength || 0;
+          if (Number(videoSize) < 10 * 1024 * 1024) {
+            const vidBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+            if (vidBuffer) {
+              if (isCloudinaryConfigured()) {
+                const cloudUrl = await uploadVideo(Buffer.from(vidBuffer), msgKey.id || undefined);
+                if (cloudUrl) {
+                  mediaUrl = cloudUrl;
+                  console.log(`[WA][Group] Uploaded outgoing video to Cloudinary: ${cloudUrl}`);
+                }
+              }
+              if (!mediaUrl && Number(videoSize) < 2 * 1024 * 1024) {
+                const base64 = Buffer.from(vidBuffer).toString('base64');
+                mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+                console.log(`[WA][Group] Stored outgoing video as Base64: ${base64.length} chars`);
+              }
+            }
+          } else {
+            console.log(`[WA][Group] Skipping large outgoing video: ${videoSize} bytes`);
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download outgoing video:', e);
+        }
         break;
       case 'audioMessage':
         contentType = 'audio';
         content = messageContent?.audioMessage?.ptt ? '[Voice Note]' : '[Audio]';
+        mediaMimeType = messageContent?.audioMessage?.mimetype || 'audio/ogg';
+        // Download and upload audio
+        try {
+          const audioBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (audioBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadAudio(Buffer.from(audioBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded outgoing audio to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(audioBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored outgoing audio as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download outgoing audio:', e);
+        }
         break;
       case 'documentMessage':
         contentType = 'document';
         content = messageContent?.documentMessage?.fileName || '[Document]';
+        mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+        break;
+      case 'stickerMessage':
+        contentType = 'sticker';
+        content = '[Sticker]';
+        mediaMimeType = messageContent?.stickerMessage?.mimetype || 'image/webp';
+        // Download and upload sticker
+        try {
+          const stickerBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (stickerBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadSticker(Buffer.from(stickerBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded outgoing sticker to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              const base64 = Buffer.from(stickerBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored outgoing sticker as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download outgoing sticker:', e);
+        }
         break;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
