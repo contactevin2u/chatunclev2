@@ -21,6 +21,8 @@ import { processAutoReply } from '../autoReplyProcessor';
 import {
   preSendCheck,
   postSendRecord,
+  preSendCheckGroup,
+  postSendRecordGroup,
   getTypingDuration,
   sleep,
   getRandomDelay,
@@ -1747,6 +1749,150 @@ class SessionManager {
       return result.key.id;
     } catch (error) {
       console.error(`[WA] Failed to send message:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send a message to a group
+   * Uses group-specific anti-ban measures (rate limiting only, no new contact tracking)
+   */
+  async sendGroupMessage(
+    accountId: string,
+    groupJid: string,
+    payload: MessagePayload,
+    options: { skipAntiBan?: boolean } = {}
+  ): Promise<string> {
+    const session = this.sessions.get(accountId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // Wait for session to be fully synced and ready
+    try {
+      await this.waitForReady(accountId, 30000);
+    } catch (error) {
+      console.error(`[WA] Session not ready for account ${accountId}:`, error);
+      throw new Error('Session is still syncing - please wait a moment and try again');
+    }
+
+    const sock = session.socket;
+
+    // Check if socket is connected
+    if (!sock.user) {
+      throw new Error('Session not connected - please reconnect');
+    }
+
+    // Validate group JID format
+    if (!groupJid.endsWith('@g.us')) {
+      throw new Error('Invalid group JID format');
+    }
+
+    console.log(`[WA][Group] Sending ${payload.type} message to ${groupJid}`);
+
+    // === ANTI-BAN MEASURES FOR GROUPS ===
+    if (!options.skipAntiBan) {
+      // Group pre-send check (rate limiting only, no new contact check)
+      const preCheck = await preSendCheckGroup(accountId);
+      if (!preCheck.canSend) {
+        console.warn(`[WA][Group] Anti-ban blocked send: ${preCheck.reason}`);
+        throw new Error(`Message blocked: ${preCheck.reason}`);
+      }
+
+      // Typing indicator for groups (shorter duration)
+      const messageLength = payload.content?.length || 50;
+      const typingDuration = Math.min(getTypingDuration(messageLength), 1500); // Max 1.5s for groups
+      console.log(`[AntiBan][Group] Typing for ${typingDuration}ms`);
+
+      try {
+        await sock.sendPresenceUpdate('composing', groupJid);
+        await sleep(typingDuration);
+        await sock.sendPresenceUpdate('paused', groupJid);
+      } catch (e) {
+        console.log(`[WA][Group] Typing indicator skipped:`, e);
+      }
+    }
+
+    let result;
+
+    try {
+      switch (payload.type) {
+        case 'text':
+          if (!payload.content) {
+            throw new Error('Text content is required');
+          }
+          result = await sock.sendMessage(groupJid, { text: payload.content });
+          break;
+
+        case 'image':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for image');
+          }
+          result = await sock.sendMessage(groupJid, {
+            image: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          });
+          break;
+
+        case 'video':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for video');
+          }
+          result = await sock.sendMessage(groupJid, {
+            video: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          });
+          break;
+
+        case 'audio':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for audio');
+          }
+          result = await sock.sendMessage(groupJid, {
+            audio: { url: payload.mediaUrl },
+            mimetype: payload.mediaMimeType || 'audio/mp4',
+            ptt: true,
+          });
+          break;
+
+        case 'document':
+          if (!payload.mediaUrl) {
+            throw new Error('Media URL is required for document');
+          }
+          result = await sock.sendMessage(groupJid, {
+            document: { url: payload.mediaUrl },
+            mimetype: payload.mediaMimeType || 'application/octet-stream',
+            fileName: payload.content || 'document',
+          });
+          break;
+
+        default:
+          throw new Error('Unsupported message type');
+      }
+
+      console.log(`[WA][Group] Message sent successfully:`, {
+        id: result?.key?.id,
+        remoteJid: result?.key?.remoteJid,
+        fromMe: result?.key?.fromMe,
+      });
+
+      if (!result?.key?.id) {
+        throw new Error('Message sent but no ID returned');
+      }
+
+      // Post-send recording for groups (rate limiting only)
+      if (!options.skipAntiBan) {
+        postSendRecordGroup(accountId);
+        try {
+          await sock.sendPresenceUpdate('unavailable', groupJid);
+        } catch (e) {
+          // Ignore presence errors
+        }
+      }
+
+      return result.key.id;
+    } catch (error) {
+      console.error(`[WA][Group] Failed to send message:`, error);
       throw error;
     }
   }

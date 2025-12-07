@@ -65,22 +65,37 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
 });
 
 // Send a message (optimistic UI - returns immediately, sends in background)
+// Supports both 1:1 and group conversations
 router.post('/conversation/:conversationId', async (req: Request, res: Response) => {
   try {
     const { content, contentType = 'text', mediaUrl, mediaMimeType } = req.body;
     const agentId = req.user!.userId;
 
-    // Verify ownership and get details (including jid_type for LID vs PN format)
+    // Verify ownership and get details - handle both 1:1 (contact_id) and group (group_id) conversations
     const conversation = await queryOne(`
-      SELECT c.id, c.whatsapp_account_id, ct.wa_id, ct.jid_type, c.first_response_at
+      SELECT c.id, c.whatsapp_account_id, c.is_group, c.first_response_at,
+             ct.wa_id, ct.jid_type,
+             g.group_jid
       FROM conversations c
-      JOIN contacts ct ON c.contact_id = ct.id
+      LEFT JOIN contacts ct ON c.contact_id = ct.id
+      LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
       WHERE c.id = $1 AND wa.user_id = $2
     `, [req.params.conversationId, agentId]);
 
     if (!conversation) {
       res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Validate we have a recipient
+    const isGroup = conversation.is_group || false;
+    if (!isGroup && !conversation.wa_id) {
+      res.status(400).json({ error: 'No contact associated with this conversation' });
+      return;
+    }
+    if (isGroup && !conversation.group_jid) {
+      res.status(400).json({ error: 'No group JID associated with this conversation' });
       return;
     }
 
@@ -127,19 +142,36 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     // === SEND IN BACKGROUND: Anti-ban delays happen here, not blocking UI ===
     (async () => {
       try {
-        const waMessageId = await sessionManager.sendMessage(
-          conversation.whatsapp_account_id,
-          conversation.wa_id,
-          {
-            type: contentType,
-            content,
-            mediaUrl,
-            mediaMimeType,
-          },
-          {
-            jidType: conversation.jid_type || 'pn',  // Use stored JID type for correct format
-          }
-        );
+        let waMessageId: string;
+
+        if (isGroup) {
+          // Send to group using group-specific anti-ban
+          waMessageId = await sessionManager.sendGroupMessage(
+            conversation.whatsapp_account_id,
+            conversation.group_jid,
+            {
+              type: contentType,
+              content,
+              mediaUrl,
+              mediaMimeType,
+            }
+          );
+        } else {
+          // Send to 1:1 contact using standard anti-ban
+          waMessageId = await sessionManager.sendMessage(
+            conversation.whatsapp_account_id,
+            conversation.wa_id,
+            {
+              type: contentType,
+              content,
+              mediaUrl,
+              mediaMimeType,
+            },
+            {
+              jidType: conversation.jid_type || 'pn',  // Use stored JID type for correct format
+            }
+          );
+        }
 
         // Update message with WhatsApp ID and 'sent' status
         await execute(`
@@ -159,7 +191,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
         await execute(`
           INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
           VALUES ($1, 'message_sent', 'conversation', $2, $3)
-        `, [agentId, req.params.conversationId, JSON.stringify({ content_type: contentType, response_time_ms: responseTimeMs })]);
+        `, [agentId, req.params.conversationId, JSON.stringify({ content_type: contentType, response_time_ms: responseTimeMs, is_group: isGroup })]);
 
       } catch (error: any) {
         console.error('Background send error:', error);

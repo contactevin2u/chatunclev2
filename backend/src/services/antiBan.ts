@@ -415,5 +415,71 @@ export async function postSendRecord(accountId: string, contactWaId: string): Pr
   recordBatchMessage(accountId);
 }
 
+/**
+ * Check if a JID is a group JID
+ */
+export function isGroupJid(jid: string): boolean {
+  return jid.endsWith('@g.us');
+}
+
+/**
+ * Pre-send check for group messages
+ * Groups don't need new contact tracking, but still need rate limiting
+ */
+export async function preSendCheckGroup(accountId: string): Promise<{ canSend: boolean; reason?: string }> {
+  // Check batch cooldown
+  const batchCheck = needsBatchCooldown(accountId);
+  if (batchCheck.needed) {
+    console.log(`[AntiBan] Group batch cooldown needed: ${batchCheck.waitMs}ms`);
+    await sleep(batchCheck.waitMs);
+  }
+
+  // Wait for rate limit
+  await waitForRateLimit(accountId);
+
+  return { canSend: true };
+}
+
+/**
+ * Post-send recording for group messages
+ * Only records rate limiting, not new contact tracking
+ */
+export function postSendRecordGroup(accountId: string): void {
+  recordMessageSent(accountId, false); // Never count as new contact
+  recordBatchMessage(accountId);
+}
+
+/**
+ * Universal pre-send check - works for both 1:1 and group messages
+ * Detects group JIDs automatically
+ */
+export async function preSendCheckUniversal(
+  accountId: string,
+  jid: string
+): Promise<{ canSend: boolean; reason?: string }> {
+  if (isGroupJid(jid)) {
+    return preSendCheckGroup(accountId);
+  }
+  // For 1:1 contacts, extract wa_id from JID (remove suffix)
+  const waId = jid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
+  return preSendCheck(accountId, waId);
+}
+
+/**
+ * Universal post-send recording - works for both 1:1 and group messages
+ */
+export async function postSendRecordUniversal(
+  accountId: string,
+  jid: string
+): Promise<void> {
+  if (isGroupJid(jid)) {
+    postSendRecordGroup(accountId);
+    return;
+  }
+  // For 1:1 contacts, extract wa_id from JID
+  const waId = jid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
+  await postSendRecord(accountId, waId);
+}
+
 // Export configuration for reference
 export const ANTI_BAN_CONFIG = RATE_LIMITS;
