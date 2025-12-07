@@ -464,6 +464,91 @@ class SessionManager {
       console.log(`  - progress: ${progress}`);
       console.log(`  - syncType: ${syncType}`);
 
+      // Process chats from history - extract group chats and fetch metadata
+      if (chats && chats.length > 0) {
+        let groupChatCount = 0;
+        for (const chat of chats) {
+          try {
+            const chatJid = chat.id;
+            if (!chatJid || !isJidGroup(chatJid)) continue;
+
+            // This is a group chat - try to fetch metadata and create group record
+            groupChatCount++;
+            console.log(`[WA][Group] Found group chat in history: ${chatJid}`);
+
+            // Try to get group metadata from socket
+            try {
+              const metadata = await sock.groupMetadata(chatJid);
+              if (metadata) {
+                // Upsert group into database
+                const group = await queryOne(
+                  `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                   ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+                     name = COALESCE(EXCLUDED.name, groups.name),
+                     description = COALESCE(EXCLUDED.description, groups.description),
+                     owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
+                     participant_count = COALESCE(EXCLUDED.participant_count, groups.participant_count),
+                     is_announce = COALESCE(EXCLUDED.is_announce, groups.is_announce),
+                     is_restrict = COALESCE(EXCLUDED.is_restrict, groups.is_restrict),
+                     updated_at = NOW()
+                   RETURNING *`,
+                  [
+                    accountId,
+                    chatJid,
+                    metadata.subject || chat.name || null,
+                    metadata.desc || null,
+                    metadata.owner || null,
+                    metadata.participants?.length || 0,
+                    metadata.announce || false,
+                    metadata.restrict || false,
+                  ]
+                );
+
+                // Create conversation for this group
+                await queryOne(
+                  `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+                   VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
+                   ON CONFLICT DO NOTHING
+                   RETURNING *`,
+                  [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
+                );
+
+                // Cache the metadata
+                groupMetadataCache.set(accountId, chatJid, metadata as any);
+                console.log(`[WA][Group] Created group from history: ${metadata.subject}`);
+              }
+            } catch (metaError) {
+              // Can't fetch metadata - create minimal group record from chat info
+              console.log(`[WA][Group] Could not fetch metadata for ${chatJid}, creating minimal record`);
+              const group = await queryOne(
+                `INSERT INTO groups (whatsapp_account_id, group_jid, name)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+                   name = COALESCE(EXCLUDED.name, groups.name),
+                   updated_at = NOW()
+                 RETURNING *`,
+                [accountId, chatJid, chat.name || extractGroupId(chatJid)]
+              );
+
+              await queryOne(
+                `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+                 VALUES ($1, $2, TRUE, NOW())
+                 ON CONFLICT DO NOTHING
+                 RETURNING *`,
+                [accountId, group.id]
+              );
+            }
+
+            // Small delay between group metadata fetches
+            await sleep(100);
+          } catch (error) {
+            console.error(`[WA][Group] Error processing group chat from history:`, error);
+          }
+        }
+        console.log(`[WA] Found ${groupChatCount} group chats in history`);
+      }
+
       // Process contacts from history using Baileys jid helpers
       if (contacts && contacts.length > 0) {
         let processedContactCount = 0;
@@ -599,6 +684,80 @@ class SessionManager {
     });
 
     // ============ GROUP EVENT HANDLERS ============
+
+    // Handle new groups discovered (full metadata)
+    sock.ev.on('groups.upsert', async (groupMetadatas) => {
+      console.log(`[WA] groups.upsert - count: ${groupMetadatas.length}`);
+
+      for (const metadata of groupMetadatas) {
+        try {
+          const groupJid = metadata.id;
+          if (!groupJid || !isJidGroup(groupJid)) continue;
+
+          console.log(`[WA][Group] New group discovered: ${metadata.subject} (${extractGroupId(groupJid)})`);
+
+          // Upsert group into database
+          const group = await queryOne(
+            `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+               name = COALESCE(EXCLUDED.name, groups.name),
+               description = COALESCE(EXCLUDED.description, groups.description),
+               owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
+               participant_count = COALESCE(EXCLUDED.participant_count, groups.participant_count),
+               is_announce = COALESCE(EXCLUDED.is_announce, groups.is_announce),
+               is_restrict = COALESCE(EXCLUDED.is_restrict, groups.is_restrict),
+               updated_at = NOW()
+             RETURNING *`,
+            [
+              accountId,
+              groupJid,
+              metadata.subject || null,
+              metadata.desc || null,
+              metadata.owner || null,
+              metadata.participants?.length || 0,
+              metadata.announce || false,
+              metadata.restrict || false,
+            ]
+          );
+
+          // Upsert participants
+          if (metadata.participants && metadata.participants.length > 0) {
+            for (const participant of metadata.participants) {
+              const pJid = typeof participant === 'string' ? participant : participant.id;
+              const isAdmin = typeof participant === 'object' && (participant.admin === 'admin' || participant.admin === 'superadmin');
+              const isSuperAdmin = typeof participant === 'object' && participant.admin === 'superadmin';
+
+              await execute(
+                `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (group_id, participant_jid) DO UPDATE SET
+                   is_admin = EXCLUDED.is_admin,
+                   is_superadmin = EXCLUDED.is_superadmin,
+                   updated_at = NOW()`,
+                [group.id, pJid, isAdmin, isSuperAdmin]
+              );
+            }
+          }
+
+          // Create conversation for this group if doesn't exist
+          await queryOne(
+            `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+             VALUES ($1, $2, TRUE, NOW())
+             ON CONFLICT DO NOTHING
+             RETURNING *`,
+            [accountId, group.id]
+          );
+
+          // Update cache
+          groupMetadataCache.set(accountId, groupJid, metadata as any);
+
+          console.log(`[WA][Group] Upserted group ${metadata.subject} with ${metadata.participants?.length || 0} participants`);
+        } catch (error) {
+          console.error(`[WA][Group] Error upserting group:`, error);
+        }
+      }
+    });
 
     // Handle group metadata updates (name, description, profile pic, etc.)
     sock.ev.on('groups.update', async (updates) => {
