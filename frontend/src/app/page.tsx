@@ -89,18 +89,18 @@ export default function HomePage() {
               </div>
               <span className="text-xl font-bold text-gray-900">ChatUncle</span>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
               <Link
                 href="/login"
-                className="text-gray-600 hover:text-gray-900 font-medium"
+                className="hidden sm:block text-gray-600 hover:text-gray-900 font-medium"
               >
                 Login
               </Link>
               <Link
                 href="/login"
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                className="bg-green-600 text-white px-3 py-2 sm:px-4 rounded-lg hover:bg-green-700 transition-colors font-medium text-sm sm:text-base"
               >
-                Get Started Free
+                Get Started
               </Link>
             </div>
           </div>
@@ -108,13 +108,13 @@ export default function HomePage() {
       </nav>
 
       {/* Hero Section */}
-      <header className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
+      <header className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-24">
         <div className="text-center">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
             Malaysia&apos;s #1 WhatsApp Business
             <span className="text-green-600"> CRM Platform</span>
           </h1>
-          <p className="mt-6 text-xl text-gray-600 max-w-3xl mx-auto">
+          <p className="mt-4 sm:mt-6 text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto">
             Manage multiple WhatsApp accounts, automate customer responses with AI,
             and boost your sales. Trusted by 500+ Malaysian businesses including healthcare,
             e-commerce, and service industries.
@@ -134,7 +134,7 @@ export default function HomePage() {
               See Features
             </Link>
           </div>
-          <div className="mt-8 flex items-center justify-center space-x-6 text-sm text-gray-500">
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 text-sm text-gray-500">
             <div className="flex items-center space-x-1">
               <Check className="h-5 w-5 text-green-500" aria-hidden="true" />
               <span>No credit card required</span>
@@ -154,7 +154,7 @@ export default function HomePage() {
       {/* Trust Badges */}
       <section className="bg-white py-8 border-y border-gray-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap items-center justify-center gap-8 text-gray-400">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-4 sm:gap-8 text-gray-400">
             <div className="flex items-center space-x-2">
               <Award className="h-6 w-6 text-yellow-500" aria-hidden="true" />
               <span className="font-medium">Superbrands 2025</span>
@@ -176,12 +176,12 @@ export default function HomePage() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
+      <section id="features" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-24">
+        <div className="text-center mb-10 sm:mb-16">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
             Powerful Features for Your WhatsApp Business
           </h2>
-          <p className="mt-4 text-xl text-gray-600 max-w-2xl mx-auto">
+          <p className="mt-4 text-base sm:text-xl text-gray-600 max-w-2xl mx-auto">
             Everything you need to manage customer conversations at scale.
             Built for Malaysian businesses by AA Alive Sdn Bhd.
           </p>
@@ -204,14 +204,14 @@ export default function HomePage() {
       </section>
 
       {/* Benefits Section */}
-      <section className="bg-green-600 py-16 lg:py-24">
+      <section className="bg-green-600 py-12 sm:py-16 lg:py-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="lg:flex lg:items-center lg:justify-between">
             <div className="lg:w-1/2">
-              <h2 className="text-3xl sm:text-4xl font-bold text-white">
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white">
                 Why Malaysian Businesses Choose ChatUncle
               </h2>
-              <p className="mt-4 text-xl text-green-100">
+              <p className="mt-4 text-base sm:text-xl text-green-100">
                 Join hundreds of Malaysian businesses already using ChatUncle
                 to transform their WhatsApp customer service.
               </p>
@@ -233,16 +233,16 @@ export default function HomePage() {
       </section>
 
       {/* Use Cases Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-24">
+        <div className="text-center mb-10 sm:mb-16">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-900">
             Perfect for Every Industry
           </h2>
-          <p className="mt-4 text-xl text-gray-600 max-w-2xl mx-auto">
+          <p className="mt-4 text-base sm:text-xl text-gray-600 max-w-2xl mx-auto">
             ChatUncle helps businesses across Malaysia streamline their WhatsApp communication.
           </p>
         </div>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
           <article className="bg-gradient-to-br from-blue-50 to-white p-6 rounded-xl border border-blue-100">
             <h3 className="font-semibold text-gray-900 mb-2">Healthcare</h3>
             <p className="text-sm text-gray-600">
@@ -271,12 +271,12 @@ export default function HomePage() {
       </section>
 
       {/* CTA Section */}
-      <section className="bg-gray-900 py-16 lg:py-24">
+      <section className="bg-gray-900 py-12 sm:py-16 lg:py-24">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-white">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white">
             Ready to Transform Your WhatsApp Business?
           </h2>
-          <p className="mt-4 text-xl text-gray-300">
+          <p className="mt-4 text-base sm:text-xl text-gray-300">
             Start your free trial today. No credit card required.
           </p>
           <Link
@@ -292,9 +292,9 @@ export default function HomePage() {
       {/* Footer with Backlinks */}
       <footer className="bg-gray-50 border-t border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid md:grid-cols-4 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8">
             {/* Company Info */}
-            <div className="md:col-span-2">
+            <div className="sm:col-span-2 md:col-span-2">
               <div className="flex items-center space-x-2 mb-4">
                 <div className="bg-green-600 p-2 rounded-lg">
                   <MessageSquare className="h-5 w-5 text-white" aria-hidden="true" />
@@ -389,11 +389,11 @@ export default function HomePage() {
 
           {/* Bottom Bar */}
           <div className="mt-12 pt-8 border-t border-gray-200">
-            <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+            <div className="flex flex-col items-center text-center sm:flex-row sm:justify-between sm:text-left space-y-4 sm:space-y-0">
               <p className="text-sm text-gray-500">
                 &copy; {new Date().getFullYear()} AA Alive Sdn Bhd. All rights reserved.
               </p>
-              <div className="flex items-center space-x-6 text-sm text-gray-500">
+              <div className="flex items-center text-sm text-gray-500">
                 <span>Made with care in Malaysia</span>
               </div>
             </div>
