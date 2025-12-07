@@ -494,17 +494,16 @@ class SessionManager {
         console.log(`[WA] Processed ${processedContactCount} contacts from history`);
       }
 
-      // Process messages from history
+      // Process messages from history (including groups)
       if (messages && messages.length > 0) {
         let processedCount = 0;
+        let groupProcessedCount = 0;
         for (const msg of messages) {
           if (!msg.key) continue;
           const remoteJid = msg.key.remoteJid;
 
-          // Skip status broadcasts and groups using Baileys helpers
+          // Skip status broadcasts
           if (!remoteJid || isJidBroadcast(remoteJid)) continue;
-          if (isJidGroup(remoteJid)) continue;
-          if (!isUserJid(remoteJid)) continue;
 
           try {
             // Check if message already exists
@@ -513,6 +512,20 @@ class SessionManager {
               [msg.key.id]
             );
             if (existingMsg) continue;
+
+            // Handle group messages
+            if (isJidGroup(remoteJid)) {
+              if (msg.key.fromMe) {
+                await this.handleGroupOutgoingMessage(accountId, userId, msg, false);
+              } else {
+                await this.handleGroupIncomingMessage(accountId, userId, msg, false);
+              }
+              groupProcessedCount++;
+              continue;
+            }
+
+            // Handle 1:1 messages
+            if (!isUserJid(remoteJid)) continue;
 
             if (msg.key.fromMe) {
               // Outgoing message sent from phone
@@ -529,7 +542,7 @@ class SessionManager {
             }
           }
         }
-        console.log(`[WA] Processed ${processedCount} messages from history`);
+        console.log(`[WA] Processed ${processedCount} messages + ${groupProcessedCount} group messages from history`);
       }
 
       // Notify frontend about sync progress
