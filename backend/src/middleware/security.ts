@@ -19,6 +19,8 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: false,
+  // Trust proxy is set in index.ts, but skip validation as backup
+  validate: { xForwardedForHeader: false },
   keyGenerator: (req: Request) => {
     // Use IP address for rate limiting
     return req.ip || req.socket.remoteAddress || 'unknown';
@@ -35,6 +37,8 @@ export const apiRateLimiter = rateLimit({
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
+  // Trust proxy is set in index.ts, but skip validation as backup
+  validate: { xForwardedForHeader: false },
   skip: (req: Request) => {
     // Skip rate limiting for health checks
     return req.path === '/health';
@@ -51,6 +55,8 @@ export const messageRateLimiter = rateLimit({
   message: { error: 'Message rate limit exceeded. Please wait before sending more messages.' },
   standardHeaders: true,
   legacyHeaders: false,
+  // Trust proxy is set in index.ts, but skip validation as backup
+  validate: { xForwardedForHeader: false },
   keyGenerator: (req: Request) => {
     // Rate limit per user, not per IP
     return req.user?.userId || req.ip || 'unknown';

@@ -15,9 +15,30 @@ export function initializeSocket(httpServer: HttpServer): Server {
 
         // Normalize origins by removing trailing slashes
         const normalizedOrigin = origin.replace(/\/$/, '');
-        const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
 
-        if (normalizedOrigin === allowedOrigin || config.nodeEnv === 'development') {
+        // Allow in development
+        if (config.nodeEnv === 'development') {
+          return callback(null, true);
+        }
+
+        // Allow chatuncle domains
+        if (normalizedOrigin.includes('chatuncle.my') || normalizedOrigin.includes('chatuncle')) {
+          return callback(null, true);
+        }
+
+        // Allow Vercel domains (production and preview)
+        if (normalizedOrigin.includes('vercel.app')) {
+          return callback(null, true);
+        }
+
+        // Allow localhost for development
+        if (normalizedOrigin.includes('localhost')) {
+          return callback(null, true);
+        }
+
+        // Allow configured origin
+        const allowedOrigin = config.corsOrigin.replace(/\/$/, '');
+        if (normalizedOrigin === allowedOrigin) {
           return callback(null, true);
         }
 

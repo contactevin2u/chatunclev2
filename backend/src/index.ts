@@ -31,6 +31,10 @@ import groupsRoutes from './routes/groups';
 const app = express();
 const httpServer = createServer(app);
 
+// Trust proxy - REQUIRED for Render/Vercel (reverse proxy)
+// This fixes X-Forwarded-For header issues with rate limiting
+app.set('trust proxy', 1);
+
 // Initialize Socket.io
 initializeSocket(httpServer);
 
