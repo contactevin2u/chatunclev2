@@ -1,0 +1,33 @@
+# ChatUncle - WhatsApp Business CRM Platform
+# https://chatuncle.my
+# AA Alive Sdn Bhd
+
+User-agent: *
+Allow: /
+Allow: /login
+Disallow: /dashboard/*
+Disallow: /admin/*
+Disallow: /api/*
+
+# Sitemap location
+Sitemap: https://chatuncle.my/sitemap.xml
+
+# Crawl delay for respectful crawling
+Crawl-delay: 1
+
+# Specific bot rules
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: Baiduspider
+Allow: /
+
+# Block bad bots
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /

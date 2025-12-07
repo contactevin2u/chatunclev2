@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { MessageSquare } from 'lucide-react';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -29,14 +30,14 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
-          <div className="flex justify-center">
+          <Link href="/" className="inline-flex justify-center">
             <div className="bg-whatsapp-dark p-3 rounded-full">
-              <MessageSquare className="h-8 w-8 text-white" />
+              <MessageSquare className="h-8 w-8 text-white" aria-label="ChatUncle Logo" />
             </div>
-          </div>
-          <h2 className="mt-6 text-3xl font-bold text-gray-900">
+          </Link>
+          <h1 className="mt-6 text-3xl font-bold text-gray-900">
             Welcome to ChatUncle
-          </h2>
+          </h1>
           <p className="mt-2 text-sm text-gray-600">
             Sign in to manage your WhatsApp conversations
           </p>
@@ -44,7 +45,7 @@ export default function LoginPage() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
+            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm" role="alert">
               {error}
             </div>
           )}
@@ -97,6 +98,13 @@ export default function LoginPage() {
             Contact administrator to create an account
           </p>
         </form>
+
+        {/* Back to home link */}
+        <div className="text-center">
+          <Link href="/" className="text-sm text-green-600 hover:text-green-700">
+            &larr; Back to homepage
+          </Link>
+        </div>
       </div>
     </div>
   );
