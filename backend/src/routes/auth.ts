@@ -5,19 +5,28 @@ import { query, queryOne } from '../config/database';
 import { config } from '../config/env';
 import { User, JwtPayload } from '../types';
 import { authenticate } from '../middleware/auth';
+import { authRateLimiter } from '../middleware/security';
+import { validateEmail } from '../utils/validation';
 
 const router = Router();
 
 // Public registration disabled - use admin panel to create users
 // POST /admin/agents (requires admin authentication)
 
-// Login
-router.post('/login', async (req: Request, res: Response) => {
+// Login - with rate limiting to prevent brute force attacks
+router.post('/login', authRateLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
       res.status(400).json({ error: 'Email and password are required' });
+      return;
+    }
+
+    // Validate email format
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      res.status(400).json({ error: emailValidation.error });
       return;
     }
 
@@ -28,6 +37,7 @@ router.post('/login', async (req: Request, res: Response) => {
     );
 
     if (!user) {
+      // Use same error message to prevent user enumeration
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
@@ -62,7 +72,7 @@ router.post('/login', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ error: 'Authentication failed. Please try again.' });
   }
 });
 

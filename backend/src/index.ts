@@ -5,6 +5,7 @@ import { config } from './config/env';
 import { initializeSocket } from './services/socket';
 import { sessionManager } from './services/whatsapp/SessionManager';
 import { startScheduledMessageProcessor } from './services/scheduledMessageProcessor';
+import { securityHeaders, apiRateLimiter, sanitizeRequest, secureErrorHandler } from './middleware/security';
 
 // Routes
 import authRoutes from './routes/auth';
@@ -32,6 +33,9 @@ const httpServer = createServer(app);
 
 // Initialize Socket.io
 initializeSocket(httpServer);
+
+// Security middleware - apply before other middleware
+app.use(securityHeaders);
 
 // Middleware
 app.use(cors({
@@ -70,6 +74,12 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Request sanitization
+app.use(sanitizeRequest);
+
+// API rate limiting (applies to all API routes)
+app.use('/api', apiRateLimiter);
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -96,11 +106,8 @@ app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/orderops', orderopsRoutes);
 app.use('/api/groups', groupsRoutes);
 
-// Error handler
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+// Secure error handler - doesn't expose internal details in production
+app.use(secureErrorHandler);
 
 // Start server
 httpServer.listen(config.port, async () => {

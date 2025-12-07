@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate, requireAdmin } from '../middleware/auth';
 import { User } from '../types';
+import { validatePassword, validateEmail, validateName } from '../utils/validation';
 
 const router = Router();
 
@@ -31,7 +32,7 @@ router.get('/agents', async (req: Request, res: Response) => {
     res.json({ agents });
   } catch (error) {
     console.error('List agents error:', error);
-    res.status(500).json({ error: 'Failed to list agents' });
+    res.status(500).json({ error: 'Failed to retrieve agents' });
   }
 });
 
@@ -42,6 +43,33 @@ router.post('/agents', async (req: Request, res: Response) => {
 
     if (!email || !password || !name) {
       res.status(400).json({ error: 'Email, password, and name are required' });
+      return;
+    }
+
+    // Validate email
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      res.status(400).json({ error: emailValidation.error });
+      return;
+    }
+
+    // Validate password complexity
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      res.status(400).json({ error: passwordValidation.error });
+      return;
+    }
+
+    // Validate name
+    const nameValidation = validateName(name);
+    if (!nameValidation.valid) {
+      res.status(400).json({ error: nameValidation.error });
+      return;
+    }
+
+    // Validate role
+    if (role !== 'agent' && role !== 'admin') {
+      res.status(400).json({ error: 'Invalid role. Must be "agent" or "admin"' });
       return;
     }
 
@@ -86,8 +114,29 @@ router.patch('/agents/:id', async (req: Request, res: Response) => {
       return;
     }
 
+    // Validate name if provided
+    if (name) {
+      const nameValidation = validateName(name);
+      if (!nameValidation.valid) {
+        res.status(400).json({ error: nameValidation.error });
+        return;
+      }
+    }
+
+    // Validate role if provided
+    if (role && role !== 'agent' && role !== 'admin') {
+      res.status(400).json({ error: 'Invalid role. Must be "agent" or "admin"' });
+      return;
+    }
+
     let passwordHash = existing.password_hash;
     if (password) {
+      // Validate password complexity
+      const passwordValidation = validatePassword(password);
+      if (!passwordValidation.valid) {
+        res.status(400).json({ error: passwordValidation.error });
+        return;
+      }
       passwordHash = await bcrypt.hash(password, 12);
     }
 

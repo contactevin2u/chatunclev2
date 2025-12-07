@@ -9,11 +9,37 @@ import { config } from './env';
  * - Statement timeout to prevent long-running queries
  * - Idle timeout to release unused connections
  * - Connection limits based on Render's PostgreSQL tier
+ *
+ * SSL Configuration Notes:
+ * - Render.com managed PostgreSQL uses SSL but with certificates that require
+ *   rejectUnauthorized: false for internal connections
+ * - The connection is still encrypted via SSL/TLS
+ * - If using external PostgreSQL with proper CA certificates, set
+ *   DATABASE_SSL_CA environment variable with the CA certificate
  */
+
+// Determine SSL configuration based on environment
+function getSSLConfig(): false | { rejectUnauthorized: boolean; ca?: string } {
+  if (config.nodeEnv !== 'production') {
+    return false;
+  }
+
+  // If a CA certificate is provided, use strict SSL validation
+  if (process.env.DATABASE_SSL_CA) {
+    return {
+      rejectUnauthorized: true,
+      ca: process.env.DATABASE_SSL_CA,
+    };
+  }
+
+  // For Render.com and similar managed services that use internal SSL
+  // The connection is still encrypted, just without CA verification
+  return { rejectUnauthorized: false };
+}
 
 const poolConfig: PoolConfig = {
   connectionString: config.databaseUrl,
-  ssl: config.nodeEnv === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: getSSLConfig(),
 
   // Connection pool settings
   max: 20, // Maximum number of clients in the pool (Render free tier allows 97)
