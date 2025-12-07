@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2 } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { orderops } from '@/lib/api';
 
@@ -14,27 +14,125 @@ interface MessageThreadProps {
   isGroup?: boolean;
 }
 
+// Confirmation Modal Component
+function ConfirmModal({
+  isOpen,
+  onClose,
+  onConfirm,
+  messagePreview,
+  isLoading,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  messagePreview: string;
+  isLoading: boolean;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <Package className="h-5 w-5 text-purple-600" />
+            <h3 className="text-lg font-semibold text-gray-900">Send to OrderOps</h3>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="p-1 hover:bg-gray-100 rounded-full disabled:opacity-50"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        <div className="mb-5">
+          <p className="text-sm text-gray-600 mb-3">
+            Are you sure you want to send this message to OrderOps for order parsing?
+          </p>
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+            <p className="text-sm text-gray-700 line-clamp-4 whitespace-pre-wrap">
+              {messagePreview}
+            </p>
+          </div>
+          <p className="text-xs text-amber-600 mt-2">
+            This will create an order in OrderOps system.
+          </p>
+        </div>
+
+        <div className="flex space-x-3">
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 text-sm font-medium"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm font-medium flex items-center justify-center space-x-2"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Sending...</span>
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" />
+                <span>Confirm & Send</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MessageThread({ messages, conversationId, isGroup = false }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { token } = useAuth();
   const [parsingId, setParsingId] = useState<string | null>(null);
   const [parseResult, setParseResult] = useState<{ id: string; success: boolean; data?: any } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean; messageId: string; content: string }>({
+    isOpen: false,
+    messageId: '',
+    content: '',
+  });
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendToOrderOps = async (messageId: string) => {
+  // Open confirmation modal
+  const handleRequestOrderOps = (messageId: string, content: string) => {
+    setConfirmModal({ isOpen: true, messageId, content });
+  };
+
+  // Close confirmation modal
+  const handleCloseModal = () => {
+    if (parsingId) return; // Don't close while loading
+    setConfirmModal({ isOpen: false, messageId: '', content: '' });
+  };
+
+  // Confirmed - send to OrderOps
+  const handleConfirmSend = async () => {
     if (!token || !conversationId) return;
 
+    const { messageId } = confirmModal;
     setParsingId(messageId);
     setParseResult(null);
 
     try {
       const result = await orderops.parseMessage(token, messageId, conversationId);
       setParseResult({ id: messageId, success: result.success, data: result.result });
+      setConfirmModal({ isOpen: false, messageId: '', content: '' });
     } catch (error: any) {
       setParseResult({ id: messageId, success: false, data: error.message });
+      setConfirmModal({ isOpen: false, messageId: '', content: '' });
     } finally {
       setParsingId(null);
     }
@@ -188,7 +286,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                     </div>
                   ) : (
                     <button
-                      onClick={() => handleSendToOrderOps(message.id)}
+                      onClick={() => handleRequestOrderOps(message.id, message.content || '')}
                       disabled={parsingId === message.id}
                       className="flex items-center space-x-1 text-xs text-purple-600 hover:text-purple-700 disabled:text-gray-400"
                     >
@@ -212,6 +310,15 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
         );
       })}
       <div ref={bottomRef} />
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={handleCloseModal}
+        onConfirm={handleConfirmSend}
+        messagePreview={confirmModal.content}
+        isLoading={parsingId === confirmModal.messageId}
+      />
     </div>
   );
 }
