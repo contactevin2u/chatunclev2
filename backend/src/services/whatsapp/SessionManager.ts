@@ -124,6 +124,7 @@ interface SessionState {
 
 class SessionManager {
   private sessions: Map<string, SessionState> = new Map();
+  private deletingAccounts: Set<string> = new Set(); // Track accounts being deleted to prevent race conditions
   private isShuttingDown: boolean = false;
 
   constructor() {
@@ -203,8 +204,8 @@ class SessionManager {
       logger,
       // Use Browsers helper for proper browser identification (recommended by Baileys docs)
       browser: Browsers.ubuntu('ChatUncle'),
-      // Enable full history sync for retrieving old messages
-      syncFullHistory: true,
+      // Disable full history sync for faster connection (only recent messages)
+      syncFullHistory: false,
       // Don't mark as online on connect - allows user to receive notifications on phone
       markOnlineOnConnect: false,
       // Disable link preview generation (reduces processing overhead)
@@ -323,6 +324,12 @@ class SessionManager {
 
     // Handle incoming messages - both real-time and history
     sock.ev.on('messages.upsert', async (upsert) => {
+      // Skip processing if account is being deleted (prevents foreign key errors)
+      if (this.isAccountDeleting(accountId)) {
+        console.log(`[WA] Skipping messages.upsert - account ${accountId} is being deleted`);
+        return;
+      }
+
       const { messages, type } = upsert;
       console.log(`[WA] messages.upsert - type: ${type}, count: ${messages.length}`);
 
@@ -418,6 +425,12 @@ class SessionManager {
 
     // Handle message status updates (sent, delivered, read)
     sock.ev.on('messages.update', async (updates) => {
+      // Skip processing if account is being deleted (prevents foreign key errors)
+      if (this.isAccountDeleting(accountId)) {
+        console.log(`[WA] Skipping messages.update - account ${accountId} is being deleted`);
+        return;
+      }
+
       console.log(`[WA] messages.update - count: ${updates.length}`);
       for (const update of updates) {
         const waMessageId = update.key.id;
@@ -654,6 +667,12 @@ class SessionManager {
 
     // Handle contacts using Baileys jid helpers
     sock.ev.on('contacts.upsert', async (contacts) => {
+      // Skip processing if account is being deleted (prevents foreign key errors)
+      if (this.isAccountDeleting(accountId)) {
+        console.log(`[WA] Skipping contacts.upsert - account ${accountId} is being deleted`);
+        return;
+      }
+
       console.log(`[WA] contacts.upsert - count: ${contacts.length}`);
 
       for (const contact of contacts) {
@@ -689,6 +708,12 @@ class SessionManager {
 
     // Handle new groups discovered (full metadata)
     sock.ev.on('groups.upsert', async (groupMetadatas) => {
+      // Skip processing if account is being deleted (prevents foreign key errors)
+      if (this.isAccountDeleting(accountId)) {
+        console.log(`[WA] Skipping groups.upsert - account ${accountId} is being deleted`);
+        return;
+      }
+
       console.log(`[WA] groups.upsert - count: ${groupMetadatas.length}`);
 
       for (const metadata of groupMetadatas) {
@@ -2429,6 +2454,10 @@ class SessionManager {
   }
 
   async destroySession(accountId: string): Promise<void> {
+    // Mark account as being deleted FIRST to prevent async handlers from processing
+    this.deletingAccounts.add(accountId);
+    console.log(`[WA] Marked account ${accountId} as deleting`);
+
     const session = this.sessions.get(accountId);
     if (session) {
       console.log(`[WA] Destroying session ${accountId}`);
@@ -2444,6 +2473,16 @@ class SessionManager {
       groupMetadataCache.cleanup(accountId);
       messageQueue.cleanup(accountId);
     }
+
+    // Keep in deletingAccounts set for a while to catch any straggling async handlers
+    setTimeout(() => {
+      this.deletingAccounts.delete(accountId);
+      console.log(`[WA] Removed account ${accountId} from deleting set`);
+    }, 10000); // 10 seconds should be enough for any pending operations
+  }
+
+  isAccountDeleting(accountId: string): boolean {
+    return this.deletingAccounts.has(accountId);
   }
 
   private async cleanupSession(accountId: string): Promise<void> {
