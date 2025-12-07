@@ -704,7 +704,7 @@ export default function InboxPage() {
                         <Tag className="h-5 w-5" />
                       </button>
                       {showLabelDropdown && (
-                        <div className="absolute right-0 top-full mt-1 w-64 md:w-56 bg-white rounded-lg shadow-lg border z-50">
+                        <div className="absolute right-0 top-full mt-1 w-56 sm:w-64 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-lg border z-50">
                           <div className="p-2.5 md:p-2 text-xs font-medium text-gray-500 border-b">Add Label</div>
                           {/* Create new label inline */}
                           <div className="p-2.5 md:p-2 border-b">
@@ -772,7 +772,7 @@ export default function InboxPage() {
                 </div>
                 {/* Labels display - only for 1:1 conversations */}
                 {!selectedConversation.is_group && getContactLabels().length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2 ml-13">
+                  <div className="flex flex-wrap gap-1 mt-2 ml-11 sm:ml-14">
                     {getContactLabels().map((label) => (
                       <span
                         key={label.id}
@@ -793,7 +793,7 @@ export default function InboxPage() {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-2 md:p-4">
+              <div className="flex-1 overflow-y-auto p-2 sm:p-3 md:p-4">
                 <MessageThread
                   messages={messagesList}
                   conversationId={getEffectiveConversationId() || undefined}
@@ -802,7 +802,7 @@ export default function InboxPage() {
               </div>
 
               {/* Input */}
-              <div className="bg-[#F0F2F5] p-2 md:p-3">
+              <div className="bg-[#F0F2F5] p-2 sm:p-3">
                 <MessageInput onSend={handleSendMessage} disabled={isSending} />
               </div>
             </>

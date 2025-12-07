@@ -102,13 +102,13 @@ export default function ConversationList({
                 }
               }}
               className={clsx(
-                'w-full px-3 md:px-4 py-3 md:py-3 flex items-start space-x-3 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left',
+                'w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-start space-x-2.5 sm:space-x-3 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left',
                 isSelected(conversation) && 'bg-gray-100'
               )}
             >
               {/* Avatar */}
               <div className={clsx(
-                'flex-shrink-0 w-11 h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-medium text-sm md:text-base relative',
+                'flex-shrink-0 w-10 h-10 sm:w-11 sm:h-11 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-medium text-sm md:text-base relative',
                 conversation.is_group ? 'bg-blue-500' : 'bg-gray-300'
               )}>
                 {conversation.is_group ? (
@@ -132,12 +132,12 @@ export default function ConversationList({
                     {isUnifiedGroup && (
                       <button
                         onClick={(e) => toggleGroupExpanded(conversation.id, e)}
-                        className="flex-shrink-0 p-0.5 hover:bg-gray-200 rounded"
+                        className="flex-shrink-0 p-1 sm:p-0.5 hover:bg-gray-200 rounded touch-manipulation"
                       >
                         {isExpanded ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
+                          <ChevronDown className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-500" />
                         ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-gray-500" />
+                          <ChevronRight className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-gray-500" />
                         )}
                       </button>
                     )}
@@ -222,13 +222,13 @@ export default function ConversationList({
 
             {/* Expanded account list for unified groups */}
             {isUnifiedGroup && isExpanded && conversation.accounts && (
-              <div className="bg-gray-50 border-l-2 border-purple-300 ml-4">
+              <div className="bg-gray-50 border-l-2 border-purple-300 ml-3 sm:ml-4">
                 {conversation.accounts.map((account: GroupAccount) => (
                   <button
                     key={account.conversation_id}
                     onClick={() => onSelect(conversation, account.conversation_id)}
                     className={clsx(
-                      'w-full px-4 py-2 flex items-center justify-between hover:bg-gray-100 transition-colors text-left',
+                      'w-full px-3 sm:px-4 py-2 sm:py-2.5 flex items-center justify-between hover:bg-gray-100 transition-colors text-left',
                       selectedId === account.conversation_id && 'bg-purple-50'
                     )}
                   >

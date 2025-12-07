@@ -31,8 +31,8 @@ function ConfirmModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3 sm:p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm sm:max-w-md p-4 sm:p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-2">
             <Package className="h-5 w-5 text-purple-600" />
@@ -191,7 +191,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
           >
             <div
               className={clsx(
-                'max-w-[70%] px-3 py-2 shadow-sm',
+                'max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-3 py-2 shadow-sm',
                 isSent ? 'chat-bubble-sent' : 'chat-bubble-received'
               )}
             >
@@ -215,8 +215,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 <img
                   src={message.media_url}
                   alt="Image"
-                  className="rounded-lg mb-2"
-                  style={{ maxWidth: '220px', maxHeight: '220px', objectFit: 'contain' }}
+                  className="rounded-lg mb-2 max-w-full sm:max-w-[220px] max-h-[200px] sm:max-h-[220px] object-contain"
                 />
               )}
 
@@ -225,8 +224,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 <img
                   src={message.media_url}
                   alt="Sticker"
-                  className="mb-1"
-                  style={{ maxWidth: '120px', maxHeight: '120px', objectFit: 'contain' }}
+                  className="mb-1 max-w-[100px] sm:max-w-[120px] max-h-[100px] sm:max-h-[120px] object-contain"
                 />
               )}
 
@@ -235,8 +233,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 <audio
                   controls
                   src={message.media_url}
-                  className="mb-2"
-                  style={{ maxWidth: '200px', height: '36px' }}
+                  className="mb-2 w-full max-w-[200px] h-9"
                 />
               )}
 
@@ -245,8 +242,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 <video
                   controls
                   src={message.media_url}
-                  className="rounded-lg mb-2"
-                  style={{ maxWidth: '220px', maxHeight: '180px', objectFit: 'contain' }}
+                  className="rounded-lg mb-2 max-w-full sm:max-w-[220px] max-h-[160px] sm:max-h-[180px] object-contain"
                 />
               )}
 
@@ -259,7 +255,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
 
               {/* Time and status */}
               <div className="flex items-center justify-end space-x-1 mt-1">
-                <span className="text-[10px] text-gray-500">
+                <span className="text-[10px] sm:text-xs text-gray-500">
                   {format(new Date(message.created_at), 'HH:mm')}
                 </span>
                 {isSent && getStatusIcon(message.status)}

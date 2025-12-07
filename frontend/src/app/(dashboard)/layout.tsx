@@ -86,10 +86,10 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen flex bg-gray-100">
-      {/* Menu toggle button - fixed position */}
+      {/* Menu toggle button - fixed position, hidden on lg+ screens */}
       <button
         onClick={() => setSidebarOpen(true)}
-        className={`fixed top-3 left-3 z-40 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50 transition-all ${
+        className={`fixed top-3 left-3 z-40 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50 transition-all lg:hidden ${
           sidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
         title="Open menu"
@@ -97,17 +97,17 @@ export default function DashboardLayout({
         <Menu className="h-5 w-5 text-gray-600" />
       </button>
 
-      {/* Overlay */}
+      {/* Overlay - only on mobile/tablet */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/20 z-40"
+          className="fixed inset-0 bg-black/20 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar - slide out panel */}
+      {/* Sidebar - slide out panel on mobile, permanent on lg+ */}
       <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50 transform transition-transform duration-200 ${
+        className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50 transform transition-transform duration-200 lg:translate-x-0 lg:static lg:z-auto lg:flex-shrink-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -121,7 +121,7 @@ export default function DashboardLayout({
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 lg:hidden"
             title="Close menu"
           >
             <X className="h-5 w-5" />

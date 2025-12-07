@@ -139,12 +139,12 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
       {showTemplates && filteredTemplates.length > 0 && (
         <div
           ref={dropdownRef}
-          className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-lg border border-gray-200 max-h-64 overflow-y-auto z-50"
+          className="absolute bottom-full left-0 right-0 mb-2 bg-white rounded-lg shadow-lg border border-gray-200 max-h-48 sm:max-h-64 overflow-y-auto z-50"
         >
           <div className="p-2 border-b border-gray-100 bg-gray-50 flex items-center space-x-2">
             <FileText className="h-4 w-4 text-gray-500" />
             <span className="text-sm font-medium text-gray-700">Quick Replies</span>
-            <span className="text-xs text-gray-400 ml-auto">↑↓ navigate • Enter select • Esc close</span>
+            <span className="text-xs text-gray-400 ml-auto hidden sm:inline">↑↓ navigate • Enter select • Esc close</span>
           </div>
           {filteredTemplates.map((template, index) => (
             <button
@@ -212,7 +212,7 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
         </button>
 
         {/* Input */}
-        <div className="flex-1 bg-white rounded-2xl md:rounded-lg border border-gray-200 px-3 md:px-4 py-2">
+        <div className="flex-1 bg-white rounded-full sm:rounded-2xl border border-gray-200 px-3 sm:px-4 py-2">
           <textarea
             ref={inputRef}
             value={message}
@@ -221,7 +221,7 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
             placeholder="Type a message..."
             disabled={disabled}
             rows={1}
-            className="w-full resize-none outline-none text-gray-900 placeholder-gray-500 disabled:opacity-50 text-sm md:text-base"
+            className="w-full resize-none outline-none text-gray-900 placeholder-gray-500 disabled:opacity-50 text-sm sm:text-base"
             style={{ minHeight: '22px', maxHeight: '100px' }}
           />
         </div>
@@ -231,16 +231,16 @@ export default function MessageInput({ onSend, disabled }: MessageInputProps) {
           <button
             type="submit"
             disabled={disabled}
-            className="p-2.5 md:p-2 bg-whatsapp-dark text-white rounded-full hover:bg-whatsapp-teal active:scale-95 transition-colors disabled:opacity-50"
+            className="p-2.5 sm:p-3 bg-whatsapp-dark text-white rounded-full hover:bg-whatsapp-teal active:scale-95 transition-colors disabled:opacity-50"
           >
-            <Send className="h-5 w-5 md:h-6 md:w-6" />
+            <Send className="h-5 w-5 sm:h-6 sm:w-6" />
           </button>
         ) : (
           <button
             type="button"
-            className="p-2.5 md:p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 active:bg-gray-300 transition-colors"
+            className="p-2.5 sm:p-3 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 active:bg-gray-300 transition-colors"
           >
-            <Mic className="h-5 w-5 md:h-6 md:w-6" />
+            <Mic className="h-5 w-5 sm:h-6 sm:w-6" />
           </button>
         )}
       </form>
