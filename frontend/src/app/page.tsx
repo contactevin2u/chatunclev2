@@ -311,11 +311,12 @@ export default function HomePage() {
 
             {/* Quick Links */}
             <div>
-              <h3 className="font-semibold text-gray-900 mb-4">Product</h3>
+              <h3 className="font-semibold text-gray-900 mb-4">Resources</h3>
               <ul className="space-y-2 text-gray-600">
                 <li><Link href="#features" className="hover:text-green-600">Features</Link></li>
+                <li><Link href="/blog" className="hover:text-green-600">Blog & Guides</Link></li>
+                <li><Link href="/partners" className="hover:text-green-600">Our Partners</Link></li>
                 <li><Link href="/login" className="hover:text-green-600">Login</Link></li>
-                <li><Link href="/login" className="hover:text-green-600">Get Started</Link></li>
               </ul>
             </div>
 
