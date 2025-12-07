@@ -103,7 +103,7 @@ export const metadata: Metadata = {
     },
   },
   verification: {
-    google: 'your-google-verification-code',
+    google: 'ds6ObyWlMtYcOameMllgGyaNGINslEp5FX0ytYlPlLI',
   },
   category: 'Business Software',
 };
