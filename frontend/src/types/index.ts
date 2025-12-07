@@ -39,7 +39,7 @@ export interface Label {
 export interface Conversation {
   id: string;
   whatsapp_account_id: string;
-  contact_id: string;
+  contact_id: string | null;
   last_message_at: string | null;
   unread_count: number;
   contact_name: string | null;
@@ -47,9 +47,18 @@ export interface Conversation {
   profile_pic_url: string | null;
   account_name: string | null;
   last_message: string | null;
+  last_message_sender: string | null;
   labels?: Label[];
   created_at: string;
   updated_at: string;
+  // Group fields
+  is_group: boolean;
+  group_id: string | null;
+  group_jid: string | null;
+  group_name: string | null;
+  participant_count: number | null;
+  group_pic_url: string | null;
+  display_name: string | null;
 }
 
 export interface Message {
@@ -63,6 +72,9 @@ export interface Message {
   media_mime_type: string | null;
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   created_at: string;
+  // Group message fields
+  sender_jid: string | null;
+  sender_name: string | null;
 }
 
 export interface Template {

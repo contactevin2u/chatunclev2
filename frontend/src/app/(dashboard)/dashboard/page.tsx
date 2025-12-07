@@ -9,7 +9,7 @@ import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
 import InternalNotes from '@/components/chat/InternalNotes';
-import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft } from 'lucide-react';
+import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -135,22 +135,25 @@ export default function InboxPage() {
 
   // Filter conversations based on search query and label filter
   const filteredConversations = conversationsList.filter(conv => {
-    // Search filter - search by name, phone, or last message
+    // Search filter - search by name, phone, group name, or last message
     const query = searchQuery.toLowerCase().trim();
     if (query) {
       const nameMatch = conv.contact_name?.toLowerCase().includes(query);
       const phoneMatch = conv.contact_phone?.toLowerCase().includes(query);
+      const groupNameMatch = conv.group_name?.toLowerCase().includes(query);
+      const displayNameMatch = conv.display_name?.toLowerCase().includes(query);
       const messageMatch = conv.last_message?.toLowerCase().includes(query);
       // Also search by label name
       const labelMatch = conv.labels?.some(l => l.name.toLowerCase().includes(query));
 
-      if (!nameMatch && !phoneMatch && !messageMatch && !labelMatch) {
+      if (!nameMatch && !phoneMatch && !groupNameMatch && !displayNameMatch && !messageMatch && !labelMatch) {
         return false;
       }
     }
 
-    // Label filter
+    // Label filter (only for 1:1 conversations)
     if (filterLabelId) {
+      if (conv.is_group) return false; // Groups don't have labels
       const hasLabel = conv.labels?.some(l => l.id === filterLabelId);
       if (!hasLabel) return false;
     }
@@ -489,13 +492,34 @@ export default function InboxPage() {
                     >
                       <ArrowLeft className="h-5 w-5 text-gray-600" />
                     </button>
-                    <div className="w-9 h-9 md:w-10 md:h-10 bg-gray-300 rounded-full flex items-center justify-center text-sm md:text-base font-medium text-gray-600">
-                      {selectedConversation.contact_name?.charAt(0).toUpperCase() ||
+                    <div className={`w-9 h-9 md:w-10 md:h-10 rounded-full flex items-center justify-center text-sm md:text-base font-medium ${
+                      selectedConversation.is_group ? 'bg-blue-500 text-white' : 'bg-gray-300 text-gray-600'
+                    }`}>
+                      {selectedConversation.is_group ? (
+                        <Users className="h-4 w-4 md:h-5 md:w-5" />
+                      ) : (
+                        selectedConversation.contact_name?.charAt(0).toUpperCase() ||
                         selectedConversation.contact_phone?.charAt(0) ||
-                        '?'}
+                        '?'
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
-                      {isEditingName ? (
+                      {selectedConversation.is_group ? (
+                        // Group header - no editing
+                        <>
+                          <div className="flex items-center space-x-2">
+                            <h2 className="font-medium text-gray-900 truncate text-sm md:text-base">
+                              {selectedConversation.group_name || selectedConversation.display_name || 'Group'}
+                            </h2>
+                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">
+                              Group
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 truncate">
+                            {selectedConversation.participant_count || 0} participants
+                          </p>
+                        </>
+                      ) : isEditingName ? (
                         <div className="flex items-center space-x-1 md:space-x-2">
                           <input
                             type="text"
@@ -523,26 +547,29 @@ export default function InboxPage() {
                           </button>
                         </div>
                       ) : (
-                        <div className="flex items-center space-x-2 group">
-                          <h2 className="font-medium text-gray-900 truncate text-sm md:text-base">
-                            {selectedConversation.contact_name || selectedConversation.contact_phone}
-                          </h2>
-                          <button
-                            onClick={startEditingName}
-                            className="p-1.5 md:p-1 hover:bg-gray-200 rounded md:opacity-0 md:group-hover:opacity-100 transition-opacity active:bg-gray-300"
-                            title="Edit contact name"
-                          >
-                            <Edit2 className="h-3.5 w-3.5 md:h-3 md:w-3 text-gray-500" />
-                          </button>
-                        </div>
+                        <>
+                          <div className="flex items-center space-x-2 group">
+                            <h2 className="font-medium text-gray-900 truncate text-sm md:text-base">
+                              {selectedConversation.contact_name || selectedConversation.contact_phone}
+                            </h2>
+                            <button
+                              onClick={startEditingName}
+                              className="p-1.5 md:p-1 hover:bg-gray-200 rounded md:opacity-0 md:group-hover:opacity-100 transition-opacity active:bg-gray-300"
+                              title="Edit contact name"
+                            >
+                              <Edit2 className="h-3.5 w-3.5 md:h-3 md:w-3 text-gray-500" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-gray-500 truncate">
+                            {selectedConversation.contact_phone}
+                          </p>
+                        </>
                       )}
-                      <p className="text-xs text-gray-500 truncate">
-                        {selectedConversation.contact_phone}
-                      </p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-1 md:space-x-2">
-                    {/* Label dropdown */}
+                    {/* Label dropdown - only for 1:1 conversations */}
+                    {!selectedConversation.is_group && (
                     <div className="relative">
                       <button
                         onClick={() => setShowLabelDropdown(!showLabelDropdown)}
@@ -608,6 +635,7 @@ export default function InboxPage() {
                         </div>
                       )}
                     </div>
+                    )}
                     <button
                       onClick={() => setShowNotes(!showNotes)}
                       className={`p-2.5 md:p-2 rounded-lg transition-colors active:scale-95 ${
@@ -619,8 +647,8 @@ export default function InboxPage() {
                     </button>
                   </div>
                 </div>
-                {/* Labels display */}
-                {getContactLabels().length > 0 && (
+                {/* Labels display - only for 1:1 conversations */}
+                {!selectedConversation.is_group && getContactLabels().length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2 ml-13">
                     {getContactLabels().map((label) => (
                       <span
@@ -643,7 +671,11 @@ export default function InboxPage() {
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-2 md:p-4">
-                <MessageThread messages={messagesList} conversationId={selectedConversation?.id} />
+                <MessageThread
+                  messages={messagesList}
+                  conversationId={selectedConversation?.id}
+                  isGroup={selectedConversation?.is_group || false}
+                />
               </div>
 
               {/* Input */}

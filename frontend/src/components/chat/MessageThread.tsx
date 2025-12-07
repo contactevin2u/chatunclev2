@@ -11,9 +11,10 @@ import { orderops } from '@/lib/api';
 interface MessageThreadProps {
   messages: Message[];
   conversationId?: string;
+  isGroup?: boolean;
 }
 
-export default function MessageThread({ messages, conversationId }: MessageThreadProps) {
+export default function MessageThread({ messages, conversationId, isGroup = false }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { token } = useAuth();
   const [parsingId, setParsingId] = useState<string | null>(null);
@@ -96,6 +97,13 @@ export default function MessageThread({ messages, conversationId }: MessageThrea
                 isSent ? 'chat-bubble-sent' : 'chat-bubble-received'
               )}
             >
+              {/* Sender name for group messages */}
+              {isGroup && !isSent && message.sender_name && (
+                <p className="text-xs font-medium text-blue-600 mb-1">
+                  {message.sender_name}
+                </p>
+              )}
+
               {/* Media indicator */}
               {message.content_type !== 'text' && (
                 <div className="flex items-center space-x-1 text-gray-500 mb-1">
