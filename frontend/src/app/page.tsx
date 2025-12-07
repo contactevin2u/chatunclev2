@@ -14,6 +14,7 @@ import {
   Star,
   Zap,
   Globe,
+  Award,
 } from 'lucide-react';
 
 export const metadata: Metadata = {
@@ -155,6 +156,10 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-wrap items-center justify-center gap-8 text-gray-400">
             <div className="flex items-center space-x-2">
+              <Award className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+              <span className="font-medium">Superbrands 2025</span>
+            </div>
+            <div className="flex items-center space-x-2">
               <Shield className="h-6 w-6" aria-hidden="true" />
               <span className="font-medium">SSM Registered</span>
             </div>
@@ -165,10 +170,6 @@ export default function HomePage() {
             <div className="flex items-center space-x-2">
               <Users className="h-6 w-6" aria-hidden="true" />
               <span className="font-medium">500+ Businesses</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Zap className="h-6 w-6" aria-hidden="true" />
-              <span className="font-medium">99.9% Uptime</span>
             </div>
           </div>
         </div>

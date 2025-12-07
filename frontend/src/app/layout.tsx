@@ -144,6 +144,7 @@ const organizationSchema = {
     contactType: 'customer service',
     availableLanguage: ['English', 'Malay'],
   },
+  award: 'Superbrands Malaysia 2025',
 };
 
 // WebApplication Schema Markup
