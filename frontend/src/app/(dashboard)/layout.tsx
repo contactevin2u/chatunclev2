@@ -33,6 +33,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true); // Collapsed by default on desktop
 
   // Check if we're on the main inbox page (for focused mode)
   const isInboxPage = pathname === '/dashboard';
@@ -86,30 +87,39 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen flex bg-gray-100">
-      {/* Menu toggle button - fixed position, hidden on lg+ screens */}
+      {/* Menu toggle button - visible on mobile and when collapsed on desktop */}
       <button
-        onClick={() => setSidebarOpen(true)}
-        className={`fixed top-3 left-3 z-40 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50 transition-all lg:hidden ${
-          sidebarOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
-        title="Open menu"
+        onClick={() => {
+          if (window.innerWidth >= 1024) {
+            setSidebarCollapsed(!sidebarCollapsed);
+          } else {
+            setSidebarOpen(true);
+          }
+        }}
+        className={`fixed top-3 left-3 z-40 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50 transition-all ${
+          sidebarOpen ? 'opacity-0 pointer-events-none lg:opacity-100 lg:pointer-events-auto' : 'opacity-100'
+        } ${!sidebarCollapsed ? 'lg:left-[260px]' : ''}`}
+        title="Toggle menu"
       >
         <Menu className="h-5 w-5 text-gray-600" />
       </button>
 
-      {/* Overlay - only on mobile/tablet */}
-      {sidebarOpen && (
+      {/* Overlay - show when sidebar is open on any screen */}
+      {(sidebarOpen || !sidebarCollapsed) && (
         <div
-          className="fixed inset-0 bg-black/20 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          className={`fixed inset-0 bg-black/20 z-40 ${sidebarOpen ? '' : 'hidden lg:block'}`}
+          onClick={() => {
+            setSidebarOpen(false);
+            setSidebarCollapsed(true);
+          }}
         />
       )}
 
-      {/* Sidebar - slide out panel on mobile, permanent on lg+ */}
+      {/* Sidebar - slide out panel on mobile, collapsible on lg+ */}
       <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50 transform transition-transform duration-200 lg:translate-x-0 lg:static lg:z-auto lg:flex-shrink-0 ${
+        className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 flex flex-col z-50 transform transition-transform duration-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        } ${sidebarCollapsed ? 'lg:-translate-x-full' : 'lg:translate-x-0'}`}
       >
         {/* Header */}
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
@@ -120,8 +130,11 @@ export default function DashboardLayout({
             <span className="text-sm font-semibold text-gray-900">ChatUncle</span>
           </div>
           <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 lg:hidden"
+            onClick={() => {
+              setSidebarOpen(false);
+              setSidebarCollapsed(true);
+            }}
+            className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
             title="Close menu"
           >
             <X className="h-5 w-5" />

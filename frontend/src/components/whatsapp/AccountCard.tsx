@@ -80,15 +80,14 @@ export default function AccountCard({ account, onReconnect, onDelete }: AccountC
         </p>
 
         <div className="flex items-center space-x-2">
-          {account.status === 'disconnected' && (
-            <button
-              onClick={onReconnect}
-              className="flex items-center space-x-1 px-3 py-1.5 text-sm text-whatsapp-dark hover:bg-whatsapp-light/10 rounded-lg transition-colors"
-            >
-              <RefreshCw className="h-4 w-4" />
-              <span>Reconnect</span>
-            </button>
-          )}
+          {/* Always show reconnect/rescan button - useful if session expired */}
+          <button
+            onClick={onReconnect}
+            className="flex items-center space-x-1 px-3 py-1.5 text-sm text-whatsapp-dark hover:bg-whatsapp-light/10 rounded-lg transition-colors"
+          >
+            <RefreshCw className="h-4 w-4" />
+            <span>{account.status === 'connected' ? 'Rescan QR' : 'Reconnect'}</span>
+          </button>
           <button
             onClick={onDelete}
             className="flex items-center space-x-1 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
