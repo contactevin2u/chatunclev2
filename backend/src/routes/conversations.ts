@@ -7,9 +7,10 @@ const router = Router();
 router.use(authenticate);
 
 // List conversations for user's accounts (includes both 1:1 and group conversations)
+// Use ?unifyGroups=true to merge same groups across accounts
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { accountId, unreadOnly, groupsOnly } = req.query;
+    const { accountId, unreadOnly, groupsOnly, unifyGroups } = req.query;
 
     // Build query that handles both 1:1 and group conversations
     let sql = `
@@ -33,6 +34,7 @@ router.get('/', async (req: Request, res: Response) => {
         g.participant_count,
         g.profile_pic_url as group_pic_url,
         -- Account info
+        wa.id as wa_account_id,
         wa.name as account_name,
         -- Last message with sender info for groups
         (
@@ -96,8 +98,8 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
-    // Transform response
-    const result = conversations.map((conv: any) => ({
+    // Transform conversations
+    const transformed = conversations.map((conv: any) => ({
       id: conv.id,
       whatsapp_account_id: conv.whatsapp_account_id,
       is_group: conv.is_group || false,
@@ -105,6 +107,7 @@ router.get('/', async (req: Request, res: Response) => {
       unread_count: conv.unread_count,
       created_at: conv.created_at,
       account_name: conv.account_name,
+      account_id: conv.wa_account_id,
       last_message: conv.last_message_data?.content || null,
       last_message_sender: conv.last_message_data?.sender_name || null,
       // 1:1 contact fields
@@ -124,7 +127,79 @@ router.get('/', async (req: Request, res: Response) => {
       display_name: conv.is_group ? conv.group_name : (conv.contact_name || conv.contact_phone || conv.wa_id),
     }));
 
-    res.json({ conversations: result });
+    // If unifyGroups is enabled, merge group conversations by group_jid
+    if (unifyGroups === 'true') {
+      const groupsByJid = new Map<string, any[]>();
+      const nonGroups: any[] = [];
+
+      for (const conv of transformed) {
+        if (conv.is_group && conv.group_jid) {
+          const existing = groupsByJid.get(conv.group_jid) || [];
+          existing.push(conv);
+          groupsByJid.set(conv.group_jid, existing);
+        } else {
+          nonGroups.push(conv);
+        }
+      }
+
+      // Create unified group entries
+      const unifiedGroups: any[] = [];
+      for (const [groupJid, groupConvs] of groupsByJid.entries()) {
+        // Sort by last_message_at to get most recent
+        groupConvs.sort((a, b) => {
+          const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+          const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+          return bTime - aTime;
+        });
+
+        const mostRecent = groupConvs[0];
+        const totalUnread = groupConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0);
+
+        // Build accounts array with their conversation details
+        const accounts = groupConvs.map(c => ({
+          conversation_id: c.id,
+          account_id: c.account_id,
+          account_name: c.account_name,
+          unread_count: c.unread_count,
+          last_message_at: c.last_message_at,
+        }));
+
+        unifiedGroups.push({
+          // Use the group_jid as the unified ID
+          id: `unified_${groupJid}`,
+          is_unified_group: true,
+          is_group: true,
+          group_jid: groupJid,
+          group_name: mostRecent.group_name,
+          group_pic_url: mostRecent.group_pic_url,
+          participant_count: mostRecent.participant_count,
+          display_name: mostRecent.group_name,
+          // Aggregated data
+          total_unread: totalUnread,
+          account_count: accounts.length,
+          accounts: accounts,
+          // Most recent message info
+          last_message_at: mostRecent.last_message_at,
+          last_message: mostRecent.last_message,
+          last_message_sender: mostRecent.last_message_sender,
+          last_message_account: mostRecent.account_name,
+          // For compatibility - use first account's conversation as default
+          default_conversation_id: mostRecent.id,
+          whatsapp_account_id: mostRecent.whatsapp_account_id,
+        });
+      }
+
+      // Combine and sort by last_message_at
+      const result = [...nonGroups, ...unifiedGroups].sort((a, b) => {
+        const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+        const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+        return bTime - aTime;
+      });
+
+      res.json({ conversations: result, unified: true });
+    } else {
+      res.json({ conversations: transformed });
+    }
   } catch (error) {
     console.error('List conversations error:', error);
     res.status(500).json({ error: 'Failed to list conversations' });

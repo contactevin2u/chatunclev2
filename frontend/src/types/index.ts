@@ -46,6 +46,7 @@ export interface Conversation {
   contact_phone: string | null;
   profile_pic_url: string | null;
   account_name: string | null;
+  account_id?: string | null;
   last_message: string | null;
   last_message_sender: string | null;
   labels?: Label[];
@@ -59,6 +60,21 @@ export interface Conversation {
   participant_count: number | null;
   group_pic_url: string | null;
   display_name: string | null;
+  // Unified group fields (when unifyGroups=true)
+  is_unified_group?: boolean;
+  total_unread?: number;
+  account_count?: number;
+  accounts?: GroupAccount[];
+  last_message_account?: string | null;
+  default_conversation_id?: string;
+}
+
+export interface GroupAccount {
+  conversation_id: string;
+  account_id: string;
+  account_name: string;
+  unread_count: number;
+  last_message_at: string | null;
 }
 
 export interface Message {

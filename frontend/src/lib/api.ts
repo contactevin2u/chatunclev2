@@ -84,11 +84,17 @@ export const accounts = {
 
 // Conversations
 export const conversations = {
-  list: (token: string, accountId?: string) =>
-    request<{ conversations: any[] }>(
-      `/api/conversations${accountId ? `?accountId=${accountId}` : ''}`,
+  list: (token: string, options?: { accountId?: string; unifyGroups?: boolean; groupsOnly?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options?.accountId) params.set('accountId', options.accountId);
+    if (options?.unifyGroups) params.set('unifyGroups', 'true');
+    if (options?.groupsOnly !== undefined) params.set('groupsOnly', options.groupsOnly.toString());
+    const queryString = params.toString();
+    return request<{ conversations: any[]; unified?: boolean }>(
+      `/api/conversations${queryString ? `?${queryString}` : ''}`,
       { token }
-    ),
+    );
+  },
 
   get: (token: string, id: string) =>
     request<{ conversation: any }>(`/api/conversations/${id}`, { token }),

@@ -4,17 +4,19 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
 import { conversations as conversationsApi, messages as messagesApi, labels as labelsApi, contacts as contactsApi } from '@/lib/api';
-import { Conversation, Message, Label } from '@/types';
+import { Conversation, Message, Label, GroupAccount } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
 import InternalNotes from '@/components/chat/InternalNotes';
-import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users } from 'lucide-react';
+import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
   const [conversationsList, setConversationsList] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  // For unified groups, track the actual conversation ID to use (for messages/sending)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messagesList, setMessagesList] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
@@ -30,7 +32,9 @@ export default function InboxPage() {
   const [filterLabelId, setFilterLabelId] = useState<string | null>(null);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [mobileShowChat, setMobileShowChat] = useState(false);
+  const [showAccountSelector, setShowAccountSelector] = useState(false);
   const selectedConversationRef = useRef<Conversation | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
 
   // Load labels on mount
   useEffect(() => {
@@ -164,18 +168,38 @@ export default function InboxPage() {
   // Get active filter label name
   const activeFilterLabel = filterLabelId ? allLabels.find(l => l.id === filterLabelId) : null;
 
-  // Keep ref in sync with state for callbacks
+  // Keep refs in sync with state for callbacks
   useEffect(() => {
     selectedConversationRef.current = selectedConversation;
   }, [selectedConversation]);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  // Get the effective conversation ID (for unified groups, use activeConversationId)
+  const getEffectiveConversationId = useCallback(() => {
+    if (selectedConversation?.is_unified_group) {
+      return activeConversationId || selectedConversation.default_conversation_id;
+    }
+    return selectedConversation?.id;
+  }, [selectedConversation, activeConversationId]);
+
+  // Get the currently selected account for unified groups
+  const getSelectedAccount = useCallback((): GroupAccount | null => {
+    if (!selectedConversation?.is_unified_group || !selectedConversation.accounts) return null;
+    const effectiveId = getEffectiveConversationId();
+    return selectedConversation.accounts.find(a => a.conversation_id === effectiveId) || null;
+  }, [selectedConversation, getEffectiveConversationId]);
 
   // Function to reload conversations
   const loadConversations = useCallback(async () => {
     if (!token) return;
     try {
-      const { conversations } = await conversationsApi.list(token);
+      // Use unifyGroups=true to merge same groups across accounts
+      const { conversations } = await conversationsApi.list(token, { unifyGroups: true });
       setConversationsList(conversations);
-      console.log('[UI] Loaded conversations:', conversations.length);
+      console.log('[UI] Loaded conversations:', conversations.length, '(unified groups enabled)');
     } catch (error) {
       console.error('Failed to load conversations:', error);
     }
@@ -185,8 +209,15 @@ export default function InboxPage() {
   const handleNewMessage = useCallback((data: any) => {
     console.log('[UI] New message received:', data);
 
-    // Check if this conversation exists in our list
-    const existingConv = conversationsList.find(c => c.id === data.conversationId);
+    // Check if this conversation exists in our list (including unified group accounts)
+    let existingConv = conversationsList.find(c => c.id === data.conversationId);
+
+    // Also check unified group accounts
+    if (!existingConv) {
+      existingConv = conversationsList.find(c =>
+        c.is_unified_group && c.accounts?.some(a => a.conversation_id === data.conversationId)
+      );
+    }
 
     if (!existingConv) {
       // New conversation - reload the list
@@ -195,8 +226,9 @@ export default function InboxPage() {
       return;
     }
 
-    // Add to messages if current conversation
-    if (selectedConversationRef.current?.id === data.conversationId) {
+    // Add to messages if current conversation (check effective conversation ID)
+    const effectiveId = activeConversationIdRef.current || selectedConversationRef.current?.id;
+    if (effectiveId === data.conversationId) {
       setMessagesList((prev) => {
         // Check if message already exists
         if (prev.some(m => m.id === data.message.id)) {
@@ -283,20 +315,44 @@ export default function InboxPage() {
       return;
     }
 
+    // Get the effective conversation ID for loading messages
+    const effectiveId = selectedConversation.is_unified_group
+      ? (activeConversationId || selectedConversation.default_conversation_id)
+      : selectedConversation.id;
+
+    if (!effectiveId) {
+      setMessagesList([]);
+      return;
+    }
+
     const loadMessages = async () => {
       try {
-        const { messages } = await messagesApi.list(token, selectedConversation.id);
+        const { messages } = await messagesApi.list(token, effectiveId);
         setMessagesList(messages);
 
         // Mark as read
-        if (selectedConversation.unread_count > 0) {
-          await conversationsApi.markRead(token, selectedConversation.id);
+        const unreadCount = selectedConversation.is_unified_group
+          ? (selectedConversation.accounts?.find(a => a.conversation_id === effectiveId)?.unread_count || 0)
+          : selectedConversation.unread_count;
+
+        if (unreadCount > 0) {
+          await conversationsApi.markRead(token, effectiveId);
+          // Update conversation list (handle both regular and unified groups)
           setConversationsList((prev) =>
-            prev.map((conv) =>
-              conv.id === selectedConversation.id
-                ? { ...conv, unread_count: 0 }
-                : conv
-            )
+            prev.map((conv) => {
+              if (conv.id === selectedConversation.id) {
+                if (conv.is_unified_group && conv.accounts) {
+                  // Update the specific account's unread count
+                  const updatedAccounts = conv.accounts.map(a =>
+                    a.conversation_id === effectiveId ? { ...a, unread_count: 0 } : a
+                  );
+                  const newTotalUnread = updatedAccounts.reduce((sum, a) => sum + a.unread_count, 0);
+                  return { ...conv, accounts: updatedAccounts, total_unread: newTotalUnread };
+                }
+                return { ...conv, unread_count: 0 };
+              }
+              return conv;
+            })
           );
         }
       } catch (error) {
@@ -305,14 +361,24 @@ export default function InboxPage() {
     };
 
     loadMessages();
-  }, [token, selectedConversation]);
+  }, [token, selectedConversation, activeConversationId]);
 
   const handleSendMessage = async (content: string) => {
     if (!token || !selectedConversation || !content.trim()) return;
 
+    // Get the effective conversation ID for sending
+    const effectiveId = selectedConversation.is_unified_group
+      ? (activeConversationId || selectedConversation.default_conversation_id)
+      : selectedConversation.id;
+
+    if (!effectiveId) {
+      console.error('No effective conversation ID for sending');
+      return;
+    }
+
     setIsSending(true);
     try {
-      const { message } = await messagesApi.send(token, selectedConversation.id, content);
+      const { message } = await messagesApi.send(token, effectiveId, content);
       setMessagesList((prev) => [...prev, message]);
 
       // Update conversation list
@@ -339,9 +405,22 @@ export default function InboxPage() {
   }
 
   // Handle selecting conversation (show chat on mobile)
-  const handleSelectConversation = (conv: Conversation) => {
+  const handleSelectConversation = (conv: Conversation, selectedAccountConversationId?: string) => {
     setSelectedConversation(conv);
+    // For unified groups, set the active conversation ID
+    if (conv.is_unified_group) {
+      setActiveConversationId(selectedAccountConversationId || conv.default_conversation_id || null);
+    } else {
+      setActiveConversationId(null);
+    }
     setMobileShowChat(true);
+    setShowAccountSelector(false);
+  };
+
+  // Handle switching account within a unified group
+  const handleSwitchAccount = (account: GroupAccount) => {
+    setActiveConversationId(account.conversation_id);
+    setShowAccountSelector(false);
   };
 
   // Handle back to list on mobile
@@ -467,7 +546,7 @@ export default function InboxPage() {
         <div className="flex-1 overflow-y-auto">
           <ConversationList
             conversations={filteredConversations}
-            selectedId={selectedConversation?.id}
+            selectedId={activeConversationId || selectedConversation?.id}
             onSelect={handleSelectConversation}
           />
         </div>
@@ -505,19 +584,63 @@ export default function InboxPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       {selectedConversation.is_group ? (
-                        // Group header - no editing
+                        // Group header - with account selector for unified groups
                         <>
                           <div className="flex items-center space-x-2">
                             <h2 className="font-medium text-gray-900 truncate text-sm md:text-base">
                               {selectedConversation.group_name || selectedConversation.display_name || 'Group'}
                             </h2>
-                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">
-                              Group
-                            </span>
+                            {selectedConversation.is_unified_group ? (
+                              <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">
+                                {selectedConversation.account_count} accounts
+                              </span>
+                            ) : (
+                              <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">
+                                Group
+                              </span>
+                            )}
                           </div>
-                          <p className="text-xs text-gray-500 truncate">
-                            {selectedConversation.participant_count || 0} participants
-                          </p>
+                          {/* Account selector for unified groups */}
+                          {selectedConversation.is_unified_group && selectedConversation.accounts ? (
+                            <div className="relative">
+                              <button
+                                onClick={() => setShowAccountSelector(!showAccountSelector)}
+                                className="flex items-center space-x-1 text-xs text-purple-600 hover:text-purple-700"
+                              >
+                                <span>via {getSelectedAccount()?.account_name || 'Select account'}</span>
+                                <ChevronDown className="h-3 w-3" />
+                              </button>
+                              {showAccountSelector && (
+                                <div className="absolute left-0 top-full mt-1 bg-white rounded-lg shadow-lg border z-50 min-w-[180px]">
+                                  <div className="py-1">
+                                    {selectedConversation.accounts.map((account) => (
+                                      <button
+                                        key={account.conversation_id}
+                                        onClick={() => handleSwitchAccount(account)}
+                                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center justify-between ${
+                                          activeConversationId === account.conversation_id ? 'bg-purple-50' : ''
+                                        }`}
+                                      >
+                                        <span className="flex items-center space-x-2">
+                                          <span className="w-2 h-2 rounded-full bg-purple-400" />
+                                          <span>{account.account_name}</span>
+                                        </span>
+                                        {account.unread_count > 0 && (
+                                          <span className="bg-purple-600 text-white text-[10px] min-w-[16px] h-4 flex items-center justify-center px-1 rounded-full">
+                                            {account.unread_count}
+                                          </span>
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-500 truncate">
+                              {selectedConversation.participant_count || 0} participants
+                            </p>
+                          )}
                         </>
                       ) : isEditingName ? (
                         <div className="flex items-center space-x-1 md:space-x-2">
@@ -673,7 +796,7 @@ export default function InboxPage() {
               <div className="flex-1 overflow-y-auto p-2 md:p-4">
                 <MessageThread
                   messages={messagesList}
-                  conversationId={selectedConversation?.id}
+                  conversationId={getEffectiveConversationId() || undefined}
                   isGroup={selectedConversation?.is_group || false}
                 />
               </div>
@@ -694,7 +817,7 @@ export default function InboxPage() {
         {/* Internal Notes Panel */}
         {showNotes && selectedConversation && (
           <InternalNotes
-            conversationId={selectedConversation.id}
+            conversationId={getEffectiveConversationId() || selectedConversation.id}
             onClose={() => setShowNotes(false)}
           />
         )}
