@@ -103,6 +103,58 @@ async function orderOpsRequest(path: string, options: RequestInit = {}): Promise
   return fetchResponse;
 }
 
+/**
+ * Public health check - tests OrderOps connection without auth
+ * GET /api/orderops/health
+ */
+router.get('/health', async (req: Request, res: Response) => {
+  try {
+    // Check if credentials are configured
+    if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
+      res.json({
+        success: false,
+        configured: false,
+        error: 'OrderOps credentials not configured',
+      });
+      return;
+    }
+
+    // Try to get a token
+    const token = await getOrderOpsToken();
+
+    // Test with a simple API call
+    const fetchRes = await orderOpsRequest('/orders?limit=1', { method: 'GET' });
+
+    if (!fetchRes.ok) {
+      res.json({
+        success: false,
+        configured: true,
+        authenticated: true,
+        api_error: fetchRes.status,
+      });
+      return;
+    }
+
+    const result = await fetchRes.json() as any;
+    const orderCount = result.data?.length || result.orders?.length || (Array.isArray(result) ? result.length : 0);
+
+    res.json({
+      success: true,
+      configured: true,
+      authenticated: true,
+      api_url: ORDEROPS_API_URL,
+      orders_found: orderCount,
+      message: 'OrderOps connection working!',
+    });
+  } catch (error: any) {
+    res.json({
+      success: false,
+      configured: !!ORDEROPS_USERNAME && !!ORDEROPS_PASSWORD,
+      error: error.message,
+    });
+  }
+});
+
 router.use(authenticate);
 
 /**
