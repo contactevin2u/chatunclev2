@@ -27,6 +27,11 @@ export async function usePostgresAuthState(accountId: string): Promise<{
       CREATE INDEX IF NOT EXISTS idx_auth_keys_account
       ON whatsapp_auth_keys(account_id)
     `);
+    // Composite index for the common query pattern: WHERE account_id = $1 AND key_type = $2
+    await query(`
+      CREATE INDEX IF NOT EXISTS idx_auth_keys_account_type
+      ON whatsapp_auth_keys(account_id, key_type)
+    `);
   };
 
   await ensureTable();
