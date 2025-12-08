@@ -58,7 +58,14 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-pulse text-gray-500 mb-2">Redirecting to login...</div>
+          <a href="/login" className="text-blue-600 hover:underline text-sm">Click here if not redirected</a>
+        </div>
+      </div>
+    );
   }
 
   const navigation = [

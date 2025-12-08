@@ -1,3 +1,5 @@
+import { clearStoredAuth } from './auth';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://chatuncle-api.onrender.com';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -32,6 +34,16 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const response = await fetch(`${API_URL}${endpoint}`, config);
 
   if (!response.ok) {
+    // Handle 401 Unauthorized - clear auth and redirect to login
+    if (response.status === 401) {
+      clearStoredAuth();
+      // Only redirect if we're in the browser and not already on login page
+      if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+        window.location.href = '/login';
+      }
+      throw new Error('Session expired. Please login again.');
+    }
+
     const error = await response.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(error.error || 'Request failed');
   }

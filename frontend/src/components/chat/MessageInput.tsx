@@ -248,6 +248,8 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
 
         clearAttachment();
         setMessage('');
+        // Refocus input after sending media
+        setTimeout(() => inputRef.current?.focus(), 50);
       } catch (error: any) {
         console.error('Failed to upload media:', error);
         alert(error.message || 'Failed to upload media');
@@ -261,6 +263,8 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     if (message.trim()) {
       onSend(message.trim());
       setMessage('');
+      // Refocus input after sending
+      setTimeout(() => inputRef.current?.focus(), 50);
     }
   };
 
