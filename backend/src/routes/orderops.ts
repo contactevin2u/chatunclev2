@@ -319,4 +319,126 @@ router.get('/order/:orderId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Get order payment due/balance info from OrderOps
+ * GET /api/orderops/order/:orderId/due
+ */
+router.get('/order/:orderId/due', async (req: Request, res: Response) => {
+  try {
+    const { orderId } = req.params;
+    const { as_of } = req.query;
+
+    // Validate orderId is numeric
+    if (!/^\d+$/.test(orderId)) {
+      res.status(400).json({ error: 'Invalid order ID' });
+      return;
+    }
+
+    // Build query string
+    const queryParams = as_of ? `?as_of=${as_of}` : '';
+
+    // Fetch from OrderOps with auto-retry on 401
+    const fetchRes = await orderOpsRequest(`/orders/${orderId}/due${queryParams}`, {
+      method: 'GET',
+    });
+
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      res.status(fetchRes.status).json({ error: 'OrderOps API error', details: errorText });
+      return;
+    }
+
+    const result = await fetchRes.json() as any;
+    res.json({ success: true, due: result.data || result });
+  } catch (error: any) {
+    console.error('[OrderOps] Fetch order due error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * List orders from OrderOps
+ * GET /api/orderops/orders
+ */
+router.get('/orders', async (req: Request, res: Response) => {
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    // Build query string
+    const params = new URLSearchParams();
+    if (status) params.set('status', status as string);
+    params.set('limit', limit as string);
+    params.set('offset', offset as string);
+
+    const fetchRes = await orderOpsRequest(`/orders?${params.toString()}`, {
+      method: 'GET',
+    });
+
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      res.status(fetchRes.status).json({ error: 'OrderOps API error', details: errorText });
+      return;
+    }
+
+    const result = await fetchRes.json() as any;
+    res.json({ success: true, orders: result.data || result.orders || result });
+  } catch (error: any) {
+    console.error('[OrderOps] List orders error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Test OrderOps connection - verifies credentials and connectivity
+ * GET /api/orderops/test
+ */
+router.get('/test', async (req: Request, res: Response) => {
+  try {
+    // Check if credentials are configured
+    if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
+      res.json({
+        success: false,
+        configured: false,
+        error: 'OrderOps credentials not configured. Set ORDEROPS_USERNAME and ORDEROPS_PASSWORD env variables.',
+      });
+      return;
+    }
+
+    // Try to get a token (this will login if needed)
+    const token = await getOrderOpsToken();
+
+    // Test fetching orders to verify full connectivity
+    const fetchRes = await orderOpsRequest('/orders?limit=1', { method: 'GET' });
+
+    if (!fetchRes.ok) {
+      const errorText = await fetchRes.text();
+      res.json({
+        success: false,
+        configured: true,
+        authenticated: true,
+        error: `API call failed: ${fetchRes.status} - ${errorText}`,
+      });
+      return;
+    }
+
+    const result = await fetchRes.json() as any;
+
+    res.json({
+      success: true,
+      configured: true,
+      authenticated: true,
+      api_url: ORDEROPS_API_URL,
+      sample_order: result.data?.[0] || result.orders?.[0] || result[0] || null,
+      message: 'OrderOps connection successful!',
+    });
+  } catch (error: any) {
+    console.error('[OrderOps] Test connection error:', error);
+    res.json({
+      success: false,
+      configured: !!ORDEROPS_USERNAME && !!ORDEROPS_PASSWORD,
+      error: error.message,
+    });
+  }
+});
+
 export default router;
