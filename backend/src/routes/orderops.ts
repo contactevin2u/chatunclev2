@@ -188,6 +188,79 @@ router.get('/health', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Public test endpoint - parse a raw message and fetch order
+ * POST /api/orderops/test-parse
+ * Body: { message: "..." }
+ */
+router.post('/test-parse', async (req: Request, res: Response) => {
+  try {
+    const { message } = req.body;
+
+    if (!message) {
+      res.status(400).json({ error: 'message is required in body' });
+      return;
+    }
+
+    // Check credentials
+    if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
+      res.json({ success: false, error: 'OrderOps not configured' });
+      return;
+    }
+
+    console.log('[OrderOps] Test parsing:', message);
+
+    // Send for parsing
+    const parseRes = await orderOpsRequest('/parse/advanced', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+
+    if (!parseRes.ok) {
+      const errorText = await parseRes.text();
+      res.json({ success: false, error: 'Parse failed', details: errorText });
+      return;
+    }
+
+    const parseResult = await parseRes.json() as any;
+    const data = parseResult.data || parseResult;
+
+    console.log('[OrderOps] Parse result:', JSON.stringify(data).substring(0, 500));
+
+    // If order was created, fetch full details
+    const orderId = data.order_id || data.mother_order_id;
+    let order = null;
+    let due = null;
+
+    if (orderId) {
+      // Fetch order details
+      const orderRes = await orderOpsRequest(`/orders/${orderId}`, { method: 'GET' });
+      if (orderRes.ok) {
+        const orderData = await orderRes.json() as any;
+        order = orderData.data || orderData;
+      }
+
+      // Fetch due info
+      const dueRes = await orderOpsRequest(`/orders/${orderId}/due`, { method: 'GET' });
+      if (dueRes.ok) {
+        const dueData = await dueRes.json() as any;
+        due = dueData.data || dueData;
+      }
+    }
+
+    res.json({
+      success: true,
+      parse_result: data,
+      order_id: orderId,
+      order,
+      due,
+    });
+  } catch (error: any) {
+    console.error('[OrderOps] Test parse error:', error);
+    res.json({ success: false, error: error.message });
+  }
+});
+
 router.use(authenticate);
 
 /**
