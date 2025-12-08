@@ -181,14 +181,10 @@ const productSchema = {
   '@type': 'Product',
   name: 'Anti-Embolism Stockings Malaysia',
   description: 'Medical-grade anti-embolism stockings (TED stockings) for DVT prevention. Hospital-approved compression stockings for post-surgery and bedridden patients.',
-  brand: {
-    '@type': 'Brand',
-    name: 'AA Alive Medical',
-  },
-  manufacturer: {
-    '@type': 'Organization',
-    name: 'AA Alive Sdn Bhd',
-  },
+  image: ['https://chatuncle.my/images/anti-embolism-stockings.jpg'],
+  brand: { '@type': 'Brand', name: 'AA Alive Medical' },
+  sku: 'AES-COLLECTION',
+  manufacturer: { '@type': 'Organization', name: 'AA Alive Sdn Bhd' },
   category: 'Medical Compression Stockings',
   offers: {
     '@type': 'AggregateOffer',
@@ -197,32 +193,19 @@ const productSchema = {
     priceCurrency: 'MYR',
     availability: 'https://schema.org/InStock',
     offerCount: products.length,
-    seller: {
-      '@type': 'Organization',
-      name: 'AA Alive Sdn Bhd',
+    priceValidUntil: '2025-12-31',
+    url: 'https://chatuncle.my/medical-devices/anti-embolism-stockings',
+    seller: { '@type': 'Organization', name: 'AA Alive Sdn Bhd' },
+    shippingDetails: {
+      '@type': 'OfferShippingDetails',
+      shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'MYR' },
+      shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'MY' },
+      deliveryTime: { '@type': 'ShippingDeliveryTime', handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' }, transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 3, unitCode: 'DAY' } },
     },
+    hasMerchantReturnPolicy: { '@type': 'MerchantReturnPolicy', applicableCountry: 'MY', returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow', merchantReturnDays: 7, returnMethod: 'https://schema.org/ReturnByMail', returnFees: 'https://schema.org/FreeReturn' },
   },
-  aggregateRating: {
-    '@type': 'AggregateRating',
-    ratingValue: '4.9',
-    reviewCount: '247',
-    bestRating: '5',
-    worstRating: '1',
-  },
-  review: [
-    {
-      '@type': 'Review',
-      reviewRating: {
-        '@type': 'Rating',
-        ratingValue: '5',
-      },
-      author: {
-        '@type': 'Person',
-        name: 'Dr. Lee Wei Ming',
-      },
-      reviewBody: 'Excellent quality TED stockings. We use these for all our post-operative patients. Great compression and comfortable for patients.',
-    },
-  ],
+  aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.9', reviewCount: '247', bestRating: '5', worstRating: '1' },
+  review: [{ '@type': 'Review', reviewRating: { '@type': 'Rating', ratingValue: '5', bestRating: '5' }, author: { '@type': 'Person', name: 'Dr. Lee Wei Ming' }, reviewBody: 'Excellent quality TED stockings. We use these for all our post-operative patients. Great compression and comfortable for patients.' }],
 };
 
 const medicalWebPageSchema = {

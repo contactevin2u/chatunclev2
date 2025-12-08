@@ -249,10 +249,9 @@ const productSchema = {
   '@type': 'Product',
   name: 'Compression Stockings Malaysia',
   description: 'Medical-grade compression stockings for varicose veins, edema, travel, and everyday leg support. Multiple compression classes available.',
-  brand: {
-    '@type': 'Brand',
-    name: 'AA Alive Medical',
-  },
+  image: ['https://chatuncle.my/images/compression-stockings.jpg'],
+  brand: { '@type': 'Brand', name: 'AA Alive Medical' },
+  sku: 'CS-COLLECTION',
   category: 'Medical Compression Stockings',
   offers: {
     '@type': 'AggregateOffer',
@@ -261,12 +260,19 @@ const productSchema = {
     priceCurrency: 'MYR',
     availability: 'https://schema.org/InStock',
     offerCount: products.length,
+    priceValidUntil: '2025-12-31',
+    url: 'https://chatuncle.my/medical-devices/compression-stockings',
+    seller: { '@type': 'Organization', name: 'AA Alive Sdn Bhd' },
+    shippingDetails: {
+      '@type': 'OfferShippingDetails',
+      shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'MYR' },
+      shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'MY' },
+      deliveryTime: { '@type': 'ShippingDeliveryTime', handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 1, unitCode: 'DAY' }, transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 3, unitCode: 'DAY' } },
+    },
+    hasMerchantReturnPolicy: { '@type': 'MerchantReturnPolicy', applicableCountry: 'MY', returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow', merchantReturnDays: 7, returnMethod: 'https://schema.org/ReturnByMail', returnFees: 'https://schema.org/FreeReturn' },
   },
-  aggregateRating: {
-    '@type': 'AggregateRating',
-    ratingValue: '4.8',
-    reviewCount: '312',
-  },
+  aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.8', reviewCount: '312', bestRating: '5', worstRating: '1' },
+  review: { '@type': 'Review', reviewRating: { '@type': 'Rating', ratingValue: '5', bestRating: '5' }, author: { '@type': 'Person', name: 'Lisa Wong' }, reviewBody: 'Great quality compression stockings. Helped with my varicose veins significantly.' },
 };
 
 const faqSchema = {

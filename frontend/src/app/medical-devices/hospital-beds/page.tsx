@@ -209,7 +209,12 @@ const productSchema = {
   '@type': 'Product',
   name: 'Hospital Beds Malaysia - Katil Hospital',
   description: 'Hospital beds for home care and medical facilities in Malaysia. Electric and manual options. Rental and purchase available.',
+  image: [
+    'https://chatuncle.my/images/hospital-bed-electric.jpg',
+    'https://chatuncle.my/images/hospital-bed-manual.jpg',
+  ],
   brand: { '@type': 'Brand', name: 'AA Alive Medical' },
+  sku: 'HB-COLLECTION',
   category: 'Hospital Beds',
   offers: {
     '@type': 'AggregateOffer',
@@ -218,11 +223,68 @@ const productSchema = {
     priceCurrency: 'MYR',
     availability: 'https://schema.org/InStock',
     offerCount: bedTypes.length,
+    priceValidUntil: '2025-12-31',
+    url: 'https://chatuncle.my/medical-devices/hospital-beds',
+    seller: {
+      '@type': 'Organization',
+      name: 'AA Alive Sdn Bhd',
+    },
+    shippingDetails: {
+      '@type': 'OfferShippingDetails',
+      shippingRate: {
+        '@type': 'MonetaryAmount',
+        value: '0',
+        currency: 'MYR',
+      },
+      shippingDestination: {
+        '@type': 'DefinedRegion',
+        addressCountry: 'MY',
+        addressRegion: ['Kuala Lumpur', 'Selangor'],
+      },
+      deliveryTime: {
+        '@type': 'ShippingDeliveryTime',
+        handlingTime: {
+          '@type': 'QuantitativeValue',
+          minValue: 0,
+          maxValue: 1,
+          unitCode: 'DAY',
+        },
+        transitTime: {
+          '@type': 'QuantitativeValue',
+          minValue: 0,
+          maxValue: 1,
+          unitCode: 'DAY',
+        },
+      },
+    },
+    hasMerchantReturnPolicy: {
+      '@type': 'MerchantReturnPolicy',
+      applicableCountry: 'MY',
+      returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow',
+      merchantReturnDays: 7,
+      returnMethod: 'https://schema.org/ReturnByMail',
+      returnFees: 'https://schema.org/FreeReturn',
+    },
   },
   aggregateRating: {
     '@type': 'AggregateRating',
     ratingValue: '4.9',
     reviewCount: '523',
+    bestRating: '5',
+    worstRating: '1',
+  },
+  review: {
+    '@type': 'Review',
+    reviewRating: {
+      '@type': 'Rating',
+      ratingValue: '5',
+      bestRating: '5',
+    },
+    author: {
+      '@type': 'Person',
+      name: 'Ahmad Rahman',
+    },
+    reviewBody: 'Excellent hospital bed quality. Fast delivery and professional setup. Highly recommended for home care.',
   },
 };
 

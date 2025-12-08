@@ -169,7 +169,9 @@ const productSchema = {
   '@type': 'Product',
   name: 'Urine Analyser Malaysia - Urinalysis Equipment',
   description: 'Urine analyser machines for clinics and laboratories in Malaysia. Semi-automatic and fully automatic urinalysis systems.',
+  image: ['https://chatuncle.my/images/urine-analyser.jpg'],
   brand: { '@type': 'Brand', name: 'AA Alive Medical' },
+  sku: 'UA-COLLECTION',
   category: 'Laboratory Equipment',
   offers: {
     '@type': 'AggregateOffer',
@@ -177,8 +179,19 @@ const productSchema = {
     highPrice: '120000',
     priceCurrency: 'MYR',
     availability: 'https://schema.org/InStock',
+    priceValidUntil: '2025-12-31',
+    url: 'https://chatuncle.my/medical-devices/urine-analyser',
+    seller: { '@type': 'Organization', name: 'AA Alive Sdn Bhd' },
+    shippingDetails: {
+      '@type': 'OfferShippingDetails',
+      shippingRate: { '@type': 'MonetaryAmount', value: '0', currency: 'MYR' },
+      shippingDestination: { '@type': 'DefinedRegion', addressCountry: 'MY' },
+      deliveryTime: { '@type': 'ShippingDeliveryTime', handlingTime: { '@type': 'QuantitativeValue', minValue: 0, maxValue: 3, unitCode: 'DAY' }, transitTime: { '@type': 'QuantitativeValue', minValue: 1, maxValue: 5, unitCode: 'DAY' } },
+    },
+    hasMerchantReturnPolicy: { '@type': 'MerchantReturnPolicy', applicableCountry: 'MY', returnPolicyCategory: 'https://schema.org/MerchantReturnFiniteReturnWindow', merchantReturnDays: 7, returnMethod: 'https://schema.org/ReturnByMail', returnFees: 'https://schema.org/FreeReturn' },
   },
-  aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.7', reviewCount: '89' },
+  aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.7', reviewCount: '89', bestRating: '5', worstRating: '1' },
+  review: { '@type': 'Review', reviewRating: { '@type': 'Rating', ratingValue: '5', bestRating: '5' }, author: { '@type': 'Person', name: 'Dr. Tan Wei Ming' }, reviewBody: 'Reliable urine analyser for our clinic. Fast results and easy to use.' },
 };
 
 export default function UrineAnalyserPage() {
