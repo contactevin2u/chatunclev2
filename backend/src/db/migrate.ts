@@ -399,17 +399,17 @@ CREATE TABLE IF NOT EXISTS contact_orders (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Add columns if table exists (for migrations) - MUST run before indexes
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS mother_order_id INT;
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS balance DECIMAL(10, 2);
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(50);
+
 -- Indexes and constraints for contact_orders
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_orders_orderops_id ON contact_orders(orderops_order_id);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_contact ON contact_orders(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_code ON contact_orders(order_code);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_mother ON contact_orders(mother_order_id);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_conversation ON contact_orders(conversation_id);
-
--- Add columns if table exists (for migrations)
-ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS mother_order_id INT;
-ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS balance DECIMAL(10, 2);
-ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(50);
 
 -- ============================================================
 -- WHATSAPP GROUPS SUPPORT
