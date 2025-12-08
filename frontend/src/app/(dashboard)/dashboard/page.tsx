@@ -376,8 +376,9 @@ export default function InboxPage() {
     loadMessages();
   }, [token, selectedConversation, activeConversationId]);
 
-  const handleSendMessage = async (content: string) => {
-    if (!token || !selectedConversation || !content.trim()) return;
+  const handleSendMessage = async (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string) => {
+    if (!token || !selectedConversation) return;
+    if (!content.trim() && !mediaUrl) return;
 
     // Get the effective conversation ID for sending
     const effectiveId = selectedConversation.is_unified_group
@@ -391,14 +392,17 @@ export default function InboxPage() {
 
     setIsSending(true);
     try {
-      const { message } = await messagesApi.send(token, effectiveId, content);
+      const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType);
       setMessagesList((prev) => [...prev, message]);
 
       // Update conversation list
+      const displayContent = mediaUrl
+        ? (contentType === 'image' ? '📷 Photo' : contentType === 'video' ? '🎥 Video' : contentType === 'audio' ? '🎤 Voice note' : content)
+        : content;
       setConversationsList((prev) =>
         prev.map((conv) =>
           conv.id === selectedConversation.id
-            ? { ...conv, last_message: content, last_message_at: new Date().toISOString() }
+            ? { ...conv, last_message: displayContent, last_message_at: new Date().toISOString() }
             : conv
         )
       );
@@ -816,7 +820,11 @@ export default function InboxPage() {
 
               {/* Input */}
               <div className="bg-[#F0F2F5] p-2 sm:p-3">
-                <MessageInput onSend={handleSendMessage} disabled={isSending} />
+                <MessageInput
+                  onSend={handleSendMessage}
+                  disabled={isSending}
+                  conversationId={getEffectiveConversationId() || undefined}
+                />
               </div>
             </>
           ) : (

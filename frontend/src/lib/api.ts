@@ -134,10 +134,10 @@ export const messages = {
       { token }
     ),
 
-  send: (token: string, conversationId: string, content: string, contentType = 'text') =>
+  send: (token: string, conversationId: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string) =>
     request<{ message: any }>(`/api/messages/conversation/${conversationId}`, {
       method: 'POST',
-      body: { content, contentType },
+      body: { content, contentType, mediaUrl, mediaMimeType },
       token,
     }),
 
