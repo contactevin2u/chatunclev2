@@ -287,10 +287,23 @@ export default function InboxPage() {
     );
   }, []);
 
+  // Handle message reaction updates
+  const handleMessageReaction = useCallback((data: { messageId: string; waMessageId: string; reactions: any[] }) => {
+    console.log('[UI] Message reaction update:', data);
+    setMessagesList((prev) =>
+      prev.map((msg) =>
+        msg.id === data.messageId || msg.wa_message_id === data.waMessageId
+          ? { ...msg, reactions: data.reactions }
+          : msg
+      )
+    );
+  }, []);
+
   useSocket({
     onNewMessage: handleNewMessage,
     onSyncProgress: handleSyncProgress,
     onMessageStatus: handleMessageStatus,
+    onMessageReaction: handleMessageReaction,
   });
 
   // Load conversations on mount

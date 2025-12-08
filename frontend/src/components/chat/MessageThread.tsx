@@ -4,9 +4,10 @@ import { useRef, useEffect, useState } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package, Smile } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
-import { orderops } from '@/lib/api';
+import { orderops, messages as messagesApi } from '@/lib/api';
+import { MessageReaction } from '@/types';
 
 interface MessageThreadProps {
   messages: Message[];
@@ -102,10 +103,77 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
     messageId: '',
     content: '',
   });
+  const [emojiPickerMessageId, setEmojiPickerMessageId] = useState<string | null>(null);
+  const [reactingMessageId, setReactingMessageId] = useState<string | null>(null);
+  const [messageReactions, setMessageReactions] = useState<Record<string, MessageReaction[]>>({});
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Common reaction emojis (WhatsApp style)
+  const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Handle sending a reaction
+  const handleReaction = async (messageId: string, emoji: string) => {
+    if (!token) return;
+
+    setReactingMessageId(messageId);
+    setEmojiPickerMessageId(null);
+
+    try {
+      const result = await messagesApi.react(token, messageId, emoji);
+      if (result.success) {
+        setMessageReactions(prev => ({
+          ...prev,
+          [messageId]: result.reactions,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to react:', error);
+    } finally {
+      setReactingMessageId(null);
+    }
+  };
+
+  // Remove reaction
+  const handleRemoveReaction = async (messageId: string) => {
+    if (!token) return;
+
+    setReactingMessageId(messageId);
+
+    try {
+      const result = await messagesApi.react(token, messageId, '');
+      if (result.success) {
+        setMessageReactions(prev => ({
+          ...prev,
+          [messageId]: result.reactions,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to remove reaction:', error);
+    } finally {
+      setReactingMessageId(null);
+    }
+  };
+
+  // Get reactions for a message (from local state or message data)
+  const getReactions = (message: Message): MessageReaction[] => {
+    return messageReactions[message.id] || message.reactions || [];
+  };
+
+  // Group reactions by emoji
+  const groupReactions = (reactions: MessageReaction[]) => {
+    const grouped: Record<string, { emoji: string; count: number; senders: string[] }> = {};
+    reactions.forEach(r => {
+      if (!grouped[r.emoji]) {
+        grouped[r.emoji] = { emoji: r.emoji, count: 0, senders: [] };
+      }
+      grouped[r.emoji].count++;
+      grouped[r.emoji].senders.push(r.sender);
+    });
+    return Object.values(grouped);
+  };
 
   // Open confirmation modal
   const handleRequestOrderOps = (messageId: string, content: string) => {
@@ -187,11 +255,38 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
         return (
           <div
             key={message.id}
-            className={clsx('flex', isSent ? 'justify-end' : 'justify-start')}
+            className={clsx('flex group', isSent ? 'justify-end' : 'justify-start')}
           >
+            {/* Reaction button - left side for sent messages */}
+            {isSent && message.wa_message_id && (
+              <div className="relative self-center mr-1">
+                <button
+                  onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
+                  className="p-1 rounded-full hover:bg-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="React"
+                >
+                  <Smile className="h-4 w-4 text-gray-400" />
+                </button>
+                {/* Emoji picker popup */}
+                {emojiPickerMessageId === message.id && (
+                  <div className="absolute bottom-full right-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleReaction(message.id, emoji)}
+                        disabled={reactingMessageId === message.id}
+                        className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <div
               className={clsx(
-                'max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-3 py-2 shadow-sm',
+                'max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-3 py-2 shadow-sm relative',
                 isSent ? 'chat-bubble-sent' : 'chat-bubble-received'
               )}
             >
@@ -263,6 +358,43 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 {isSent && getStatusIcon(message.status)}
               </div>
 
+              {/* Reactions display */}
+              {(() => {
+                const reactions = getReactions(message);
+                const grouped = groupReactions(reactions);
+                if (grouped.length === 0) return null;
+                return (
+                  <div className="flex flex-wrap gap-1 mt-1.5 -mb-1">
+                    {grouped.map((group) => (
+                      <button
+                        key={group.emoji}
+                        onClick={() => {
+                          // If user already reacted with this emoji, remove it
+                          const hasMyReaction = group.senders.includes('me');
+                          if (hasMyReaction) {
+                            handleRemoveReaction(message.id);
+                          } else {
+                            handleReaction(message.id, group.emoji);
+                          }
+                        }}
+                        disabled={reactingMessageId === message.id}
+                        className={clsx(
+                          'inline-flex items-center px-1.5 py-0.5 rounded-full text-xs',
+                          'bg-gray-100 hover:bg-gray-200 transition-colors',
+                          group.senders.includes('me') && 'ring-1 ring-blue-400 bg-blue-50'
+                        )}
+                        title={group.senders.join(', ')}
+                      >
+                        <span>{group.emoji}</span>
+                        {group.count > 1 && (
+                          <span className="ml-0.5 text-gray-600">{group.count}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+
               {/* OrderOps button - for any text message with sufficient content */}
               {message.content_type === 'text' && message.content && message.content.length > 20 && (
                 <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
@@ -304,6 +436,33 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 </div>
               )}
             </div>
+            {/* Reaction button - right side for received messages */}
+            {!isSent && message.wa_message_id && (
+              <div className="relative self-center ml-1">
+                <button
+                  onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
+                  className="p-1 rounded-full hover:bg-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="React"
+                >
+                  <Smile className="h-4 w-4 text-gray-400" />
+                </button>
+                {/* Emoji picker popup */}
+                {emojiPickerMessageId === message.id && (
+                  <div className="absolute bottom-full left-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
+                    {QUICK_REACTIONS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleReaction(message.id, emoji)}
+                        disabled={reactingMessageId === message.id}
+                        className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

@@ -120,6 +120,13 @@ export const messages = {
       body: { content, contentType },
       token,
     }),
+
+  react: (token: string, messageId: string, emoji: string) =>
+    request<{ success: boolean; reactions: any[] }>(`/api/messages/${messageId}/react`, {
+      method: 'POST',
+      body: { emoji },
+      token,
+    }),
 };
 
 // Contacts

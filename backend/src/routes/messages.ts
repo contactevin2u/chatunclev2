@@ -31,12 +31,12 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
       return;
     }
 
-    // Include sender_jid and sender_name for group messages
+    // Include sender_jid, sender_name, and reactions for messages
     let sql = `
       SELECT m.id, m.wa_message_id, m.sender_type, m.content_type, m.content,
              m.media_url, m.media_mime_type, m.status, m.created_at,
              m.agent_id, m.is_auto_reply, m.response_time_ms,
-             m.sender_jid, m.sender_name,
+             m.sender_jid, m.sender_name, m.reactions,
              u.name as agent_name
       FROM messages m
       LEFT JOIN users u ON m.agent_id = u.id
@@ -215,6 +215,92 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
   } catch (error) {
     console.error('Send message error:', error);
     res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+// React to a message
+router.post('/:messageId/react', async (req: Request, res: Response) => {
+  try {
+    const { emoji } = req.body;
+
+    if (emoji === undefined) {
+      res.status(400).json({ error: 'emoji is required (use empty string to remove reaction)' });
+      return;
+    }
+
+    // Get message with conversation details
+    const message = await queryOne<{
+      id: string;
+      wa_message_id: string;
+      conversation_id: string;
+      sender_type: string;
+      reactions: any[];
+    }>(`
+      SELECT m.id, m.wa_message_id, m.conversation_id, m.sender_type, m.reactions,
+             c.whatsapp_account_id, c.is_group, c.group_id,
+             ct.wa_id, ct.jid_type,
+             g.group_jid
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      LEFT JOIN contacts ct ON c.contact_id = ct.id
+      LEFT JOIN groups g ON c.group_id = g.id
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE m.id = $1 AND wa.user_id = $2
+    `, [req.params.messageId, req.user!.userId]);
+
+    if (!message) {
+      res.status(404).json({ error: 'Message not found' });
+      return;
+    }
+
+    // Construct the remote JID
+    const remoteJid = (message as any).is_group
+      ? (message as any).group_jid
+      : `${(message as any).wa_id}@${(message as any).jid_type === 'lid' ? 'lid' : 's.whatsapp.net'}`;
+
+    // Construct message key for Baileys
+    const messageKey = {
+      remoteJid,
+      id: message.wa_message_id,
+      fromMe: message.sender_type === 'agent',
+    };
+
+    // Send the reaction via WhatsApp
+    await sessionManager.sendReaction(
+      (message as any).whatsapp_account_id,
+      remoteJid,
+      messageKey,
+      emoji
+    );
+
+    // Update local reactions (the messages.reaction event will also update this)
+    let reactions = message.reactions || [];
+    const myId = 'me'; // Our reactions are tracked as 'me'
+
+    if (emoji === '') {
+      reactions = reactions.filter((r: any) => r.sender !== myId);
+    } else {
+      reactions = reactions.filter((r: any) => r.sender !== myId);
+      reactions.push({ emoji, sender: myId, timestamp: Date.now() });
+    }
+
+    await execute(
+      `UPDATE messages SET reactions = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(reactions), message.id]
+    );
+
+    // Emit to frontend
+    const io = getIO();
+    io.to(`user:${req.user!.userId}`).emit('message:reaction', {
+      messageId: message.id,
+      waMessageId: message.wa_message_id,
+      reactions,
+    });
+
+    res.json({ success: true, reactions });
+  } catch (error: any) {
+    console.error('React to message error:', error);
+    res.status(500).json({ error: error.message || 'Failed to react to message' });
   }
 });
 

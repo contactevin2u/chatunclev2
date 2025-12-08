@@ -77,6 +77,12 @@ export interface GroupAccount {
   last_message_at: string | null;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  sender: string;
+  timestamp: number;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -91,6 +97,8 @@ export interface Message {
   // Group message fields
   sender_jid: string | null;
   sender_name: string | null;
+  // Reactions
+  reactions?: MessageReaction[];
 }
 
 export interface Template {

@@ -243,6 +243,10 @@ ALTER TABLE templates ADD COLUMN IF NOT EXISTS content_type VARCHAR(50) DEFAULT 
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_url TEXT;
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_mime_type VARCHAR(100);
 
+-- Add reactions support to messages table
+-- Format: [{"emoji": "💖", "sender": "60123456789", "timestamp": 1234567890}]
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions JSONB DEFAULT '[]'::jsonb;
+
 -- ============================================================
 -- PERFORMANCE INDEXES
 -- ============================================================

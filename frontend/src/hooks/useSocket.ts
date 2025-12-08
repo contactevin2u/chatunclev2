@@ -8,6 +8,7 @@ import { useAuth } from './useAuth';
 interface SocketEvents {
   onNewMessage?: (data: any) => void;
   onMessageStatus?: (data: any) => void;
+  onMessageReaction?: (data: any) => void;
   onAccountStatus?: (data: any) => void;
   onQrUpdate?: (data: any) => void;
   onSyncProgress?: (data: any) => void;
@@ -31,6 +32,10 @@ export function useSocket(events: SocketEvents = {}) {
       socket.on('message:status', events.onMessageStatus);
     }
 
+    if (events.onMessageReaction) {
+      socket.on('message:reaction', events.onMessageReaction);
+    }
+
     if (events.onAccountStatus) {
       socket.on('account:status', events.onAccountStatus);
     }
@@ -50,6 +55,9 @@ export function useSocket(events: SocketEvents = {}) {
       if (events.onMessageStatus) {
         socket.off('message:status', events.onMessageStatus);
       }
+      if (events.onMessageReaction) {
+        socket.off('message:reaction', events.onMessageReaction);
+      }
       if (events.onAccountStatus) {
         socket.off('account:status', events.onAccountStatus);
       }
@@ -60,7 +68,7 @@ export function useSocket(events: SocketEvents = {}) {
         socket.off('sync:progress', events.onSyncProgress);
       }
     };
-  }, [token, events.onNewMessage, events.onMessageStatus, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress]);
+  }, [token, events.onNewMessage, events.onMessageStatus, events.onMessageReaction, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress]);
 
   const joinAccount = useCallback((accountId: string) => {
     socketRef.current?.emit('join:account', accountId);

@@ -704,6 +704,70 @@ class SessionManager {
       console.log(`[WA] contacts.update - count: ${updates.length}`);
     });
 
+    // ============ REACTION EVENT HANDLER ============
+    sock.ev.on('messages.reaction', async (reactions) => {
+      // Skip processing if account is being deleted
+      if (this.isAccountDeleting(accountId)) {
+        console.log(`[WA] Skipping messages.reaction - account ${accountId} is being deleted`);
+        return;
+      }
+
+      console.log(`[WA] messages.reaction - count: ${reactions.length}`);
+
+      for (const reaction of reactions) {
+        try {
+          const targetMsgId = reaction.key.id;
+          const emoji = reaction.reaction?.text || '';
+          const senderJid = reaction.reaction?.key?.participant || reaction.key.remoteJid;
+          const senderId = senderJid ? extractUserIdFromJid(senderJid) : 'unknown';
+          const timestamp = Date.now();
+
+          console.log(`[WA] Reaction: ${emoji} on message ${targetMsgId} from ${senderId}`);
+
+          // Find the message by wa_message_id
+          const message = await queryOne<{ id: string; reactions: any[] }>(
+            `SELECT id, reactions FROM messages WHERE wa_message_id = $1`,
+            [targetMsgId]
+          );
+
+          if (!message) {
+            console.log(`[WA] Message not found for reaction: ${targetMsgId}`);
+            continue;
+          }
+
+          let reactions = message.reactions || [];
+
+          if (emoji === '') {
+            // Remove reaction from this sender
+            reactions = reactions.filter((r: any) => r.sender !== senderId);
+          } else {
+            // Remove any existing reaction from this sender, then add new one
+            reactions = reactions.filter((r: any) => r.sender !== senderId);
+            reactions.push({ emoji, sender: senderId, timestamp });
+          }
+
+          // Update message with new reactions
+          await execute(
+            `UPDATE messages SET reactions = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(reactions), message.id]
+          );
+
+          // Emit to frontend
+          const io = getIO();
+          io.to(`user:${userId}`).emit('message:reaction', {
+            accountId,
+            messageId: message.id,
+            waMessageId: targetMsgId,
+            reactions,
+          });
+
+          console.log(`[WA] Updated reactions on message ${message.id}: ${reactions.length} total`);
+        } catch (error) {
+          console.error(`[WA] Error processing reaction:`, error);
+        }
+      }
+    });
+
     // ============ GROUP EVENT HANDLERS ============
 
     // Handle new groups discovered (full metadata)
@@ -1250,17 +1314,9 @@ class SessionManager {
         content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
         break;
       case 'reactionMessage':
-        // Reactions update existing messages - save them as a special type
-        const reaction = messageContent?.reactionMessage;
-        if (reaction?.text) {
-          contentType = 'text';
-          content = `[Reacted: ${reaction.text}]`;
-          console.log(`[WA] Reaction: ${reaction.text}`);
-        } else {
-          console.log(`[WA] Skipping empty reaction`);
-          return;
-        }
-        break;
+        // Reactions are handled by messages.reaction event - skip here
+        console.log(`[WA] Skipping reactionMessage in upsert (handled by messages.reaction event)`);
+        return;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
         // Protocol messages - skip them
@@ -1565,16 +1621,9 @@ class SessionManager {
         content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
         break;
       case 'reactionMessage':
-        // Reactions - save them as special type
-        const reaction = messageContent?.reactionMessage;
-        if (reaction?.text) {
-          contentType = 'text';
-          content = `[Reacted: ${reaction.text}]`;
-        } else {
-          console.log(`[WA] Skipping empty outgoing reaction`);
-          return;
-        }
-        break;
+        // Reactions are handled by messages.reaction event - skip here
+        console.log(`[WA] Skipping outgoing reactionMessage (handled by messages.reaction event)`);
+        return;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
         // Protocol messages - skip them
@@ -2445,6 +2494,47 @@ class SessionManager {
    */
   async isInWarmupPeriod(accountId: string): Promise<boolean> {
     return isInWarmupPeriod(accountId);
+  }
+
+  /**
+   * Send a reaction to a message
+   * @param accountId - WhatsApp account ID
+   * @param remoteJid - The JID of the conversation (contact or group)
+   * @param messageKey - The key of the message to react to
+   * @param emoji - The emoji to react with (empty string to remove reaction)
+   */
+  async sendReaction(
+    accountId: string,
+    remoteJid: string,
+    messageKey: { remoteJid: string; id: string; fromMe?: boolean; participant?: string },
+    emoji: string
+  ): Promise<void> {
+    const session = this.sessions.get(accountId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    const sock = session.socket;
+
+    // Check if socket is connected
+    if (!sock.user) {
+      throw new Error('Session not connected - please reconnect');
+    }
+
+    console.log(`[WA] Sending reaction ${emoji || '(remove)'} to message ${messageKey.id}`);
+
+    try {
+      await sock.sendMessage(remoteJid, {
+        react: {
+          text: emoji,
+          key: messageKey,
+        },
+      });
+      console.log(`[WA] Reaction sent successfully`);
+    } catch (error) {
+      console.error(`[WA] Failed to send reaction:`, error);
+      throw error;
+    }
   }
 
   async reconnectSession(accountId: string, userId: string): Promise<void> {
