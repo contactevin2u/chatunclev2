@@ -13,6 +13,7 @@ import {
   Check,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 interface InternalNotesProps {
   conversationId: string;
@@ -86,22 +87,9 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
     setEditContent(note.content);
   };
 
-  return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <StickyNote className="h-5 w-5 text-yellow-500" />
-          <h3 className="font-semibold text-gray-900">Internal Notes</h3>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-1 hover:bg-gray-100 rounded"
-        >
-          <X className="h-5 w-5 text-gray-500" />
-        </button>
-      </div>
-
+  // Shared content for both mobile and desktop
+  const notesContent = (
+    <>
       {/* Notes List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {isLoading ? (
@@ -129,13 +117,13 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
                   <div className="flex justify-end space-x-2">
                     <button
                       onClick={() => setEditingId(null)}
-                      className="p-1 text-gray-500 hover:bg-gray-100 rounded"
+                      className="p-2 text-gray-500 hover:bg-gray-100 rounded active:bg-gray-200"
                     >
                       <X className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => handleUpdate(note.id)}
-                      className="p-1 text-green-600 hover:bg-green-50 rounded"
+                      className="p-2 text-green-600 hover:bg-green-50 rounded active:bg-green-100"
                     >
                       <Check className="h-4 w-4" />
                     </button>
@@ -153,15 +141,15 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
                     <div className="flex space-x-1">
                       <button
                         onClick={() => startEdit(note)}
-                        className="p-1 text-gray-400 hover:text-gray-600 hover:bg-yellow-100 rounded"
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-yellow-100 rounded active:bg-yellow-200"
                       >
-                        <Edit2 className="h-3 w-3" />
+                        <Edit2 className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(note.id)}
-                        className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded active:bg-red-100"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
@@ -173,14 +161,14 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
       </div>
 
       {/* Add Note */}
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200 bg-white">
         {isAdding ? (
           <div className="space-y-2">
             <textarea
               value={newNote}
               onChange={(e) => setNewNote(e.target.value)}
               placeholder="Write an internal note..."
-              className="w-full border border-gray-300 rounded-lg p-2 text-sm resize-none"
+              className="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none"
               rows={3}
               autoFocus
             />
@@ -190,13 +178,13 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
                   setIsAdding(false);
                   setNewNote('');
                 }}
-                className="px-3 py-1 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg active:bg-gray-200"
               >
                 Cancel
               </button>
               <button
                 onClick={handleAdd}
-                className="px-3 py-1 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                className="px-4 py-2 text-sm bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 active:bg-yellow-700"
               >
                 Add Note
               </button>
@@ -205,13 +193,47 @@ export default function InternalNotes({ conversationId, onClose }: InternalNotes
         ) : (
           <button
             onClick={() => setIsAdding(true)}
-            className="w-full flex items-center justify-center space-x-2 py-2 border border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-yellow-400 hover:text-yellow-600 transition-colors"
+            className="w-full flex items-center justify-center space-x-2 py-3 border border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-yellow-400 hover:text-yellow-600 active:bg-yellow-50 transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span className="text-sm">Add Note</span>
           </button>
         )}
       </div>
-    </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile Bottom Sheet */}
+      <BottomSheet
+        isOpen={true}
+        onClose={onClose}
+        title="Internal Notes"
+        icon={<StickyNote className="h-5 w-5 text-yellow-500" />}
+        badge={notesList.length}
+      >
+        {notesContent}
+      </BottomSheet>
+
+      {/* Desktop Side Panel */}
+      <div className="hidden md:flex w-80 bg-white border-l border-gray-200 flex-col h-full">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <StickyNote className="h-5 w-5 text-yellow-500" />
+            <h3 className="font-semibold text-gray-900">Internal Notes</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-100 rounded"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+
+        {notesContent}
+      </div>
+    </>
   );
 }

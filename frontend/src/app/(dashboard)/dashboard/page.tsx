@@ -11,6 +11,7 @@ import MessageInput from '@/components/chat/MessageInput';
 import InternalNotes from '@/components/chat/InternalNotes';
 import OrdersPanel from '@/components/chat/OrdersPanel';
 import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, Package } from 'lucide-react';
+import MobileBottomNav from '@/components/ui/MobileBottomNav';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -448,13 +449,30 @@ export default function InboxPage() {
     setMobileShowChat(false);
   };
 
+  // Calculate total unread count for mobile nav badge
+  const totalUnreadCount = conversationsList.reduce((total, conv) => {
+    if (conv.is_unified_group && conv.accounts) {
+      return total + (conv.total_unread || 0);
+    }
+    return total + (conv.unread_count || 0);
+  }, 0);
+
+  // Handle inbox click from bottom nav (returns to conversation list)
+  const handleMobileInboxClick = () => {
+    if (mobileShowChat) {
+      setMobileShowChat(false);
+    }
+  };
+
   return (
-    <div className="h-screen flex overflow-hidden">
+    <div className="h-screen flex overflow-hidden relative">
       {/* Conversations sidebar - hidden on mobile when chat is shown */}
       <div className={`
         w-full md:w-80 lg:w-96
         border-r border-gray-200 bg-white flex flex-col
+        transition-transform duration-250 ease-out
         ${mobileShowChat ? 'hidden md:flex' : 'flex'}
+        md:pb-0 pb-16
       `}>
         <div className="p-3 md:p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
@@ -575,6 +593,7 @@ export default function InboxPage() {
       {/* Message area - hidden on mobile when showing list */}
       <div className={`
         flex-1 flex bg-[#E5DDD5]
+        transition-transform duration-250 ease-out
         ${mobileShowChat ? 'flex' : 'hidden md:flex'}
       `}>
         <div className="flex-1 flex flex-col">
@@ -831,7 +850,7 @@ export default function InboxPage() {
               </div>
 
               {/* Input */}
-              <div className="bg-[#F0F2F5] p-2 sm:p-3">
+              <div className="bg-[#F0F2F5] p-2 sm:p-3 pb-[calc(0.5rem+4rem)] md:pb-3">
                 <MessageInput
                   onSend={handleSendMessage}
                   disabled={isSending}
@@ -866,6 +885,13 @@ export default function InboxPage() {
           />
         )}
       </div>
+
+      {/* Mobile Bottom Navigation */}
+      <MobileBottomNav
+        unreadCount={totalUnreadCount}
+        onInboxClick={handleMobileInboxClick}
+        showInbox={!mobileShowChat}
+      />
     </div>
   );
 }

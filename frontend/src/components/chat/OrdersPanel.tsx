@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { orderops } from '@/lib/api';
+import BottomSheet from '@/components/ui/BottomSheet';
 
 interface Order {
   id: string;
@@ -600,42 +601,15 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
     );
   };
 
-  return (
-    <div className="w-96 border-l border-gray-200 bg-gray-50 flex flex-col h-full">
-      {/* Header */}
-      <div className="p-3 border-b border-gray-200 bg-white flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <Package className="h-5 w-5 text-blue-600" />
-          <h3 className="font-semibold text-gray-900">Orders</h3>
-          {orders.length > 0 && (
-            <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full">
-              {orders.length}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center space-x-1">
-          <button
-            onClick={loadOrders}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-            title="Refresh orders"
-          >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </button>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
+  // Shared content for both mobile and desktop
+  const ordersContent = (
+    <>
       {/* Error */}
       {error && (
         <div className="mx-3 mt-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2 text-sm text-red-700">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
           <span className="flex-1 text-xs">{error}</span>
-          <button onClick={() => setError(null)}><X className="h-3 w-3" /></button>
+          <button onClick={() => setError(null)} className="p-1"><X className="h-3 w-3" /></button>
         </div>
       )}
 
@@ -648,7 +622,7 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
               value={linkInput}
               onChange={(e) => setLinkInput(e.target.value)}
               placeholder="Order ID or Code (e.g. 7037 or WC5577)"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()}
               autoFocus
             />
@@ -656,13 +630,13 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
               <button
                 onClick={handleLinkOrder}
                 disabled={isLinking || !linkInput.trim()}
-                className="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                className="flex-1 px-3 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50"
               >
                 {isLinking ? 'Linking...' : 'Link Order'}
               </button>
               <button
                 onClick={() => { setShowLinkForm(false); setLinkInput(''); }}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+                className="px-3 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 active:bg-gray-100"
               >
                 Cancel
               </button>
@@ -671,7 +645,7 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
         ) : (
           <button
             onClick={() => setShowLinkForm(true)}
-            className="w-full flex items-center justify-center space-x-2 px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+            className="w-full flex items-center justify-center space-x-2 px-3 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 active:bg-blue-50 transition-colors"
           >
             <Plus className="h-4 w-4" />
             <span className="text-sm font-medium">Link Order</span>
@@ -697,6 +671,63 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
           </div>
         )}
       </div>
-    </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile Bottom Sheet */}
+      <BottomSheet
+        isOpen={true}
+        onClose={onClose}
+        title="Orders"
+        icon={<Package className="h-5 w-5 text-blue-600" />}
+        badge={orders.length}
+      >
+        <div className="flex items-center space-x-2 px-4 py-2 border-b border-gray-100 bg-gray-50">
+          <button
+            onClick={loadOrders}
+            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg active:bg-gray-200"
+            title="Refresh orders"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+        {ordersContent}
+      </BottomSheet>
+
+      {/* Desktop Side Panel */}
+      <div className="hidden md:flex w-96 border-l border-gray-200 bg-gray-50 flex-col h-full">
+        {/* Header */}
+        <div className="p-3 border-b border-gray-200 bg-white flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Package className="h-5 w-5 text-blue-600" />
+            <h3 className="font-semibold text-gray-900">Orders</h3>
+            {orders.length > 0 && (
+              <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                {orders.length}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={loadOrders}
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+              title="Refresh orders"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {ordersContent}
+      </div>
+    </>
   );
 }

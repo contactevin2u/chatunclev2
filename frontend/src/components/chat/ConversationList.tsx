@@ -102,8 +102,8 @@ export default function ConversationList({
                 }
               }}
               className={clsx(
-                'w-full px-3 sm:px-4 py-2.5 sm:py-3 flex items-start space-x-2.5 sm:space-x-3 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left',
-                isSelected(conversation) && 'bg-gray-100'
+                'w-full px-3 sm:px-4 py-3 sm:py-3 flex items-start space-x-2.5 sm:space-x-3 hover:bg-gray-50 active:bg-gray-100 transition-all duration-150 text-left touch-manipulation',
+                isSelected(conversation) && 'bg-green-50 border-l-4 border-green-500'
               )}
             >
               {/* Avatar */}
