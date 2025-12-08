@@ -608,12 +608,13 @@ router.get('/conversation/:conversationId/orders', async (req: Request, res: Res
     const { conversationId } = req.params;
     const userId = req.user!.userId;
 
-    // Verify ownership
+    // Verify ownership (including shared account access)
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -653,12 +654,13 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       return;
     }
 
-    // Verify ownership and get contact
+    // Verify ownership (including shared account access) and get contact
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -771,11 +773,12 @@ router.delete('/conversation/:conversationId/orders/:orderId', async (req: Reque
     const { conversationId, orderId } = req.params;
     const userId = req.user!.userId;
 
-    // Verify ownership
+    // Verify ownership (including shared account access)
     const conversation = await queryOne(`
       SELECT c.id FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -804,11 +807,12 @@ router.post('/conversation/:conversationId/orders/:orderId/sync', async (req: Re
     const { conversationId, orderId } = req.params;
     const userId = req.user!.userId;
 
-    // Verify ownership
+    // Verify ownership (including shared account access)
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
