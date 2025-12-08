@@ -10,15 +10,33 @@ const router = Router();
 // All routes require authentication
 router.use(authenticate);
 
-// List user's WhatsApp accounts
+// List user's WhatsApp accounts (owned + shared)
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const accounts = await query<WhatsAppAccount>(
-      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
+    // Get owned accounts
+    const ownedAccounts = await query<WhatsAppAccount & { is_owner: boolean; permission: string }>(
+      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at,
+              TRUE as is_owner, 'owner' as permission
        FROM whatsapp_accounts
-       WHERE user_id = $1
-       ORDER BY created_at DESC`,
+       WHERE user_id = $1`,
       [req.user!.userId]
+    );
+
+    // Get shared accounts (accounts this user has access to but doesn't own)
+    const sharedAccounts = await query<WhatsAppAccount & { is_owner: boolean; permission: string; owner_name: string }>(
+      `SELECT wa.id, wa.phone_number, wa.name, wa.status, wa.incognito_mode, wa.show_channel_name, wa.channel_display_name,
+              wa.created_at, wa.updated_at,
+              FALSE as is_owner, aa.permission, u.name as owner_name
+       FROM whatsapp_accounts wa
+       JOIN account_access aa ON wa.id = aa.whatsapp_account_id
+       JOIN users u ON wa.user_id = u.id
+       WHERE aa.agent_id = $1`,
+      [req.user!.userId]
+    );
+
+    // Combine and sort by created_at
+    const accounts = [...ownedAccounts, ...sharedAccounts].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
     res.json({ accounts });
@@ -260,5 +278,154 @@ function getRecommendations(stats: any): string[] {
 
   return recommendations;
 }
+
+// ============================================================
+// ACCOUNT ACCESS CONTROL (Multi-agent sharing)
+// ============================================================
+
+// List agents with access to an account (owner only)
+router.get('/:id/access', async (req: Request, res: Response) => {
+  try {
+    // Only owner can view access list
+    const account = await queryOne<WhatsAppAccount>(
+      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found or not owner' });
+      return;
+    }
+
+    const accessList = await query(
+      `SELECT aa.id, aa.agent_id, aa.permission, aa.granted_at,
+              u.name as agent_name, u.email as agent_email
+       FROM account_access aa
+       JOIN users u ON aa.agent_id = u.id
+       WHERE aa.whatsapp_account_id = $1
+       ORDER BY aa.granted_at DESC`,
+      [req.params.id]
+    );
+
+    res.json({ access: accessList });
+  } catch (error) {
+    console.error('List account access error:', error);
+    res.status(500).json({ error: 'Failed to list account access' });
+  }
+});
+
+// Grant access to an agent (owner only)
+router.post('/:id/access', async (req: Request, res: Response) => {
+  try {
+    const { agentEmail, permission = 'full' } = req.body;
+
+    if (!agentEmail) {
+      res.status(400).json({ error: 'agentEmail is required' });
+      return;
+    }
+
+    // Valid permissions: 'full', 'send', 'view'
+    if (!['full', 'send', 'view'].includes(permission)) {
+      res.status(400).json({ error: 'Invalid permission. Use: full, send, or view' });
+      return;
+    }
+
+    // Only owner can grant access
+    const account = await queryOne<WhatsAppAccount>(
+      'SELECT id, name FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found or not owner' });
+      return;
+    }
+
+    // Find the agent by email
+    const agent = await queryOne<{ id: string; name: string; email: string }>(
+      'SELECT id, name, email FROM users WHERE email = $1',
+      [agentEmail]
+    );
+
+    if (!agent) {
+      res.status(404).json({ error: 'Agent not found with that email' });
+      return;
+    }
+
+    // Can't grant access to yourself
+    if (agent.id === req.user!.userId) {
+      res.status(400).json({ error: 'Cannot grant access to yourself (you are the owner)' });
+      return;
+    }
+
+    // Grant or update access
+    const access = await queryOne(
+      `INSERT INTO account_access (whatsapp_account_id, agent_id, permission, granted_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (whatsapp_account_id, agent_id)
+       DO UPDATE SET permission = $3, granted_at = NOW()
+       RETURNING *`,
+      [req.params.id, agent.id, permission, req.user!.userId]
+    );
+
+    res.status(201).json({
+      message: `Access granted to ${agent.name}`,
+      access: {
+        ...access,
+        agent_name: agent.name,
+        agent_email: agent.email,
+      },
+    });
+  } catch (error) {
+    console.error('Grant access error:', error);
+    res.status(500).json({ error: 'Failed to grant access' });
+  }
+});
+
+// Revoke access from an agent (owner only)
+router.delete('/:id/access/:agentId', async (req: Request, res: Response) => {
+  try {
+    // Only owner can revoke access
+    const account = await queryOne<WhatsAppAccount>(
+      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found or not owner' });
+      return;
+    }
+
+    const deletedCount = await execute(
+      'DELETE FROM account_access WHERE whatsapp_account_id = $1 AND agent_id = $2',
+      [req.params.id, req.params.agentId]
+    );
+
+    if (deletedCount === 0) {
+      res.status(404).json({ error: 'Access record not found' });
+      return;
+    }
+
+    res.json({ message: 'Access revoked' });
+  } catch (error) {
+    console.error('Revoke access error:', error);
+    res.status(500).json({ error: 'Failed to revoke access' });
+  }
+});
+
+// List all agents (for access management dropdown) - returns all non-admin agents
+router.get('/agents/list', async (req: Request, res: Response) => {
+  try {
+    const agents = await query(
+      `SELECT id, name, email FROM users WHERE id != $1 ORDER BY name`,
+      [req.user!.userId]
+    );
+
+    res.json({ agents });
+  } catch (error) {
+    console.error('List agents error:', error);
+    res.status(500).json({ error: 'Failed to list agents' });
+  }
+});
 
 export default router;

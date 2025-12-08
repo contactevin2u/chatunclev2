@@ -248,6 +248,34 @@ ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_mime_type VARCHAR(100);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions JSONB DEFAULT '[]'::jsonb;
 
 -- ============================================================
+-- ACCOUNT ACCESS CONTROL (Multi-agent account sharing)
+-- ============================================================
+-- Allows account owners to grant other agents access to their WhatsApp accounts
+-- Permission levels: 'full' (send/receive/manage), 'send' (send messages only), 'view' (read-only)
+CREATE TABLE IF NOT EXISTS account_access (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  permission VARCHAR(20) DEFAULT 'full',
+  granted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  granted_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(whatsapp_account_id, agent_id)
+);
+
+-- Index for fast access lookup
+CREATE INDEX IF NOT EXISTS idx_account_access_agent ON account_access(agent_id);
+CREATE INDEX IF NOT EXISTS idx_account_access_account ON account_access(whatsapp_account_id);
+
+-- ============================================================
+-- MESSAGE DEDUPLICATION
+-- ============================================================
+-- Prevent duplicate messages when history syncs multiple times
+-- Uses partial unique index since wa_message_id can be NULL for unsent messages
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id_unique
+  ON messages(conversation_id, wa_message_id)
+  WHERE wa_message_id IS NOT NULL;
+
+-- ============================================================
 -- PERFORMANCE INDEXES
 -- ============================================================
 

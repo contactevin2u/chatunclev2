@@ -53,7 +53,8 @@ router.get('/', async (req: Request, res: Response) => {
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE wa.user_id = $1
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
+      WHERE (wa.user_id = $1 OR aa.agent_id IS NOT NULL)
     `;
 
     const params: any[] = [req.user!.userId];

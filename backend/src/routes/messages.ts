@@ -14,7 +14,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
   try {
     const { limit = 50, before } = req.query;
 
-    // Verify ownership (handles both 1:1 and group conversations)
+    // Verify ownership or shared access (handles both 1:1 and group conversations)
     const conversation = await queryOne(`
       SELECT c.id, c.whatsapp_account_id, c.is_group, c.group_id,
              ct.wa_id, ct.jid_type,
@@ -23,7 +23,8 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, req.user!.userId]);
 
     if (!conversation) {
@@ -71,20 +72,28 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     const { content, contentType = 'text', mediaUrl, mediaMimeType } = req.body;
     const agentId = req.user!.userId;
 
-    // Verify ownership and get details - handle both 1:1 (contact_id) and group (group_id) conversations
+    // Verify ownership or shared access with send permission
     const conversation = await queryOne(`
       SELECT c.id, c.whatsapp_account_id, c.is_group, c.first_response_at,
              ct.wa_id, ct.jid_type,
-             g.group_jid
+             g.group_jid,
+             CASE WHEN wa.user_id = $2 THEN 'owner' ELSE aa.permission END as permission
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, agentId]);
 
     if (!conversation) {
       res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Check permission - only owner, full, or send can send messages
+    if (!['owner', 'full', 'send'].includes(conversation.permission)) {
+      res.status(403).json({ error: 'You do not have permission to send messages' });
       return;
     }
 

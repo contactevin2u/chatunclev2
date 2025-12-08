@@ -1343,15 +1343,17 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
-    // Save message
+    // Save message (ON CONFLICT handles duplicate syncs)
     const savedMessage = await queryOne(
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
        VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7)
+       ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
+       DO UPDATE SET updated_at = NOW()
        RETURNING *`,
       [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
     );
 
-    console.log(`[WA] Saved message ${savedMessage.id} (${contentType}): ${content.substring(0, 50)}...`);
+    console.log(`[WA] Saved message ${savedMessage.id} (${contentType}): ${content?.substring(0, 50) || '[media]'}...`);
 
     // Cache message in MessageStore for retry handling
     if (msg.message) {
@@ -1650,15 +1652,17 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
-    // Save message as sent by agent (from phone)
+    // Save message as sent by agent (from phone) - ON CONFLICT handles duplicate syncs
     const savedMessage = await queryOne(
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
        VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7)
+       ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
+       DO UPDATE SET updated_at = NOW()
        RETURNING *`,
       [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
     );
 
-    console.log(`[WA] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
+    console.log(`[WA] Saved outgoing message ${savedMessage.id}: ${content?.substring(0, 50) || '[media]'}...`);
 
     // Cache message in MessageStore for retry handling
     if (msg.message) {
@@ -2188,15 +2192,17 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
-    // Save message with sender info (sender_jid and sender_name for groups)
+    // Save message with sender info (sender_jid and sender_name for groups) - ON CONFLICT handles duplicate syncs
     const savedMessage = await queryOne(
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, sender_jid, sender_name, created_at)
        VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7, $8, $9)
+       ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
+       DO UPDATE SET updated_at = NOW()
        RETURNING *`,
       [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, senderJid, pushName, messageTimestamp]
     );
 
-    console.log(`[WA][Group] Saved message ${savedMessage.id} from ${pushName || senderWaId}: ${content.substring(0, 50)}...`);
+    console.log(`[WA][Group] Saved message ${savedMessage.id} from ${pushName || senderWaId}: ${content?.substring(0, 50) || '[media]'}...`);
 
     // Cache message for retry handling
     if (msg.message) {
@@ -2416,15 +2422,17 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
-    // Save message as sent by agent (our account)
+    // Save message as sent by agent (our account) - ON CONFLICT handles duplicate syncs
     const savedMessage = await queryOne(
       `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
        VALUES ($1, $2, 'agent', $3, $4, $5, $6, 'sent', $7)
+       ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
+       DO UPDATE SET updated_at = NOW()
        RETURNING *`,
       [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
     );
 
-    console.log(`[WA][Group] Saved outgoing message ${savedMessage.id}: ${content.substring(0, 50)}...`);
+    console.log(`[WA][Group] Saved outgoing message ${savedMessage.id}: ${content?.substring(0, 50) || '[media]'}...`);
 
     // Cache message
     if (msg.message) {
