@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Package, RefreshCw, Plus, Trash2, ExternalLink, ChevronDown, ChevronRight, DollarSign, Truck, AlertCircle } from 'lucide-react';
+import {
+  X, Package, RefreshCw, Plus, Trash2, ChevronDown, ChevronRight,
+  DollarSign, Truck, AlertCircle, Calendar, MapPin, Phone, User,
+  Send, Copy, Check, CreditCard, Clock, FileText
+} from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { orderops } from '@/lib/api';
 
@@ -24,9 +28,10 @@ interface Order {
 interface OrdersPanelProps {
   conversationId: string;
   onClose: () => void;
+  onSendMessage?: (message: string) => void;
 }
 
-export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProps) {
+export default function OrdersPanel({ conversationId, onClose, onSendMessage }: OrdersPanelProps) {
   const { token } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,10 +39,11 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
   const [linkInput, setLinkInput] = useState('');
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [syncingOrders, setSyncingOrders] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  // Load orders on mount
   useEffect(() => {
     loadOrders();
   }, [token, conversationId]);
@@ -49,6 +55,10 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
     try {
       const { orders: loadedOrders } = await orderops.getConversationOrders(token, conversationId);
       setOrders(loadedOrders || []);
+      // Auto-expand first order
+      if (loadedOrders?.length > 0) {
+        setExpandedOrders(new Set([loadedOrders[0].orderops_order_id]));
+      }
     } catch (err: any) {
       console.error('Failed to load orders:', err);
       setError(err.message || 'Failed to load orders');
@@ -64,9 +74,7 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
     try {
       const input = linkInput.trim();
       const isNumeric = /^\d+$/.test(input);
-
       await orderops.linkOrder(token, conversationId, isNumeric ? { orderId: parseInt(input) } : { orderCode: input });
-
       setLinkInput('');
       setShowLinkForm(false);
       loadOrders();
@@ -84,7 +92,6 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
       await orderops.unlinkOrder(token, conversationId, orderId);
       loadOrders();
     } catch (err: any) {
-      console.error('Failed to unlink order:', err);
       setError(err.message || 'Failed to unlink order');
     }
   };
@@ -96,7 +103,6 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
       await orderops.syncOrder(token, conversationId, orderId);
       loadOrders();
     } catch (err: any) {
-      console.error('Failed to sync order:', err);
       setError(err.message || 'Failed to sync order');
     } finally {
       setSyncingOrders(prev => {
@@ -110,13 +116,31 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
   const toggleExpanded = (orderId: number) => {
     setExpandedOrders(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(orderId)) {
-        newSet.delete(orderId);
-      } else {
-        newSet.add(orderId);
-      }
+      if (newSet.has(orderId)) newSet.delete(orderId);
+      else newSet.add(orderId);
       return newSet;
     });
+  };
+
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sectionId)) newSet.delete(sectionId);
+      else newSet.add(sectionId);
+      return newSet;
+    });
+  };
+
+  const copyToClipboard = async (text: string, fieldId: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopiedField(fieldId);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const sendQuickMessage = (message: string) => {
+    if (onSendMessage) {
+      onSendMessage(message);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -133,110 +157,335 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
   const getDeliveryStatusColor = (status: string) => {
     switch (status?.toUpperCase()) {
       case 'ASSIGNED': return 'bg-yellow-100 text-yellow-800';
+      case 'PICKING_UP': return 'bg-amber-100 text-amber-800';
       case 'EN_ROUTE': return 'bg-orange-100 text-orange-800';
       case 'DELIVERED': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-600';
     }
   };
 
-  const formatCurrency = (amount: string | number) => {
+  const formatCurrency = (amount: string | number | null | undefined) => {
+    if (!amount) return 'RM 0.00';
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return `RM ${num?.toFixed(2) || '0.00'}`;
   };
 
+  const formatDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-MY', {
+        day: 'numeric', month: 'short', year: 'numeric'
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
   const renderOrder = (order: Order, isChild = false) => {
-    const hasChildren = order.child_orders && order.child_orders.length > 0;
     const isExpanded = expandedOrders.has(order.orderops_order_id);
     const isSyncing = syncingOrders.has(order.orderops_order_id);
     const parsedData = typeof order.parsed_data === 'string' ? JSON.parse(order.parsed_data) : order.parsed_data;
     const orderDetails = parsedData?.order;
     const dueDetails = parsedData?.due;
+    const hasChildren = order.child_orders && order.child_orders.length > 0;
+
+    // Extract details
+    const customer = orderDetails?.customer || {};
+    const trip = orderDetails?.trip || {};
+    const items = orderDetails?.items || [];
+    const payments = orderDetails?.payments || [];
+    const plan = orderDetails?.plan;
+    const deliveryDate = orderDetails?.delivery_date;
+    const notes = orderDetails?.notes;
+
+    const balanceAmount = parseFloat(order.balance) || 0;
+    const hasBalance = balanceAmount > 0;
 
     return (
-      <div key={order.id} className={`${isChild ? 'ml-4 border-l-2 border-gray-200 pl-3' : ''}`}>
-        <div className="bg-white rounded-lg border border-gray-200 p-3 mb-2 hover:shadow-sm transition-shadow">
-          {/* Header */}
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-2">
-              {hasChildren && (
-                <button onClick={() => toggleExpanded(order.orderops_order_id)} className="p-0.5 hover:bg-gray-100 rounded">
-                  {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                </button>
-              )}
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-semibold text-gray-900">{order.order_code}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getStatusColor(order.status)}`}>
-                    {order.status}
-                  </span>
-                </div>
-                <div className="text-sm text-gray-500">{order.customer_name}</div>
+      <div key={order.id} className={`${isChild ? 'ml-3 border-l-2 border-blue-200 pl-2' : ''}`}>
+        <div className={`bg-white rounded-lg border ${hasBalance ? 'border-orange-300' : 'border-gray-200'} mb-2 overflow-hidden`}>
+          {/* Compact Header - Always visible */}
+          <div
+            className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => toggleExpanded(order.orderops_order_id)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                <span className="font-bold text-gray-900">{order.order_code}</span>
+                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getStatusColor(order.status)}`}>
+                  {order.status}
+                </span>
               </div>
-            </div>
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => handleSyncOrder(order.orderops_order_id)}
-                disabled={isSyncing}
-                className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                title="Sync from OrderOps"
-              >
-                <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                onClick={() => handleUnlinkOrder(order.orderops_order_id)}
-                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                title="Unlink order"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Order Details */}
-          <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-            <div className="flex items-center space-x-1 text-gray-600">
-              <Package className="h-3.5 w-3.5" />
-              <span>{order.order_type}</span>
-            </div>
-            {order.delivery_status && (
               <div className="flex items-center space-x-1">
-                <Truck className="h-3.5 w-3.5 text-gray-400" />
-                <span className={`px-1.5 py-0.5 rounded text-xs ${getDeliveryStatusColor(order.delivery_status)}`}>
-                  {order.delivery_status}
-                </span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleSyncOrder(order.orderops_order_id); }}
+                  disabled={isSyncing}
+                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                  title="Refresh"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleUnlinkOrder(order.orderops_order_id); }}
+                  className="p-1 text-gray-400 hover:text-red-600 rounded"
+                  title="Unlink"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
-            )}
-          </div>
-
-          {/* Financials */}
-          <div className="mt-2 pt-2 border-t border-gray-100">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500">Total:</span>
-              <span className="font-medium">{formatCurrency(order.total)}</span>
             </div>
-            {parseFloat(order.balance) > 0 && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-orange-600 flex items-center space-x-1">
-                  <DollarSign className="h-3.5 w-3.5" />
-                  <span>Balance:</span>
-                </span>
-                <span className="font-medium text-orange-600">{formatCurrency(order.balance)}</span>
+
+            {/* Summary row */}
+            <div className="mt-1 flex items-center justify-between text-sm">
+              <span className="text-gray-600">{order.customer_name || customer.name || '-'}</span>
+              <div className="flex items-center space-x-3">
+                <span className="font-medium">{formatCurrency(order.total)}</span>
+                {hasBalance && (
+                  <span className="text-orange-600 font-medium flex items-center">
+                    <DollarSign className="h-3 w-3" />
+                    {formatCurrency(order.balance)}
+                  </span>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
-          {/* Items preview */}
-          {orderDetails?.items && orderDetails.items.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-gray-100">
-              <div className="text-xs text-gray-500 mb-1">Items:</div>
-              {orderDetails.items.slice(0, 3).map((item: any, idx: number) => (
-                <div key={idx} className="text-xs text-gray-700 truncate">
-                  • {item.name} x{item.qty}
+          {/* Expanded Details */}
+          {isExpanded && (
+            <div className="border-t border-gray-100 bg-gray-50">
+              {/* Quick Actions */}
+              {onSendMessage && (
+                <div className="p-2 border-b border-gray-100 bg-blue-50">
+                  <div className="text-xs font-medium text-blue-800 mb-1.5">Quick Send:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {hasBalance && (
+                      <button
+                        onClick={() => sendQuickMessage(`Hi ${customer.name || order.customer_name}, your balance for order ${order.order_code} is ${formatCurrency(order.balance)}. Please make payment at your earliest convenience. Thank you!`)}
+                        className="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded hover:bg-orange-200 flex items-center space-x-1"
+                      >
+                        <DollarSign className="h-3 w-3" />
+                        <span>Balance Due</span>
+                      </button>
+                    )}
+                    {trip?.driver && (
+                      <button
+                        onClick={() => sendQuickMessage(`Your order ${order.order_code} is being delivered by ${trip.driver.name}. Contact: ${trip.driver.phone || 'N/A'}`)}
+                        className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-1"
+                      >
+                        <Truck className="h-3 w-3" />
+                        <span>Driver Info</span>
+                      </button>
+                    )}
+                    {deliveryDate && (
+                      <button
+                        onClick={() => sendQuickMessage(`Your order ${order.order_code} is scheduled for delivery on ${formatDate(deliveryDate)}. We will notify you when the driver is on the way.`)}
+                        className="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center space-x-1"
+                      >
+                        <Calendar className="h-3 w-3" />
+                        <span>Delivery Date</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => sendQuickMessage(`Order ${order.order_code}\nTotal: ${formatCurrency(order.total)}${hasBalance ? `\nBalance: ${formatCurrency(order.balance)}` : ''}\nStatus: ${order.status}${deliveryDate ? `\nDelivery: ${formatDate(deliveryDate)}` : ''}`)}
+                      className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 flex items-center space-x-1"
+                    >
+                      <FileText className="h-3 w-3" />
+                      <span>Summary</span>
+                    </button>
+                  </div>
                 </div>
-              ))}
-              {orderDetails.items.length > 3 && (
-                <div className="text-xs text-gray-400">+{orderDetails.items.length - 3} more</div>
               )}
+
+              {/* Order Info Grid */}
+              <div className="p-3 space-y-3">
+                {/* Type & Delivery Date */}
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-500 text-xs">Type</span>
+                    <div className="font-medium">{order.order_type || orderDetails?.type || '-'}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 text-xs">Delivery</span>
+                    <div className="font-medium flex items-center space-x-1">
+                      <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                      <span>{formatDate(deliveryDate)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Customer Details */}
+                {(customer.phone || customer.address) && (
+                  <div className="bg-white rounded p-2 border border-gray-200">
+                    <div className="text-xs font-medium text-gray-500 mb-1">Customer</div>
+                    {customer.phone && (
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="flex items-center space-x-1 text-gray-700">
+                          <Phone className="h-3.5 w-3.5 text-gray-400" />
+                          <span>{customer.phone}</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(customer.phone, `phone-${order.id}`)}
+                          className="p-1 text-gray-400 hover:text-blue-600"
+                        >
+                          {copiedField === `phone-${order.id}` ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    )}
+                    {customer.address && (
+                      <div className="flex items-start space-x-1 text-sm text-gray-600 mt-1">
+                        <MapPin className="h-3.5 w-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <span className="text-xs">{customer.address}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Driver/Trip Info */}
+                {trip?.driver && (
+                  <div className="bg-green-50 rounded p-2 border border-green-200">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-medium text-green-800">Driver</div>
+                      {order.delivery_status && (
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${getDeliveryStatusColor(order.delivery_status)}`}>
+                          {order.delivery_status}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="flex items-center space-x-1 text-sm">
+                        <User className="h-3.5 w-3.5 text-green-600" />
+                        <span className="font-medium">{trip.driver.name}</span>
+                      </div>
+                      {trip.driver.phone && (
+                        <div className="flex items-center space-x-1">
+                          <span className="text-sm text-gray-600">{trip.driver.phone}</span>
+                          <button
+                            onClick={() => copyToClipboard(trip.driver.phone, `driver-${order.id}`)}
+                            className="p-1 text-gray-400 hover:text-blue-600"
+                          >
+                            {copiedField === `driver-${order.id}` ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Items Section */}
+                {items.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => toggleSection(`items-${order.id}`)}
+                      className="flex items-center justify-between w-full text-xs font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      <span>Items ({items.length})</span>
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedSections.has(`items-${order.id}`) ? 'rotate-180' : ''}`} />
+                    </button>
+                    {expandedSections.has(`items-${order.id}`) && (
+                      <div className="mt-1 bg-white rounded border border-gray-200 divide-y divide-gray-100">
+                        {items.map((item: any, idx: number) => (
+                          <div key={idx} className="p-2 text-sm flex justify-between">
+                            <div>
+                              <span className="font-medium">{item.name || item.product_name}</span>
+                              <span className="text-gray-500 ml-1">x{item.qty || item.quantity || 1}</span>
+                            </div>
+                            <span className="text-gray-600">{formatCurrency(item.price || item.unit_price)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Payment Info */}
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500">Subtotal</span>
+                    <span>{formatCurrency(orderDetails?.subtotal)}</span>
+                  </div>
+                  {orderDetails?.delivery_fee && parseFloat(orderDetails.delivery_fee) > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Delivery</span>
+                      <span>{formatCurrency(orderDetails.delivery_fee)}</span>
+                    </div>
+                  )}
+                  {orderDetails?.discount && parseFloat(orderDetails.discount) > 0 && (
+                    <div className="flex items-center justify-between text-sm text-green-600">
+                      <span>Discount</span>
+                      <span>-{formatCurrency(orderDetails.discount)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-sm font-bold mt-1 pt-1 border-t border-gray-100">
+                    <span>Total</span>
+                    <span>{formatCurrency(order.total)}</span>
+                  </div>
+                  {orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0 && (
+                    <div className="flex items-center justify-between text-sm text-green-600">
+                      <span>Paid</span>
+                      <span>-{formatCurrency(orderDetails.paid_amount)}</span>
+                    </div>
+                  )}
+                  {hasBalance && (
+                    <div className="flex items-center justify-between text-sm font-bold text-orange-600 mt-1 pt-1 border-t border-gray-100">
+                      <span className="flex items-center space-x-1">
+                        <DollarSign className="h-3.5 w-3.5" />
+                        <span>Balance Due</span>
+                      </span>
+                      <span>{formatCurrency(order.balance)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Payments History */}
+                {payments.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => toggleSection(`payments-${order.id}`)}
+                      className="flex items-center justify-between w-full text-xs font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      <span className="flex items-center space-x-1">
+                        <CreditCard className="h-3.5 w-3.5" />
+                        <span>Payments ({payments.length})</span>
+                      </span>
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedSections.has(`payments-${order.id}`) ? 'rotate-180' : ''}`} />
+                    </button>
+                    {expandedSections.has(`payments-${order.id}`) && (
+                      <div className="mt-1 bg-white rounded border border-gray-200 divide-y divide-gray-100">
+                        {payments.map((payment: any, idx: number) => (
+                          <div key={idx} className="p-2 text-sm flex justify-between items-center">
+                            <div>
+                              <span className="font-medium">{payment.method || payment.type}</span>
+                              <span className="text-gray-400 text-xs ml-2">{formatDate(payment.date || payment.created_at)}</span>
+                            </div>
+                            <span className="text-green-600 font-medium">{formatCurrency(payment.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Plan (for installments) */}
+                {plan && (
+                  <div className="bg-purple-50 rounded p-2 border border-purple-200">
+                    <div className="text-xs font-medium text-purple-800 flex items-center space-x-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Installment Plan</span>
+                    </div>
+                    <div className="text-sm mt-1">
+                      {plan.name || `${plan.months || plan.installments} months`}
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {notes && (
+                  <div className="text-xs text-gray-500 bg-yellow-50 rounded p-2 border border-yellow-200">
+                    <span className="font-medium">Note:</span> {notes}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -252,7 +501,7 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
   };
 
   return (
-    <div className="w-80 border-l border-gray-200 bg-gray-50 flex flex-col h-full">
+    <div className="w-96 border-l border-gray-200 bg-gray-50 flex flex-col h-full">
       {/* Header */}
       <div className="p-3 border-b border-gray-200 bg-white flex items-center justify-between">
         <div className="flex items-center space-x-2">
@@ -281,18 +530,16 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
         </div>
       </div>
 
-      {/* Error message */}
+      {/* Error */}
       {error && (
         <div className="mx-3 mt-3 p-2 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2 text-sm text-red-700">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto">
-            <X className="h-3 w-3" />
-          </button>
+          <span className="flex-1 text-xs">{error}</span>
+          <button onClick={() => setError(null)}><X className="h-3 w-3" /></button>
         </div>
       )}
 
-      {/* Link order form */}
+      {/* Link form */}
       <div className="p-3 border-b border-gray-200 bg-white">
         {showLinkForm ? (
           <div className="space-y-2">
@@ -309,7 +556,7 @@ export default function OrdersPanel({ conversationId, onClose }: OrdersPanelProp
               <button
                 onClick={handleLinkOrder}
                 disabled={isLinking || !linkInput.trim()}
-                className="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
               >
                 {isLinking ? 'Linking...' : 'Link Order'}
               </button>

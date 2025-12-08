@@ -24,6 +24,7 @@ export default function InboxPage() {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState(false);
   const [showOrders, setShowOrders] = useState(false);
+  const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const [newLabelName, setNewLabelName] = useState('');
@@ -835,6 +836,8 @@ export default function InboxPage() {
                   onSend={handleSendMessage}
                   disabled={isSending}
                   conversationId={getEffectiveConversationId() || undefined}
+                  prefillMessage={prefillMessage || undefined}
+                  onPrefillConsumed={() => setPrefillMessage(null)}
                 />
               </div>
             </>
@@ -859,6 +862,7 @@ export default function InboxPage() {
           <OrdersPanel
             conversationId={getEffectiveConversationId() || selectedConversation.id}
             onClose={() => setShowOrders(false)}
+            onSendMessage={(msg) => setPrefillMessage(msg)}
           />
         )}
       </div>

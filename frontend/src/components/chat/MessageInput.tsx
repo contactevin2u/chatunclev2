@@ -18,9 +18,11 @@ interface MessageInputProps {
   onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string) => void;
   disabled?: boolean;
   conversationId?: string;
+  prefillMessage?: string;
+  onPrefillConsumed?: () => void;
 }
 
-export default function MessageInput({ onSend, disabled, conversationId }: MessageInputProps) {
+export default function MessageInput({ onSend, disabled, conversationId, prefillMessage, onPrefillConsumed }: MessageInputProps) {
   const { token } = useAuth();
   const [message, setMessage] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -54,6 +56,15 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+
+  // Handle prefill message from external source (e.g., OrdersPanel quick actions)
+  useEffect(() => {
+    if (prefillMessage) {
+      setMessage(prefillMessage);
+      inputRef.current?.focus();
+      onPrefillConsumed?.();
+    }
+  }, [prefillMessage, onPrefillConsumed]);
 
   // Fetch templates on mount
   useEffect(() => {
