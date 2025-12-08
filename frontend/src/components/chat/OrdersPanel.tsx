@@ -450,14 +450,30 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
 
                 {/* Payment Info */}
                 <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="text-xs font-medium text-gray-500 mb-1 flex items-center space-x-1">
+                    <CreditCard className="h-3.5 w-3.5" />
+                    <span>Payment Details</span>
+                  </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Subtotal</span>
                     <span>{formatCurrency(orderDetails?.subtotal)}</span>
                   </div>
                   {orderDetails?.delivery_fee && parseFloat(orderDetails.delivery_fee) > 0 && (
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Delivery</span>
+                      <span className="text-gray-500">Delivery Fee</span>
                       <span>{formatCurrency(orderDetails.delivery_fee)}</span>
+                    </div>
+                  )}
+                  {orderDetails?.return_delivery_fee && parseFloat(orderDetails.return_delivery_fee) > 0 && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Return Delivery</span>
+                      <span>{formatCurrency(orderDetails.return_delivery_fee)}</span>
+                    </div>
+                  )}
+                  {orderDetails?.penalty_fee && parseFloat(orderDetails.penalty_fee) > 0 && (
+                    <div className="flex items-center justify-between text-sm text-red-600">
+                      <span>Penalty Fee</span>
+                      <span>{formatCurrency(orderDetails.penalty_fee)}</span>
                     </div>
                   )}
                   {orderDetails?.discount && parseFloat(orderDetails.discount) > 0 && (
@@ -470,12 +486,12 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                     <span>Total</span>
                     <span>{formatCurrency(order.total)}</span>
                   </div>
-                  {orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0 && (
+                  {(orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0) || (dueDetails?.paid && parseFloat(dueDetails.paid) > 0) ? (
                     <div className="flex items-center justify-between text-sm text-green-600">
                       <span>Paid</span>
-                      <span>-{formatCurrency(orderDetails.paid_amount)}</span>
+                      <span>-{formatCurrency(orderDetails?.paid_amount || dueDetails?.paid)}</span>
                     </div>
-                  )}
+                  ) : null}
                   {hasBalance && (
                     <div className="flex items-center justify-between text-sm font-bold text-orange-600 mt-1 pt-1 border-t border-gray-100">
                       <span className="flex items-center space-x-1">
@@ -485,36 +501,70 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                       <span>{formatCurrency(order.balance)}</span>
                     </div>
                   )}
+                  {dueDetails?.to_collect && parseFloat(dueDetails.to_collect) > 0 && (
+                    <div className="flex items-center justify-between text-sm text-blue-600 mt-1">
+                      <span>To Collect</span>
+                      <span>{formatCurrency(dueDetails.to_collect)}</span>
+                    </div>
+                  )}
+                  {dueDetails?.to_refund && parseFloat(dueDetails.to_refund) > 0 && (
+                    <div className="flex items-center justify-between text-sm text-purple-600 mt-1">
+                      <span>To Refund</span>
+                      <span>{formatCurrency(dueDetails.to_refund)}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Payments History */}
-                {payments.length > 0 && (
-                  <div>
-                    <button
-                      onClick={() => toggleSection(`payments-${order.id}`)}
-                      className="flex items-center justify-between w-full text-xs font-medium text-gray-500 hover:text-gray-700"
-                    >
-                      <span className="flex items-center space-x-1">
-                        <CreditCard className="h-3.5 w-3.5" />
-                        <span>Payments ({payments.length})</span>
-                      </span>
-                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedSections.has(`payments-${order.id}`) ? 'rotate-180' : ''}`} />
-                    </button>
-                    {expandedSections.has(`payments-${order.id}`) && (
-                      <div className="mt-1 bg-white rounded border border-gray-200 divide-y divide-gray-100">
-                        {payments.map((payment: any, idx: number) => (
-                          <div key={idx} className="p-2 text-sm flex justify-between items-center">
-                            <div>
-                              <span className="font-medium">{payment.method || payment.type}</span>
-                              <span className="text-gray-400 text-xs ml-2">{formatDate(payment.date || payment.created_at)}</span>
+                <div>
+                  <button
+                    onClick={() => toggleSection(`payments-${order.id}`)}
+                    className="flex items-center justify-between w-full text-xs font-medium text-gray-500 hover:text-gray-700"
+                  >
+                    <span className="flex items-center space-x-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Payment History ({payments.length})</span>
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedSections.has(`payments-${order.id}`) ? 'rotate-180' : ''}`} />
+                  </button>
+                  {expandedSections.has(`payments-${order.id}`) && (
+                    <div className="mt-1 bg-white rounded border border-gray-200">
+                      {payments.length > 0 ? (
+                        <div className="divide-y divide-gray-100">
+                          {payments.map((payment: any, idx: number) => (
+                            <div key={idx} className="p-2 text-sm">
+                              <div className="flex justify-between items-center">
+                                <div className="flex items-center space-x-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                    payment.status === 'COMPLETED' || payment.status === 'SUCCESS'
+                                      ? 'bg-green-100 text-green-700'
+                                      : payment.status === 'PENDING'
+                                        ? 'bg-yellow-100 text-yellow-700'
+                                        : 'bg-gray-100 text-gray-700'
+                                  }`}>
+                                    {payment.method || payment.type || 'Payment'}
+                                  </span>
+                                  <span className="text-gray-400 text-xs">{formatDate(payment.date || payment.created_at)}</span>
+                                </div>
+                                <span className="text-green-600 font-medium">{formatCurrency(payment.amount)}</span>
+                              </div>
+                              {payment.reference && (
+                                <div className="text-xs text-gray-400 mt-1">Ref: {payment.reference}</div>
+                              )}
+                              {payment.notes && (
+                                <div className="text-xs text-gray-500 mt-1">{payment.notes}</div>
+                              )}
                             </div>
-                            <span className="text-green-600 font-medium">{formatCurrency(payment.amount)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-3 text-center text-sm text-gray-400">
+                          No payments recorded yet
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
 
                 {/* Plan (for installments) */}
                 {plan && (
