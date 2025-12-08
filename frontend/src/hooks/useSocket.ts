@@ -12,6 +12,7 @@ interface SocketEvents {
   onAccountStatus?: (data: any) => void;
   onQrUpdate?: (data: any) => void;
   onSyncProgress?: (data: any) => void;
+  onAchievement?: (data: any) => void;
 }
 
 export function useSocket(events: SocketEvents = {}) {
@@ -48,6 +49,10 @@ export function useSocket(events: SocketEvents = {}) {
       socket.on('sync:progress', events.onSyncProgress);
     }
 
+    if (events.onAchievement) {
+      socket.on('gamification:achievement', events.onAchievement);
+    }
+
     return () => {
       if (events.onNewMessage) {
         socket.off('message:new', events.onNewMessage);
@@ -67,8 +72,11 @@ export function useSocket(events: SocketEvents = {}) {
       if (events.onSyncProgress) {
         socket.off('sync:progress', events.onSyncProgress);
       }
+      if (events.onAchievement) {
+        socket.off('gamification:achievement', events.onAchievement);
+      }
     };
-  }, [token, events.onNewMessage, events.onMessageStatus, events.onMessageReaction, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress]);
+  }, [token, events.onNewMessage, events.onMessageStatus, events.onMessageReaction, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress, events.onAchievement]);
 
   const joinAccount = useCallback((accountId: string) => {
     socketRef.current?.emit('join:account', accountId);
