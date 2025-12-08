@@ -212,7 +212,16 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                <span className="font-bold text-gray-900">{order.order_code}</span>
+                <a
+                  href={`https://www.aalyx.com/orders/${order.orderops_order_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-bold text-blue-600 hover:text-blue-800 hover:underline"
+                  title="Open in OrderOps"
+                >
+                  {order.order_code}
+                </a>
                 <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getStatusColor(order.status)}`}>
                   {order.status}
                 </span>
