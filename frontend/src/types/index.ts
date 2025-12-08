@@ -14,6 +14,19 @@ export interface WhatsAppAccount {
   status: 'connected' | 'disconnected' | 'qr_pending';
   created_at: string;
   updated_at: string;
+  // Shared access fields
+  is_owner?: boolean;
+  permission?: 'owner' | 'full' | 'send' | 'view';
+  owner_name?: string;
+}
+
+export interface AccountAccess {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  agent_email: string;
+  permission: 'full' | 'send' | 'view';
+  granted_at: string;
 }
 
 export interface Contact {

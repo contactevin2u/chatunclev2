@@ -80,6 +80,26 @@ export const accounts = {
       method: 'POST',
       token,
     }),
+
+  // Account Access Control (sharing with agents)
+  listAccess: (token: string, accountId: string) =>
+    request<{ access: any[] }>(`/api/accounts/${accountId}/access`, { token }),
+
+  grantAccess: (token: string, accountId: string, agentEmail: string, permission: 'full' | 'send' | 'view' = 'full') =>
+    request<{ message: string; access: any }>(`/api/accounts/${accountId}/access`, {
+      method: 'POST',
+      body: { agentEmail, permission },
+      token,
+    }),
+
+  revokeAccess: (token: string, accountId: string, agentId: string) =>
+    request<{ message: string }>(`/api/accounts/${accountId}/access/${agentId}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  listAgents: (token: string) =>
+    request<{ agents: any[] }>('/api/accounts/agents/list', { token }),
 };
 
 // Conversations
