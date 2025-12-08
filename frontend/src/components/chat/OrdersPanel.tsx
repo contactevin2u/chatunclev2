@@ -269,13 +269,22 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                       </button>
                     )}
                     {trip?.driver && (
-                      <button
-                        onClick={() => sendQuickMessage(`Your order ${order.order_code} is being delivered by ${trip.driver.name}. Contact: ${trip.driver.phone || 'N/A'}`)}
-                        className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-1"
-                      >
-                        <Truck className="h-3 w-3" />
-                        <span>Driver Info</span>
-                      </button>
+                      <>
+                        <button
+                          onClick={() => sendQuickMessage(`Your order ${order.order_code} will be delivered by *${trip.driver.name}*.`)}
+                          className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-1"
+                        >
+                          <User className="h-3 w-3" />
+                          <span>Driver Name</span>
+                        </button>
+                        <button
+                          onClick={() => sendQuickMessage(`Order ${order.order_code}\nDriver: *${trip.driver.name}*${trip.driver.phone ? `\nContact: ${trip.driver.phone}` : ''}${order.delivery_status ? `\nStatus: ${order.delivery_status}` : ''}${deliveryDate ? `\nDelivery Date: ${formatDate(deliveryDate)}` : ''}`)}
+                          className="px-2 py-1 text-xs bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 flex items-center space-x-1"
+                        >
+                          <Truck className="h-3 w-3" />
+                          <span>Driver Info</span>
+                        </button>
+                      </>
                     )}
                     {deliveryDate && (
                       <button
