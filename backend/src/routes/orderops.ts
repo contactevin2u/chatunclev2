@@ -708,10 +708,15 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       let orders: any[] = [];
       if (Array.isArray(result)) {
         orders = result;
+      } else if (Array.isArray(result.data?.items)) {
+        // {ok: true, data: {items: [...]}}
+        orders = result.data.items;
       } else if (Array.isArray(result.data)) {
         orders = result.data;
       } else if (Array.isArray(result.orders)) {
         orders = result.orders;
+      } else if (Array.isArray(result.items)) {
+        orders = result.items;
       } else if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
         // Single order returned as data object
         orders = [result.data];
@@ -733,10 +738,20 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       }
     }
 
-    console.log(`[OrderOps] Found order:`, order.id, order.code);
+    // Normalize order ID field (could be 'id', 'order_id', or 'orderId')
+    const orderId_normalized = order.id || order.order_id || order.orderId;
+    const orderCode_normalized = order.code || order.order_code || order.orderCode;
+
+    console.log(`[OrderOps] Found order:`, orderId_normalized, orderCode_normalized, 'keys:', Object.keys(order).join(','));
+
+    if (!orderId_normalized) {
+      console.error(`[OrderOps] Order has no ID field:`, JSON.stringify(order).substring(0, 300));
+      res.status(500).json({ error: 'Order data missing ID field' });
+      return;
+    }
 
     // Fetch due info
-    const dueRes = await orderOpsRequest(`/orders/${order.id}/due`, { method: 'GET' });
+    const dueRes = await orderOpsRequest(`/orders/${orderId_normalized}/due`, { method: 'GET' });
     let due: any = null;
     if (dueRes.ok) {
       due = await dueRes.json();
@@ -746,7 +761,16 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
     // Check if already linked
     const existing = await queryOne(`
       SELECT id FROM contact_orders WHERE orderops_order_id = $1
-    `, [order.id]);
+    `, [orderId_normalized]);
+
+    // Normalize other fields
+    const motherOrderId = order.mother_order_id || order.motherOrderId || null;
+    const orderType = order.type || order.order_type || 'DELIVERY';
+    const customerName = order.customer?.name || order.customer_name || null;
+    const orderTotal = order.total || order.subtotal || '0';
+    const orderBalance = due?.balance || order.balance || '0';
+    const orderStatus = order.status || 'NEW';
+    const deliveryStatus = order.trip?.status || order.delivery_status || null;
 
     if (existing) {
       // Update existing link
@@ -767,15 +791,15 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       `, [
         conversationId,
         conversation.contact_id,
-        order.code,
-        order.type,
-        order.customer?.name,
-        order.total,
-        due?.balance || order.balance,
-        order.status,
-        order.trip?.status,
+        orderCode_normalized,
+        orderType,
+        customerName,
+        orderTotal,
+        orderBalance,
+        orderStatus,
+        deliveryStatus,
         JSON.stringify({ order, due }),
-        order.id
+        orderId_normalized
       ]);
     } else {
       // Create new link
@@ -787,15 +811,15 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       `, [
         conversation.contact_id,
         conversationId,
-        order.id,
-        order.mother_order_id || null,
-        order.code,
-        order.type,
-        order.customer?.name,
-        order.total,
-        due?.balance || order.balance,
-        order.status,
-        order.trip?.status,
+        orderId_normalized,
+        motherOrderId,
+        orderCode_normalized,
+        orderType,
+        customerName,
+        orderTotal,
+        orderBalance,
+        orderStatus,
+        deliveryStatus,
         JSON.stringify({ order, due })
       ]);
     }
