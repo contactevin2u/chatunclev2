@@ -61,10 +61,21 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   useEffect(() => {
     if (prefillMessage) {
       setMessage(prefillMessage);
-      inputRef.current?.focus();
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
       onPrefillConsumed?.();
     }
   }, [prefillMessage, onPrefillConsumed]);
+
+  // Auto-focus input when conversation changes
+  useEffect(() => {
+    if (conversationId) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
+    }
+  }, [conversationId]);
 
   // Fetch templates on mount
   useEffect(() => {
@@ -249,7 +260,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         clearAttachment();
         setMessage('');
         // Refocus input after sending media
-        setTimeout(() => inputRef.current?.focus(), 50);
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
       } catch (error: any) {
         console.error('Failed to upload media:', error);
         alert(error.message || 'Failed to upload media');
@@ -264,7 +277,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
       onSend(message.trim());
       setMessage('');
       // Refocus input after sending
-      setTimeout(() => inputRef.current?.focus(), 50);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
     }
   };
 
@@ -537,6 +552,7 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
             placeholder={attachedMedia ? 'Add a caption...' : 'Type a message...'}
             disabled={disabled || isRecording}
             rows={1}
+            autoFocus
             className="w-full resize-none outline-none text-gray-900 placeholder-gray-500 disabled:opacity-50 text-sm sm:text-base"
             style={{ minHeight: '22px', maxHeight: '100px' }}
           />
