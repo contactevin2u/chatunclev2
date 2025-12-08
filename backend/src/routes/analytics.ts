@@ -90,13 +90,16 @@ router.get('/overview', async (req: Request, res: Response) => {
     `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
 
     // Response rate (conversations with at least one agent reply / total conversations)
+    // Optimized: Uses LEFT JOIN + GROUP BY instead of correlated EXISTS subquery
     const responseRateResult = await queryOne(`
       SELECT
-        COUNT(DISTINCT CASE WHEN EXISTS (
-          SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.sender_type = 'agent'
-        ) THEN c.id END)::float / NULLIF(COUNT(DISTINCT c.id), 0) * 100 as rate
+        COUNT(DISTINCT CASE WHEN agent_msgs.conversation_id IS NOT NULL THEN c.id END)::float
+        / NULLIF(COUNT(DISTINCT c.id), 0) * 100 as rate
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      LEFT JOIN (
+        SELECT DISTINCT conversation_id FROM messages WHERE sender_type = 'agent'
+      ) agent_msgs ON agent_msgs.conversation_id = c.id
       WHERE 1=1 ${accountFilter}
     `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
 
@@ -337,30 +340,35 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
     }
 
     // New contacts: contacts whose first conversation falls within the date range
+    // Optimized: Uses CTE with window function instead of correlated subquery
     const newContactsResult = await queryOne(`
-      SELECT COUNT(DISTINCT ct.id) as count
-      FROM contacts ct
-      JOIN conversations c ON ct.id = c.contact_id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.created_at = (
-        SELECT MIN(c2.created_at)
-        FROM conversations c2
-        WHERE c2.contact_id = ct.id
+      WITH first_conversations AS (
+        SELECT contact_id, created_at,
+          ROW_NUMBER() OVER (PARTITION BY contact_id ORDER BY created_at ASC) as rn
+        FROM conversations
+        WHERE contact_id IS NOT NULL
       )
-      ${accountFilter} ${dateFilter}
+      SELECT COUNT(DISTINCT fc.contact_id) as count
+      FROM first_conversations fc
+      JOIN conversations c ON fc.contact_id = c.contact_id AND fc.rn = 1
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE fc.rn = 1 ${accountFilter} ${dateFilter}
     `, params);
 
     // Existing contacts: contacts who had conversations before the date range
+    // Optimized: Uses CTE with window function instead of EXISTS subquery
     const existingContactsResult = await queryOne(`
+      WITH contact_first_conv AS (
+        SELECT contact_id, MIN(created_at) as first_conv_at
+        FROM conversations
+        WHERE contact_id IS NOT NULL
+        GROUP BY contact_id
+      )
       SELECT COUNT(DISTINCT c.contact_id) as count
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE EXISTS (
-        SELECT 1 FROM conversations c2
-        WHERE c2.contact_id = c.contact_id
-        AND c2.created_at < c.created_at
-      )
-      ${accountFilter} ${dateFilter}
+      JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
+      WHERE cfc.first_conv_at < c.created_at ${accountFilter} ${dateFilter}
     `, params);
 
     // Total conversations in date range
@@ -429,20 +437,26 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
       dailyDateFilter += ` AND c.created_at <= ($${dailyParamIndex++}::date + interval '1 day')`;
     }
 
+    // Optimized: Uses CTE to pre-compute first conversation per contact
     const dailyBreakdown = await query(`
+      WITH contact_first_conv AS (
+        SELECT contact_id, MIN(created_at) as first_conv_at
+        FROM conversations
+        WHERE contact_id IS NOT NULL
+        GROUP BY contact_id
+      )
       SELECT
         DATE(c.created_at) as date,
         COUNT(DISTINCT CASE
-          WHEN c.created_at = (SELECT MIN(c2.created_at) FROM conversations c2 WHERE c2.contact_id = c.contact_id)
-          THEN c.contact_id
+          WHEN c.created_at = cfc.first_conv_at THEN c.contact_id
         END) as new_contacts,
         COUNT(DISTINCT CASE
-          WHEN c.created_at > (SELECT MIN(c2.created_at) FROM conversations c2 WHERE c2.contact_id = c.contact_id)
-          THEN c.contact_id
+          WHEN c.created_at > cfc.first_conv_at THEN c.contact_id
         END) as existing_contacts,
         COUNT(*) as total_conversations
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      LEFT JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
       WHERE 1=1 ${dailyAccountFilter} ${dailyDateFilter}
       GROUP BY DATE(c.created_at)
       ORDER BY date ASC

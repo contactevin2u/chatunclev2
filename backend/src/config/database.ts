@@ -42,7 +42,7 @@ const poolConfig: PoolConfig = {
   ssl: getSSLConfig(),
 
   // Connection pool settings
-  max: 20, // Maximum number of clients in the pool (Render free tier allows 97)
+  max: 40, // Maximum number of clients in the pool (Render free tier allows 97)
   min: 2, // Minimum number of idle clients
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
   connectionTimeoutMillis: 10000, // Return error after 10 seconds if no connection available
@@ -95,8 +95,8 @@ export async function query<T = any>(text: string, params?: any[]): Promise<T[]>
     const result = await pool.query(text, params);
     const duration = Date.now() - start;
 
-    // Log slow queries (> 100ms)
-    if (duration > 100) {
+    // Log slow queries (> 50ms) - lower threshold for early warning
+    if (duration > 50) {
       console.log(`[DB] Slow query (${duration}ms):`, text.substring(0, 100));
     }
 
