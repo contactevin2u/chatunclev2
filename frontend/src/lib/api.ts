@@ -745,6 +745,36 @@ export const orderops = {
   // Get order details from OrderOps
   getOrder: (token: string, orderId: number) =>
     request<{ success: boolean; order: any }>(`/api/orderops/order/${orderId}`, { token }),
+
+  // Get order due/balance info
+  getOrderDue: (token: string, orderId: number) =>
+    request<{ success: boolean; due: any }>(`/api/orderops/order/${orderId}/due`, { token }),
+
+  // Get orders linked to a conversation
+  getConversationOrders: (token: string, conversationId: string) =>
+    request<{ success: boolean; orders: any[] }>(`/api/orderops/conversation/${conversationId}/orders`, { token }),
+
+  // Link an order to a conversation
+  linkOrder: (token: string, conversationId: string, data: { orderId?: number; orderCode?: string }) =>
+    request<{ success: boolean; message: string; order: any; due: any }>(`/api/orderops/conversation/${conversationId}/link`, {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  // Unlink an order from a conversation
+  unlinkOrder: (token: string, conversationId: string, orderId: number) =>
+    request<{ success: boolean; message: string }>(`/api/orderops/conversation/${conversationId}/orders/${orderId}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // Sync/refresh order data
+  syncOrder: (token: string, conversationId: string, orderId: number) =>
+    request<{ success: boolean; order: any; due: any }>(`/api/orderops/conversation/${conversationId}/orders/${orderId}/sync`, {
+      method: 'POST',
+      token,
+    }),
 };
 
 // Re-export API_URL for use in other places

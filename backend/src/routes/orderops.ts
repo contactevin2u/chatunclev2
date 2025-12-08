@@ -599,4 +599,272 @@ router.get('/test', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Get orders linked to a conversation
+ * GET /api/orderops/conversation/:conversationId/orders
+ */
+router.get('/conversation/:conversationId/orders', async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user!.userId;
+
+    // Verify ownership
+    const conversation = await queryOne(`
+      SELECT c.id, c.contact_id
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE c.id = $1 AND wa.user_id = $2
+    `, [conversationId, userId]);
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Get linked orders
+    const orders = await query(`
+      SELECT co.*,
+        (SELECT json_agg(child.*) FROM contact_orders child WHERE child.mother_order_id = co.orderops_order_id) as child_orders
+      FROM contact_orders co
+      WHERE co.conversation_id = $1
+      ORDER BY co.created_at DESC
+    `, [conversationId]);
+
+    res.json({ success: true, orders });
+  } catch (error: any) {
+    console.error('[OrderOps] Get conversation orders error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Link an order to a conversation (by order ID or code)
+ * POST /api/orderops/conversation/:conversationId/link
+ * Body: { orderId?: number, orderCode?: string }
+ */
+router.post('/conversation/:conversationId/link', async (req: Request, res: Response) => {
+  try {
+    const { conversationId } = req.params;
+    const { orderId, orderCode } = req.body;
+    const userId = req.user!.userId;
+
+    if (!orderId && !orderCode) {
+      res.status(400).json({ error: 'orderId or orderCode is required' });
+      return;
+    }
+
+    // Verify ownership and get contact
+    const conversation = await queryOne(`
+      SELECT c.id, c.contact_id
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE c.id = $1 AND wa.user_id = $2
+    `, [conversationId, userId]);
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Fetch order from OrderOps
+    let fetchPath = orderId ? `/orders/${orderId}` : `/orders?code=${orderCode}&limit=1`;
+    const fetchRes = await orderOpsRequest(fetchPath, { method: 'GET' });
+
+    if (!fetchRes.ok) {
+      res.status(404).json({ error: 'Order not found in OrderOps' });
+      return;
+    }
+
+    const result = await fetchRes.json() as any;
+    const order = orderId
+      ? (result.data || result)
+      : (result.data?.[0] || result.orders?.[0] || result[0]);
+
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    // Fetch due info
+    const dueRes = await orderOpsRequest(`/orders/${order.id}/due`, { method: 'GET' });
+    let due: any = null;
+    if (dueRes.ok) {
+      due = await dueRes.json();
+      due = due.data || due;
+    }
+
+    // Check if already linked
+    const existing = await queryOne(`
+      SELECT id FROM contact_orders WHERE orderops_order_id = $1
+    `, [order.id]);
+
+    if (existing) {
+      // Update existing link
+      await execute(`
+        UPDATE contact_orders SET
+          conversation_id = $1,
+          contact_id = $2,
+          order_code = $3,
+          order_type = $4,
+          customer_name = $5,
+          total = $6,
+          balance = $7,
+          status = $8,
+          delivery_status = $9,
+          parsed_data = $10,
+          updated_at = NOW()
+        WHERE orderops_order_id = $11
+      `, [
+        conversationId,
+        conversation.contact_id,
+        order.code,
+        order.type,
+        order.customer?.name,
+        order.total,
+        due?.balance || order.balance,
+        order.status,
+        order.trip?.status,
+        JSON.stringify({ order, due }),
+        order.id
+      ]);
+    } else {
+      // Create new link
+      await execute(`
+        INSERT INTO contact_orders (
+          contact_id, conversation_id, orderops_order_id, mother_order_id,
+          order_code, order_type, customer_name, total, balance, status, delivery_status, parsed_data
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `, [
+        conversation.contact_id,
+        conversationId,
+        order.id,
+        order.mother_order_id || null,
+        order.code,
+        order.type,
+        order.customer?.name,
+        order.total,
+        due?.balance || order.balance,
+        order.status,
+        order.trip?.status,
+        JSON.stringify({ order, due })
+      ]);
+    }
+
+    res.json({
+      success: true,
+      message: existing ? 'Order link updated' : 'Order linked',
+      order,
+      due
+    });
+  } catch (error: any) {
+    console.error('[OrderOps] Link order error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Unlink an order from a conversation
+ * DELETE /api/orderops/conversation/:conversationId/orders/:orderId
+ */
+router.delete('/conversation/:conversationId/orders/:orderId', async (req: Request, res: Response) => {
+  try {
+    const { conversationId, orderId } = req.params;
+    const userId = req.user!.userId;
+
+    // Verify ownership
+    const conversation = await queryOne(`
+      SELECT c.id FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE c.id = $1 AND wa.user_id = $2
+    `, [conversationId, userId]);
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    await execute(`
+      DELETE FROM contact_orders
+      WHERE conversation_id = $1 AND orderops_order_id = $2
+    `, [conversationId, orderId]);
+
+    res.json({ success: true, message: 'Order unlinked' });
+  } catch (error: any) {
+    console.error('[OrderOps] Unlink order error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Sync/refresh order data from OrderOps
+ * POST /api/orderops/conversation/:conversationId/orders/:orderId/sync
+ */
+router.post('/conversation/:conversationId/orders/:orderId/sync', async (req: Request, res: Response) => {
+  try {
+    const { conversationId, orderId } = req.params;
+    const userId = req.user!.userId;
+
+    // Verify ownership
+    const conversation = await queryOne(`
+      SELECT c.id, c.contact_id FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      WHERE c.id = $1 AND wa.user_id = $2
+    `, [conversationId, userId]);
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Fetch fresh data from OrderOps
+    const orderRes = await orderOpsRequest(`/orders/${orderId}`, { method: 'GET' });
+    if (!orderRes.ok) {
+      res.status(404).json({ error: 'Order not found in OrderOps' });
+      return;
+    }
+
+    const orderResult = await orderRes.json() as any;
+    const order = orderResult.data || orderResult;
+
+    // Fetch due info
+    const dueRes = await orderOpsRequest(`/orders/${orderId}/due`, { method: 'GET' });
+    let due: any = null;
+    if (dueRes.ok) {
+      due = await dueRes.json();
+      due = due.data || due;
+    }
+
+    // Update local record
+    await execute(`
+      UPDATE contact_orders SET
+        order_code = $1,
+        order_type = $2,
+        customer_name = $3,
+        total = $4,
+        balance = $5,
+        status = $6,
+        delivery_status = $7,
+        parsed_data = $8,
+        updated_at = NOW()
+      WHERE conversation_id = $9 AND orderops_order_id = $10
+    `, [
+      order.code,
+      order.type,
+      order.customer?.name,
+      order.total,
+      due?.balance || order.balance,
+      order.status,
+      order.trip?.status,
+      JSON.stringify({ order, due }),
+      conversationId,
+      orderId
+    ]);
+
+    res.json({ success: true, order, due });
+  } catch (error: any) {
+    console.error('[OrderOps] Sync order error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

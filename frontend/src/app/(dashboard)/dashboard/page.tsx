@@ -9,7 +9,8 @@ import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
 import InternalNotes from '@/components/chat/InternalNotes';
-import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown } from 'lucide-react';
+import OrdersPanel from '@/components/chat/OrdersPanel';
+import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, Package } from 'lucide-react';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -22,6 +23,7 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [showOrders, setShowOrders] = useState(false);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const [newLabelName, setNewLabelName] = useState('');
@@ -785,6 +787,15 @@ export default function InboxPage() {
                     >
                       <StickyNote className="h-5 w-5" />
                     </button>
+                    <button
+                      onClick={() => setShowOrders(!showOrders)}
+                      className={`p-2.5 md:p-2 rounded-lg transition-colors active:scale-95 ${
+                        showOrders ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-500 active:bg-gray-300'
+                      }`}
+                      title="Orders"
+                    >
+                      <Package className="h-5 w-5" />
+                    </button>
                   </div>
                 </div>
                 {/* Labels display - only for 1:1 conversations */}
@@ -840,6 +851,14 @@ export default function InboxPage() {
           <InternalNotes
             conversationId={getEffectiveConversationId() || selectedConversation.id}
             onClose={() => setShowNotes(false)}
+          />
+        )}
+
+        {/* Orders Panel */}
+        {showOrders && selectedConversation && (
+          <OrdersPanel
+            conversationId={getEffectiveConversationId() || selectedConversation.id}
+            onClose={() => setShowOrders(false)}
           />
         )}
       </div>

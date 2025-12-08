@@ -386,11 +386,14 @@ CREATE TABLE IF NOT EXISTS contact_orders (
   conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
   message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
   orderops_order_id INT NOT NULL,
+  mother_order_id INT,
   order_code VARCHAR(50),
   order_type VARCHAR(50),
   customer_name VARCHAR(255),
   total DECIMAL(10, 2),
+  balance DECIMAL(10, 2),
   status VARCHAR(50),
+  delivery_status VARCHAR(50),
   parsed_data JSONB,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
@@ -400,6 +403,13 @@ CREATE TABLE IF NOT EXISTS contact_orders (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_orders_orderops_id ON contact_orders(orderops_order_id);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_contact ON contact_orders(contact_id);
 CREATE INDEX IF NOT EXISTS idx_contact_orders_code ON contact_orders(order_code);
+CREATE INDEX IF NOT EXISTS idx_contact_orders_mother ON contact_orders(mother_order_id);
+CREATE INDEX IF NOT EXISTS idx_contact_orders_conversation ON contact_orders(conversation_id);
+
+-- Add columns if table exists (for migrations)
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS mother_order_id INT;
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS balance DECIMAL(10, 2);
+ALTER TABLE contact_orders ADD COLUMN IF NOT EXISTS delivery_status VARCHAR(50);
 
 -- ============================================================
 -- WHATSAPP GROUPS SUPPORT
