@@ -21,10 +21,12 @@ router.get('/agents', async (req: Request, res: Response) => {
         u.role,
         u.created_at,
         COUNT(DISTINCT wa.id) as account_count,
-        COUNT(DISTINCT c.id) as conversation_count
+        COUNT(DISTINCT c.id) as conversation_count,
+        COUNT(DISTINCT aa.whatsapp_account_id) as shared_account_count
       FROM users u
       LEFT JOIN whatsapp_accounts wa ON u.id = wa.user_id
       LEFT JOIN conversations c ON wa.id = c.whatsapp_account_id
+      LEFT JOIN account_access aa ON u.id = aa.agent_id
       GROUP BY u.id
       ORDER BY u.created_at DESC
     `);
@@ -33,6 +35,34 @@ router.get('/agents', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('List agents error:', error);
     res.status(500).json({ error: 'Failed to retrieve agents' });
+  }
+});
+
+// Get shared accounts for a specific agent
+router.get('/agents/:id/shared-accounts', async (req: Request, res: Response) => {
+  try {
+    const sharedAccounts = await query(`
+      SELECT
+        aa.id as access_id,
+        aa.permission,
+        aa.granted_at,
+        wa.id as account_id,
+        wa.name as account_name,
+        wa.phone_number,
+        wa.status,
+        owner.name as owner_name,
+        owner.email as owner_email
+      FROM account_access aa
+      JOIN whatsapp_accounts wa ON aa.whatsapp_account_id = wa.id
+      JOIN users owner ON wa.user_id = owner.id
+      WHERE aa.agent_id = $1
+      ORDER BY aa.granted_at DESC
+    `, [req.params.id]);
+
+    res.json({ sharedAccounts });
+  } catch (error) {
+    console.error('Get shared accounts error:', error);
+    res.status(500).json({ error: 'Failed to get shared accounts' });
   }
 });
 

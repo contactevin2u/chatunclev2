@@ -341,6 +341,9 @@ export const admin = {
 
   getStats: (token: string) =>
     request<{ stats: any }>('/api/admin/stats', { token }),
+
+  getAgentSharedAccounts: (token: string, agentId: string) =>
+    request<{ sharedAccounts: any[] }>(`/api/admin/agents/${agentId}/shared-accounts`, { token }),
 };
 
 // Analytics

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { admin as adminApi } from '@/lib/api';
-import { Plus, Edit2, Trash2, Users, Shield, User } from 'lucide-react';
+import { Plus, Edit2, Trash2, Users, Shield, User, Share2, ChevronDown, ChevronUp, Smartphone } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Agent {
@@ -14,6 +14,19 @@ interface Agent {
   created_at: string;
   account_count: number;
   conversation_count: number;
+  shared_account_count: number;
+}
+
+interface SharedAccount {
+  access_id: string;
+  permission: 'full' | 'send' | 'view';
+  granted_at: string;
+  account_id: string;
+  account_name: string | null;
+  phone_number: string | null;
+  status: string;
+  owner_name: string;
+  owner_email: string;
 }
 
 export default function AgentsPage() {
@@ -28,6 +41,11 @@ export default function AgentsPage() {
     password: '',
     role: 'agent' as 'agent' | 'admin',
   });
+
+  // Shared accounts expansion state
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
+  const [sharedAccounts, setSharedAccounts] = useState<SharedAccount[]>([]);
+  const [loadingShared, setLoadingShared] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -105,6 +123,36 @@ export default function AgentsPage() {
     }
   };
 
+  const toggleExpand = async (agentId: string) => {
+    if (expandedAgentId === agentId) {
+      setExpandedAgentId(null);
+      setSharedAccounts([]);
+      return;
+    }
+
+    setExpandedAgentId(agentId);
+    setLoadingShared(true);
+
+    try {
+      const { sharedAccounts: accounts } = await adminApi.getAgentSharedAccounts(token!, agentId);
+      setSharedAccounts(accounts);
+    } catch (error) {
+      console.error('Failed to load shared accounts:', error);
+      setSharedAccounts([]);
+    } finally {
+      setLoadingShared(false);
+    }
+  };
+
+  const getPermissionLabel = (permission: string) => {
+    switch (permission) {
+      case 'full': return 'Full Access';
+      case 'send': return 'Send Only';
+      case 'view': return 'View Only';
+      default: return permission;
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -148,7 +196,10 @@ export default function AgentsPage() {
                     Role
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Accounts
+                    Owned
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Shared
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Conversations
@@ -163,58 +214,140 @@ export default function AgentsPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {agents.map((agent) => (
-                  <tr key={agent.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10 bg-slate-800 rounded-full flex items-center justify-center text-white font-medium">
-                          {agent.name.charAt(0).toUpperCase()}
+                  <>
+                    <tr key={agent.id} className={expandedAgentId === agent.id ? 'bg-blue-50' : ''}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10 bg-slate-800 rounded-full flex items-center justify-center text-white font-medium">
+                            {agent.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">{agent.name}</div>
+                            <div className="text-sm text-gray-500">{agent.email}</div>
+                          </div>
                         </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{agent.name}</div>
-                          <div className="text-sm text-gray-500">{agent.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                        agent.role === 'admin'
-                          ? 'bg-orange-100 text-orange-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {agent.role === 'admin' ? (
-                          <Shield className="h-3 w-3" />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          agent.role === 'admin'
+                            ? 'bg-orange-100 text-orange-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {agent.role === 'admin' ? (
+                            <Shield className="h-3 w-3" />
+                          ) : (
+                            <User className="h-3 w-3" />
+                          )}
+                          <span>{agent.role === 'admin' ? 'Admin' : 'Agent'}</span>
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {agent.account_count}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {Number(agent.shared_account_count) > 0 ? (
+                          <button
+                            onClick={() => toggleExpand(agent.id)}
+                            className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors"
+                          >
+                            <Share2 className="h-3 w-3" />
+                            <span>{agent.shared_account_count}</span>
+                            {expandedAgentId === agent.id ? (
+                              <ChevronUp className="h-3 w-3" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3" />
+                            )}
+                          </button>
                         ) : (
-                          <User className="h-3 w-3" />
+                          <span className="text-sm text-gray-400">0</span>
                         )}
-                        <span>{agent.role === 'admin' ? 'Admin' : 'Agent'}</span>
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {agent.account_count}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {agent.conversation_count}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDistanceToNow(new Date(agent.created_at), { addSuffix: true })}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleOpenModal(agent)}
-                        className="text-slate-600 hover:text-slate-900 mr-3"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      {agent.id !== currentUser?.id && (
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {agent.conversation_count}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {formatDistanceToNow(new Date(agent.created_at), { addSuffix: true })}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button
-                          onClick={() => handleDelete(agent.id)}
-                          className="text-red-600 hover:text-red-900"
+                          onClick={() => handleOpenModal(agent)}
+                          className="text-slate-600 hover:text-slate-900 mr-3"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Edit2 className="h-4 w-4" />
                         </button>
-                      )}
-                    </td>
-                  </tr>
+                        {agent.id !== currentUser?.id && (
+                          <button
+                            onClick={() => handleDelete(agent.id)}
+                            className="text-red-600 hover:text-red-900"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {/* Expanded shared accounts row */}
+                    {expandedAgentId === agent.id && (
+                      <tr key={`${agent.id}-expanded`}>
+                        <td colSpan={7} className="px-6 py-4 bg-blue-50 border-b border-blue-100">
+                          <div className="ml-14">
+                            <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
+                              <Share2 className="h-4 w-4 mr-2 text-blue-600" />
+                              Shared Accounts
+                            </h4>
+                            {loadingShared ? (
+                              <div className="text-sm text-gray-500">Loading...</div>
+                            ) : sharedAccounts.length === 0 ? (
+                              <div className="text-sm text-gray-500">No shared accounts</div>
+                            ) : (
+                              <div className="space-y-2">
+                                {sharedAccounts.map((account) => (
+                                  <div
+                                    key={account.access_id}
+                                    className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200"
+                                  >
+                                    <div className="flex items-center space-x-3">
+                                      <div className="p-2 bg-gray-100 rounded-full">
+                                        <Smartphone className="h-4 w-4 text-gray-600" />
+                                      </div>
+                                      <div>
+                                        <p className="text-sm font-medium text-gray-900">
+                                          {account.account_name || 'WhatsApp Account'}
+                                          {account.phone_number && (
+                                            <span className="text-gray-500 ml-2">+{account.phone_number}</span>
+                                          )}
+                                        </p>
+                                        <p className="text-xs text-gray-500">
+                                          Owner: {account.owner_name} ({account.owner_email})
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center space-x-3">
+                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                        account.status === 'connected'
+                                          ? 'bg-green-100 text-green-800'
+                                          : 'bg-gray-100 text-gray-600'
+                                      }`}>
+                                        {account.status}
+                                      </span>
+                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                        account.permission === 'full'
+                                          ? 'bg-purple-100 text-purple-800'
+                                          : account.permission === 'send'
+                                          ? 'bg-blue-100 text-blue-800'
+                                          : 'bg-gray-100 text-gray-600'
+                                      }`}>
+                                        {getPermissionLabel(account.permission)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>
