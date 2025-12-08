@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(user);
     setToken(token);
     setStoredAuth(token, user);
-    router.push('/');
+    router.push('/dashboard');
   };
 
   const register = async (email: string, password: string, name: string) => {
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(user);
     setToken(token);
     setStoredAuth(token, user);
-    router.push('/');
+    router.push('/dashboard');
   };
 
   const logout = () => {
