@@ -21,6 +21,7 @@ import {
   Sun,
   Moon,
   Brain,
+  Trophy,
 } from 'lucide-react';
 
 export default function DashboardLayout({
@@ -76,6 +77,7 @@ export default function DashboardLayout({
     { name: 'Auto-Reply', href: '/dashboard/auto-reply', icon: Bot },
     { name: 'AI Knowledge', href: '/dashboard/knowledge', icon: Brain },
     { name: 'Templates', href: '/dashboard/templates', icon: FileText },
+    { name: 'Leaderboard', href: '/dashboard/leaderboard', icon: Trophy },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
 

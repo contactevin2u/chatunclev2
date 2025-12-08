@@ -789,5 +789,35 @@ export const orderops = {
     }),
 };
 
+// Gamification API
+export const gamification = {
+  // Get current user's stats
+  getStats: (token: string) =>
+    request<{ stats: any }>('/api/gamification/stats', { token }),
+
+  // Get leaderboard
+  getLeaderboard: (token: string, period: 'daily' | 'weekly' | 'monthly' | 'all' = 'weekly', limit: number = 10) =>
+    request<{ leaderboard: any[] }>(`/api/gamification/leaderboard?period=${period}&limit=${limit}`, { token }),
+
+  // Get achievements
+  getAchievements: (token: string) =>
+    request<{ earned: any[]; available: any[] }>('/api/gamification/achievements', { token }),
+
+  // Get active challenges
+  getChallenges: (token: string) =>
+    request<{ challenges: any[] }>('/api/gamification/challenges', { token }),
+
+  // Join a challenge
+  joinChallenge: (token: string, challengeId: string) =>
+    request<{ success: boolean }>(`/api/gamification/challenges/${challengeId}/join`, {
+      method: 'POST',
+      token,
+    }),
+
+  // Get points history
+  getPointsHistory: (token: string, limit: number = 50) =>
+    request<{ history: any[] }>(`/api/gamification/points-history?limit=${limit}`, { token }),
+};
+
 // Re-export API_URL for use in other places
 export { API_URL };

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, execute, transaction } from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { executeSequence } from '../services/sequenceExecutor';
+import { getAvailableVariables } from '../utils/templateVariables';
 
 interface Template {
   id: string;
@@ -43,6 +44,11 @@ interface TemplateSequenceItem {
 const router = Router();
 
 router.use(authenticate);
+
+// Get available template variables
+router.get('/variables', (req: Request, res: Response) => {
+  res.json({ variables: getAvailableVariables() });
+});
 
 // ============================================
 // SIMPLE TEMPLATES (Quick Replies)

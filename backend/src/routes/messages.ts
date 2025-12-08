@@ -4,6 +4,8 @@ import { authenticate } from '../middleware/auth';
 import { sessionManager } from '../services/whatsapp/SessionManager';
 import { getIO } from '../services/socket';
 import { Message } from '../types';
+import { gamificationService } from '../services/gamificationService';
+import { substituteTemplateVariables } from '../utils/templateVariables';
 
 const router = Router();
 
@@ -123,12 +125,30 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     // Get agent name
     const agent = await queryOne('SELECT name FROM users WHERE id = $1', [agentId]);
 
+    // Get contact info for template variables (for 1:1 chats)
+    let contactName = '';
+    let contactPhone = '';
+    if (!isGroup) {
+      const contactInfo = await queryOne(`
+        SELECT name, phone_number FROM contacts WHERE wa_id = $1
+      `, [conversation.wa_id]);
+      contactName = contactInfo?.name || '';
+      contactPhone = contactInfo?.phone_number || conversation.wa_id?.replace('@s.whatsapp.net', '') || '';
+    }
+
+    // Substitute template variables in content
+    const processedContent = content ? substituteTemplateVariables(content, {
+      contactName,
+      contactPhone,
+      agentName: agent?.name || ''
+    }) : content;
+
     // === OPTIMISTIC UI: Save message immediately with 'pending' status ===
     const message = await queryOne<Message>(`
       INSERT INTO messages (conversation_id, sender_type, content_type, content, media_url, media_mime_type, status, agent_id, response_time_ms)
       VALUES ($1, 'agent', $2, $3, $4, $5, 'pending', $6, $7)
       RETURNING *
-    `, [req.params.conversationId, contentType, content, mediaUrl, mediaMimeType, agentId, responseTimeMs]);
+    `, [req.params.conversationId, contentType, processedContent, mediaUrl, mediaMimeType, agentId, responseTimeMs]);
 
     // Update conversation immediately
     await execute(`
@@ -160,7 +180,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
             conversation.group_jid,
             {
               type: contentType,
-              content,
+              content: processedContent,
               mediaUrl,
               mediaMimeType,
             }
@@ -172,7 +192,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
             conversation.wa_id,
             {
               type: contentType,
-              content,
+              content: processedContent,
               mediaUrl,
               mediaMimeType,
             },
@@ -201,6 +221,28 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
           INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
           VALUES ($1, 'message_sent', 'conversation', $2, $3)
         `, [agentId, req.params.conversationId, JSON.stringify({ content_type: contentType, response_time_ms: responseTimeMs, is_group: isGroup })]);
+
+        // Track gamification stats
+        try {
+          await gamificationService.recordMessageSent(agentId, responseTimeMs || undefined);
+
+          // If this is a first response (no prior agent response in conversation), record it
+          if (!conversation.first_response_at && responseTimeMs) {
+            await gamificationService.recordFirstResponse(agentId, responseTimeMs);
+          }
+
+          // Check for new achievements and notify
+          const newAchievements = await gamificationService.checkAchievements(agentId);
+          if (newAchievements.length > 0) {
+            const io = getIO();
+            io.to(`user:${agentId}`).emit('gamification:achievement', {
+              achievements: newAchievements
+            });
+          }
+        } catch (gamificationError) {
+          console.error('Gamification tracking error:', gamificationError);
+          // Don't fail the message send if gamification fails
+        }
 
       } catch (error: any) {
         console.error('Background send error:', error);

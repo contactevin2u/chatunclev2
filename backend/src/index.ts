@@ -27,6 +27,7 @@ import mediaRoutes from './routes/media';
 import knowledgeRoutes from './routes/knowledge';
 import orderopsRoutes from './routes/orderops';
 import groupsRoutes from './routes/groups';
+import gamificationRoutes from './routes/gamification';
 
 const app = express();
 const httpServer = createServer(app);
@@ -114,6 +115,7 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/orderops', orderopsRoutes);
 app.use('/api/groups', groupsRoutes);
+app.use('/api/gamification', gamificationRoutes);
 
 // Secure error handler - doesn't expose internal details in production
 app.use(secureErrorHandler);

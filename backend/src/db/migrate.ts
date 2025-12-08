@@ -542,6 +542,117 @@ $$ LANGUAGE plpgsql;
 -- 11. Optimize table storage for PostgreSQL 18
 ALTER TABLE messages SET (fillfactor = 90);
 ALTER TABLE conversations SET (fillfactor = 90);
+
+-- ============================================================
+-- GAMIFICATION SYSTEM (Sales Team Motivation)
+-- ============================================================
+
+-- Agent daily stats (for leaderboard calculations)
+CREATE TABLE IF NOT EXISTS agent_daily_stats (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  stat_date DATE NOT NULL,
+  messages_sent INT DEFAULT 0,
+  conversations_handled INT DEFAULT 0,
+  avg_response_time_ms INT,
+  first_response_count INT DEFAULT 0,
+  auto_replies_triggered INT DEFAULT 0,
+  templates_used INT DEFAULT 0,
+  points_earned INT DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(agent_id, stat_date)
+);
+
+-- Agent streaks (consecutive activity days)
+CREATE TABLE IF NOT EXISTS agent_streaks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  current_streak INT DEFAULT 0,
+  longest_streak INT DEFAULT 0,
+  last_activity_date DATE,
+  streak_start_date DATE,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Achievement definitions
+CREATE TABLE IF NOT EXISTS achievements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code VARCHAR(50) UNIQUE NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  icon VARCHAR(50) DEFAULT 'trophy',
+  color VARCHAR(20) DEFAULT 'gold',
+  points INT DEFAULT 100,
+  criteria_type VARCHAR(50) NOT NULL,
+  criteria_value INT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Agent earned achievements
+CREATE TABLE IF NOT EXISTS agent_achievements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  achievement_id UUID REFERENCES achievements(id) ON DELETE CASCADE,
+  earned_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(agent_id, achievement_id)
+);
+
+-- Points transactions (audit trail)
+CREATE TABLE IF NOT EXISTS points_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  points INT NOT NULL,
+  reason VARCHAR(100) NOT NULL,
+  reference_type VARCHAR(50),
+  reference_id UUID,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Team challenges (optional competitions)
+CREATE TABLE IF NOT EXISTS team_challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  metric VARCHAR(50) NOT NULL,
+  target_value INT NOT NULL,
+  start_date TIMESTAMP NOT NULL,
+  end_date TIMESTAMP NOT NULL,
+  reward_points INT DEFAULT 500,
+  status VARCHAR(20) DEFAULT 'active',
+  winner_agent_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Challenge participants
+CREATE TABLE IF NOT EXISTS challenge_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  challenge_id UUID REFERENCES team_challenges(id) ON DELETE CASCADE,
+  agent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  current_value INT DEFAULT 0,
+  joined_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(challenge_id, agent_id)
+);
+
+-- Indexes for gamification
+CREATE INDEX IF NOT EXISTS idx_agent_daily_stats_agent ON agent_daily_stats(agent_id, stat_date DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_daily_stats_date ON agent_daily_stats(stat_date DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_achievements_agent ON agent_achievements(agent_id);
+CREATE INDEX IF NOT EXISTS idx_points_transactions_agent ON points_transactions(agent_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_team_challenges_active ON team_challenges(status, end_date) WHERE status = 'active';
+
+-- Insert default achievements
+INSERT INTO achievements (code, name, description, icon, color, points, criteria_type, criteria_value) VALUES
+  ('first_message', 'First Contact', 'Send your first message', 'message-circle', 'blue', 50, 'messages_sent', 1),
+  ('hundred_messages', 'Centurion', 'Send 100 messages', 'zap', 'yellow', 200, 'messages_sent', 100),
+  ('thousand_messages', 'Message Master', 'Send 1,000 messages', 'crown', 'gold', 1000, 'messages_sent', 1000),
+  ('speed_demon', 'Speed Demon', 'Average response under 1 minute', 'clock', 'green', 300, 'avg_response_ms', 60000),
+  ('week_streak', 'Week Warrior', 'Maintain a 7-day streak', 'flame', 'orange', 250, 'streak_days', 7),
+  ('month_streak', 'Monthly Champion', 'Maintain a 30-day streak', 'award', 'purple', 1000, 'streak_days', 30),
+  ('ten_conversations', 'Conversation Starter', 'Handle 10 conversations', 'users', 'teal', 100, 'conversations_handled', 10),
+  ('fifty_conversations', 'Chat Champion', 'Handle 50 conversations', 'star', 'gold', 500, 'conversations_handled', 50)
+ON CONFLICT (code) DO NOTHING;
 `;
 
 async function runMigrations() {
