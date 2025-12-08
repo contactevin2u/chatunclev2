@@ -261,7 +261,20 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                   <div className="flex flex-wrap gap-1">
                     {hasBalance && (
                       <button
-                        onClick={() => sendQuickMessage(`Hi ${customer.name || order.customer_name}, your balance for order ${order.order_code} is ${formatCurrency(order.balance)}. Please make payment at your earliest convenience. Thank you!`)}
+                        onClick={() => {
+                          const parts = [`*Order ${order.order_code}*`];
+                          // Add items
+                          if (items.length > 0) {
+                            const itemsList = items.map((item: any) => `• ${item.name || item.product_name} x${item.qty || item.quantity || 1}`).join('\n');
+                            parts.push(itemsList);
+                          }
+                          parts.push(`\nTotal: ${formatCurrency(order.total)}`);
+                          const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                          if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
+                          parts.push(`*Balance Due: ${formatCurrency(order.balance)}*`);
+                          parts.push(`\nPlease make payment at your earliest convenience. Thank you!`);
+                          sendQuickMessage(parts.join('\n'));
+                        }}
                         className="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded hover:bg-orange-200 flex items-center space-x-1"
                       >
                         <DollarSign className="h-3 w-3" />
@@ -294,7 +307,28 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                       </button>
                     )}
                     <button
-                      onClick={() => sendQuickMessage(`Order ${order.order_code}\nTotal: ${formatCurrency(order.total)}${hasBalance ? `\nBalance: ${formatCurrency(order.balance)}` : ''}\nStatus: ${order.status}${deliveryDate ? `\nDelivery: ${formatDate(deliveryDate)}` : ''}`)}
+                      onClick={() => {
+                        const parts = [`*Order ${order.order_code}*`];
+                        if (order.order_type) parts.push(`Type: ${order.order_type}`);
+                        // Add items
+                        if (items.length > 0) {
+                          parts.push(`\n*Items:*`);
+                          items.forEach((item: any) => {
+                            parts.push(`• ${item.name || item.product_name} x${item.qty || item.quantity || 1}`);
+                          });
+                        }
+                        parts.push(`\n*Payment:*`);
+                        parts.push(`Total: ${formatCurrency(order.total)}`);
+                        const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                        if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
+                        if (hasBalance) parts.push(`Balance: ${formatCurrency(order.balance)}`);
+                        parts.push(`\nStatus: ${order.status}`);
+                        const driverName = trip?.driver_name || trip?.driver?.name;
+                        if (driverName) parts.push(`Driver: ${driverName}`);
+                        if (deliveryDate) parts.push(`Delivery: ${formatDate(deliveryDate)}`);
+                        if (notes) parts.push(`\nNote: ${notes}`);
+                        sendQuickMessage(parts.join('\n'));
+                      }}
                       className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 flex items-center space-x-1"
                     >
                       <FileText className="h-3 w-3" />
