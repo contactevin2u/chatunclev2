@@ -702,17 +702,32 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
       }
 
       const result = await fetchRes.json() as any;
-      console.log(`[OrderOps] Search result keys:`, Object.keys(result));
+      console.log(`[OrderOps] Search result:`, JSON.stringify(result).substring(0, 500));
 
-      // Try different response structures
-      const orders = result.data || result.orders || (Array.isArray(result) ? result : []);
+      // Handle different response structures
+      let orders: any[] = [];
+      if (Array.isArray(result)) {
+        orders = result;
+      } else if (Array.isArray(result.data)) {
+        orders = result.data;
+      } else if (Array.isArray(result.orders)) {
+        orders = result.orders;
+      } else if (result.data && typeof result.data === 'object' && !Array.isArray(result.data)) {
+        // Single order returned as data object
+        orders = [result.data];
+      } else if (result.id && result.code) {
+        // Single order returned directly
+        orders = [result];
+      }
+
+      console.log(`[OrderOps] Parsed ${orders.length} orders from response`);
 
       // Find exact match by code (case insensitive)
       const codeUpper = orderCode.toUpperCase();
-      order = orders.find((o: any) => o.code?.toUpperCase() === codeUpper) || orders[0];
+      order = orders.find((o: any) => o.code?.toUpperCase() === codeUpper) || orders[0] || null;
 
       if (!order) {
-        console.log(`[OrderOps] No order found matching code ${orderCode} in results:`, orders.length);
+        console.log(`[OrderOps] No order found matching code ${orderCode}`);
         res.status(404).json({ error: `Order code ${orderCode} not found` });
         return;
       }
