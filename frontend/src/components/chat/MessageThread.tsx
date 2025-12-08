@@ -232,8 +232,10 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
               {message.media_url && message.content_type === 'audio' && (
                 <audio
                   controls
+                  preload="auto"
                   src={message.media_url}
                   className="mb-2 w-full max-w-[200px] h-9"
+                  style={{ minWidth: '180px' }}
                 />
               )}
 

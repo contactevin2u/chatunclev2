@@ -98,11 +98,13 @@ export async function uploadSticker(buffer: Buffer, messageId?: string): Promise
 
 /**
  * Upload audio/voice note to Cloudinary
+ * Converts to MP3 for browser compatibility (Safari doesn't support OGG Opus)
  */
 export async function uploadAudio(buffer: Buffer, messageId?: string): Promise<string | null> {
   return uploadMedia(buffer, {
     folder: 'chatuncle/audio',
     resourceType: 'video', // Cloudinary uses 'video' for audio files
+    format: 'mp3', // Convert to MP3 for universal browser support
     publicId: messageId ? `audio_${messageId}` : undefined,
   });
 }
