@@ -268,23 +268,21 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                         <span>Balance Due</span>
                       </button>
                     )}
-                    {trip?.driver && (
-                      <>
-                        <button
-                          onClick={() => sendQuickMessage(`Your order ${order.order_code} will be delivered by *${trip.driver.name}*.`)}
-                          className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-1"
-                        >
-                          <User className="h-3 w-3" />
-                          <span>Driver Name</span>
-                        </button>
-                        <button
-                          onClick={() => sendQuickMessage(`Order ${order.order_code}\nDriver: *${trip.driver.name}*${trip.driver.phone ? `\nContact: ${trip.driver.phone}` : ''}${order.delivery_status ? `\nStatus: ${order.delivery_status}` : ''}${deliveryDate ? `\nDelivery Date: ${formatDate(deliveryDate)}` : ''}`)}
-                          className="px-2 py-1 text-xs bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 flex items-center space-x-1"
-                        >
-                          <Truck className="h-3 w-3" />
-                          <span>Driver Info</span>
-                        </button>
-                      </>
+                    {(trip?.driver_name || trip?.driver?.name) && (
+                      <button
+                        onClick={() => {
+                          const driverName = trip.driver_name || trip.driver?.name;
+                          const tripStatus = trip.status || order.delivery_status;
+                          const parts = [`Order ${order.order_code}`, `Driver: *${driverName}*`];
+                          if (tripStatus) parts.push(`Status: ${tripStatus}`);
+                          if (deliveryDate) parts.push(`Delivery: ${formatDate(deliveryDate)}`);
+                          sendQuickMessage(parts.join('\n'));
+                        }}
+                        className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-1"
+                      >
+                        <Truck className="h-3 w-3" />
+                        <span>Driver Info</span>
+                      </button>
                     )}
                     {deliveryDate && (
                       <button
@@ -351,22 +349,22 @@ export default function OrdersPanel({ conversationId, onClose, onSendMessage }: 
                 )}
 
                 {/* Driver/Trip Info */}
-                {trip?.driver && (
+                {(trip?.driver_name || trip?.driver?.name) && (
                   <div className="bg-green-50 rounded p-2 border border-green-200">
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-medium text-green-800">Driver</div>
-                      {order.delivery_status && (
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${getDeliveryStatusColor(order.delivery_status)}`}>
-                          {order.delivery_status}
+                      {(trip.status || order.delivery_status) && (
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${getDeliveryStatusColor(trip.status || order.delivery_status)}`}>
+                          {trip.status || order.delivery_status}
                         </span>
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <div className="flex items-center space-x-1 text-sm">
                         <User className="h-3.5 w-3.5 text-green-600" />
-                        <span className="font-medium">{trip.driver.name}</span>
+                        <span className="font-medium">{trip.driver_name || trip.driver?.name}</span>
                       </div>
-                      {trip.driver.phone && (
+                      {(trip.driver?.phone) && (
                         <div className="flex items-center space-x-1">
                           <span className="text-sm text-gray-600">{trip.driver.phone}</span>
                           <button
