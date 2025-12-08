@@ -669,23 +669,56 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
     }
 
     // Fetch order from OrderOps
-    let fetchPath = orderId ? `/orders/${orderId}` : `/orders?code=${orderCode}&limit=1`;
-    const fetchRes = await orderOpsRequest(fetchPath, { method: 'GET' });
+    let order: any = null;
 
-    if (!fetchRes.ok) {
-      res.status(404).json({ error: 'Order not found in OrderOps' });
-      return;
+    if (orderId) {
+      // Direct fetch by ID
+      const fetchRes = await orderOpsRequest(`/orders/${orderId}`, { method: 'GET' });
+      if (!fetchRes.ok) {
+        const errorText = await fetchRes.text();
+        console.log(`[OrderOps] Order ${orderId} fetch failed:`, fetchRes.status, errorText);
+        res.status(404).json({ error: `Order ID ${orderId} not found in OrderOps` });
+        return;
+      }
+      const result = await fetchRes.json() as any;
+      order = result.data || result;
+    } else {
+      // Search by code - try multiple approaches
+      console.log(`[OrderOps] Searching for order code: ${orderCode}`);
+
+      // Try search endpoint first
+      let fetchRes = await orderOpsRequest(`/orders/search?q=${orderCode}`, { method: 'GET' });
+
+      if (!fetchRes.ok) {
+        // Fallback to filter by code parameter
+        fetchRes = await orderOpsRequest(`/orders?code=${orderCode}&limit=10`, { method: 'GET' });
+      }
+
+      if (!fetchRes.ok) {
+        const errorText = await fetchRes.text();
+        console.log(`[OrderOps] Order code search failed:`, fetchRes.status, errorText);
+        res.status(404).json({ error: `Order code ${orderCode} not found in OrderOps` });
+        return;
+      }
+
+      const result = await fetchRes.json() as any;
+      console.log(`[OrderOps] Search result keys:`, Object.keys(result));
+
+      // Try different response structures
+      const orders = result.data || result.orders || (Array.isArray(result) ? result : []);
+
+      // Find exact match by code (case insensitive)
+      const codeUpper = orderCode.toUpperCase();
+      order = orders.find((o: any) => o.code?.toUpperCase() === codeUpper) || orders[0];
+
+      if (!order) {
+        console.log(`[OrderOps] No order found matching code ${orderCode} in results:`, orders.length);
+        res.status(404).json({ error: `Order code ${orderCode} not found` });
+        return;
+      }
     }
 
-    const result = await fetchRes.json() as any;
-    const order = orderId
-      ? (result.data || result)
-      : (result.data?.[0] || result.orders?.[0] || result[0]);
-
-    if (!order) {
-      res.status(404).json({ error: 'Order not found' });
-      return;
-    }
+    console.log(`[OrderOps] Found order:`, order.id, order.code);
 
     // Fetch due info
     const dueRes = await orderOpsRequest(`/orders/${order.id}/due`, { method: 'GET' });
