@@ -142,7 +142,7 @@ router.get('/health', async (req: Request, res: Response) => {
 
       // Also fetch due info
       const dueRes = await orderOpsRequest(`/orders/${order_id}/due`, { method: 'GET' });
-      let due = null;
+      let due: any = null;
       if (dueRes.ok) {
         due = await dueRes.json();
       }
