@@ -55,8 +55,13 @@ app.use(cors({
       return callback(null, true);
     }
 
+    // Allow chatuncle domains (production domain)
+    if (normalizedOrigin.includes('chatuncle.my') || normalizedOrigin.includes('chatuncle')) {
+      return callback(null, true);
+    }
+
     // Allow Vercel domains (production and preview)
-    if (normalizedOrigin.includes('vercel.app') || normalizedOrigin.includes('chatuncle')) {
+    if (normalizedOrigin.includes('vercel.app')) {
       return callback(null, true);
     }
 
