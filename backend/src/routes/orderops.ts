@@ -105,10 +105,12 @@ async function orderOpsRequest(path: string, options: RequestInit = {}): Promise
 
 /**
  * Public health check - tests OrderOps connection without auth
- * GET /api/orderops/health
+ * GET /api/orderops/health?order_id=123 (optional: fetch specific order)
  */
 router.get('/health', async (req: Request, res: Response) => {
   try {
+    const { order_id } = req.query;
+
     // Check if credentials are configured
     if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
       res.json({
@@ -122,7 +124,38 @@ router.get('/health', async (req: Request, res: Response) => {
     // Try to get a token
     const token = await getOrderOpsToken();
 
-    // Test with a simple API call
+    // If order_id provided, fetch that specific order
+    if (order_id) {
+      const orderRes = await orderOpsRequest(`/orders/${order_id}`, { method: 'GET' });
+
+      if (!orderRes.ok) {
+        const errorText = await orderRes.text();
+        res.json({
+          success: false,
+          error: `Order fetch failed: ${orderRes.status}`,
+          details: errorText,
+        });
+        return;
+      }
+
+      const order = await orderRes.json() as any;
+
+      // Also fetch due info
+      const dueRes = await orderOpsRequest(`/orders/${order_id}/due`, { method: 'GET' });
+      let due = null;
+      if (dueRes.ok) {
+        due = await dueRes.json();
+      }
+
+      res.json({
+        success: true,
+        order: order.data || order,
+        due: due?.data || due,
+      });
+      return;
+    }
+
+    // Default: test with a simple API call
     const fetchRes = await orderOpsRequest('/orders?limit=1', { method: 'GET' });
 
     if (!fetchRes.ok) {
