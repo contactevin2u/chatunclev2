@@ -13,12 +13,12 @@ router.get('/', async (req: Request, res: Response) => {
     const userId = req.user!.userId;
     const { accountId } = req.query;
 
-    let filter = 'user_id = $1';
+    let filter = 'ar.user_id = $1';
     const params: any[] = [userId];
 
     if (accountId) {
       params.push(accountId);
-      filter += ` AND (whatsapp_account_id = $2 OR whatsapp_account_id IS NULL)`;
+      filter += ` AND (ar.whatsapp_account_id = $2 OR ar.whatsapp_account_id IS NULL)`;
     }
 
     const rules = await query<AutoReplyRule>(`
