@@ -254,6 +254,8 @@ class SessionManager {
       // Filter JIDs to ignore - skip status broadcasts and newsletters
       // Reduces event processing overhead significantly
       shouldIgnoreJid: (jid) => {
+        // Handle undefined/null jid
+        if (!jid) return false;
         // Ignore status broadcasts (@broadcast)
         if (isJidBroadcast(jid)) return true;
         // Ignore newsletter channels (@newsletter)
@@ -2280,14 +2282,55 @@ class SessionManager {
     );
 
     if (!group) {
-      // Create group record - we'll get full metadata from group events
+      // Try to fetch group metadata from WhatsApp first
+      let groupName = `Group ${extractGroupId(groupJid)}`;
+      let groupDesc: string | null = null;
+      let participantCount = 0;
+
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket) {
+          const metadata = await session.socket.groupMetadata(groupJid);
+          if (metadata) {
+            groupName = metadata.subject || groupName;
+            groupDesc = metadata.desc || null;
+            participantCount = metadata.participants?.length || 0;
+            console.log(`[WA][Group] Fetched metadata for new group: ${groupName}`);
+            // Cache it
+            groupMetadataCache.set(accountId, groupJid, metadata as any);
+          }
+        }
+      } catch (err) {
+        console.log(`[WA][Group] Could not fetch metadata for ${groupJid}:`, err);
+      }
+
       group = await queryOne(
-        `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
-         VALUES ($1, $2, $3, 0)
+        `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, participant_count)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [accountId, groupJid, `Group ${extractGroupId(groupJid)}`]
+        [accountId, groupJid, groupName, groupDesc, participantCount]
       );
-      console.log(`[WA][Group] Created new group record: ${group.id}`);
+      console.log(`[WA][Group] Created new group record: ${group.id} - ${groupName}`);
+    } else if (group.name?.startsWith('Group ') && group.name?.match(/^Group \d+$/)) {
+      // Group exists but has placeholder name - try to fetch real name
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket) {
+          const metadata = await session.socket.groupMetadata(groupJid);
+          if (metadata?.subject) {
+            await execute(
+              `UPDATE groups SET name = $1, description = $2, participant_count = $3, updated_at = NOW()
+               WHERE id = $4`,
+              [metadata.subject, metadata.desc || null, metadata.participants?.length || 0, group.id]
+            );
+            group.name = metadata.subject;
+            console.log(`[WA][Group] Updated placeholder name to: ${metadata.subject}`);
+            groupMetadataCache.set(accountId, groupJid, metadata as any);
+          }
+        }
+      } catch (err) {
+        // Ignore - keep placeholder name
+      }
     }
 
     // Get or create group conversation
@@ -2530,12 +2573,51 @@ class SessionManager {
     );
 
     if (!group) {
+      // Try to fetch group metadata from WhatsApp first
+      let groupName = `Group ${extractGroupId(groupJid)}`;
+      let groupDesc: string | null = null;
+      let participantCount = 0;
+
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket) {
+          const metadata = await session.socket.groupMetadata(groupJid);
+          if (metadata) {
+            groupName = metadata.subject || groupName;
+            groupDesc = metadata.desc || null;
+            participantCount = metadata.participants?.length || 0;
+            groupMetadataCache.set(accountId, groupJid, metadata as any);
+          }
+        }
+      } catch (err) {
+        // Ignore - use placeholder
+      }
+
       group = await queryOne(
-        `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
-         VALUES ($1, $2, $3, 0)
+        `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, participant_count)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [accountId, groupJid, `Group ${extractGroupId(groupJid)}`]
+        [accountId, groupJid, groupName, groupDesc, participantCount]
       );
+    } else if (group.name?.startsWith('Group ') && group.name?.match(/^Group \d+$/)) {
+      // Placeholder name - try to update
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket) {
+          const metadata = await session.socket.groupMetadata(groupJid);
+          if (metadata?.subject) {
+            await execute(
+              `UPDATE groups SET name = $1, description = $2, participant_count = $3, updated_at = NOW()
+               WHERE id = $4`,
+              [metadata.subject, metadata.desc || null, metadata.participants?.length || 0, group.id]
+            );
+            group.name = metadata.subject;
+            groupMetadataCache.set(accountId, groupJid, metadata as any);
+          }
+        }
+      } catch (err) {
+        // Ignore
+      }
     }
 
     // Get or create group conversation
@@ -2761,6 +2843,17 @@ class SessionManager {
     } catch (error) {
       console.error(`[WA] Failed to send presence:`, error);
     }
+  }
+
+  /**
+   * Get group metadata from WhatsApp
+   */
+  async getGroupMetadata(accountId: string, groupJid: string) {
+    const session = this.sessions.get(accountId);
+    if (!session?.socket) {
+      throw new Error('Session not found or not connected');
+    }
+    return session.socket.groupMetadata(groupJid);
   }
 
   /**

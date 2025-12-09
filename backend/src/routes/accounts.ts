@@ -428,4 +428,66 @@ router.get('/agents/list', async (req: Request, res: Response) => {
   }
 });
 
+// Refresh group names - fetches metadata from WhatsApp for groups with placeholder names
+router.post('/:id/refresh-groups', async (req: Request, res: Response) => {
+  try {
+    // Check ownership or access
+    const account = await queryOne<WhatsAppAccount>(
+      `SELECT wa.id FROM whatsapp_accounts wa
+       LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+       WHERE wa.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)`,
+      [req.params.id, req.user!.userId]
+    );
+
+    if (!account) {
+      res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    const accountId = req.params.id;
+
+    // Get groups with placeholder names
+    const placeholderGroups = await query(
+      `SELECT id, group_jid, name FROM groups
+       WHERE whatsapp_account_id = $1 AND name ~ '^Group [0-9]+$'`,
+      [accountId]
+    );
+
+    console.log(`[Groups] Found ${placeholderGroups.length} groups with placeholder names`);
+
+    let updated = 0;
+    let failed = 0;
+
+    for (const group of placeholderGroups) {
+      try {
+        const metadata = await sessionManager.getGroupMetadata(accountId, group.group_jid);
+        if (metadata?.subject) {
+          await execute(
+            `UPDATE groups SET name = $1, description = $2, participant_count = $3, updated_at = NOW()
+             WHERE id = $4`,
+            [metadata.subject, metadata.desc || null, metadata.participants?.length || 0, group.id]
+          );
+          console.log(`[Groups] Updated "${group.name}" -> "${metadata.subject}"`);
+          updated++;
+        }
+      } catch (err) {
+        console.log(`[Groups] Failed to fetch metadata for ${group.group_jid}:`, err);
+        failed++;
+      }
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    res.json({
+      message: `Refreshed ${updated} group names, ${failed} failed`,
+      total: placeholderGroups.length,
+      updated,
+      failed,
+    });
+  } catch (error) {
+    console.error('Refresh groups error:', error);
+    res.status(500).json({ error: 'Failed to refresh groups' });
+  }
+});
+
 export default router;
