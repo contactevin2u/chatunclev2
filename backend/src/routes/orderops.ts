@@ -444,12 +444,14 @@ async function processOrderAsync(
     const duration = Date.now() - startTime;
     console.log(`[OrderOps] Async parse completed in ${duration}ms`);
 
-    // Notify success
+    // Notify result (success or failure from OrderOps)
+    const isSuccess = data.status === 'success';
     io.to(`user:${userId}`).emit('orderops:result', {
-      success: data.status === 'success',
+      success: isSuccess,
       messageId,
       conversationId,
       orderCode,
+      error: isSuccess ? undefined : (data.message || `OrderOps returned status: ${data.status}`),
       result: data,
       duration,
     });
