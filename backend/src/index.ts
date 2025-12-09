@@ -29,6 +29,7 @@ import orderopsRoutes from './routes/orderops';
 import groupsRoutes from './routes/groups';
 import gamificationRoutes from './routes/gamification';
 
+import sendToPhoneRoutes from './routes/send-to-phone';
 const app = express();
 const httpServer = createServer(app);
 
@@ -116,6 +117,7 @@ app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/orderops', orderopsRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/gamification', gamificationRoutes);
+app.use('/api/send-to-phone', sendToPhoneRoutes);
 
 // Secure error handler - doesn't expose internal details in production
 app.use(secureErrorHandler);

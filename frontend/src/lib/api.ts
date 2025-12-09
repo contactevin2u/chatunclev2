@@ -169,6 +169,13 @@ export const messages = {
       body: { emoji },
       token,
     }),
+
+  sendToPhone: (token: string, accountId: string, phoneNumber: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string) =>
+    request<{ message: any; conversation: { id: string; contact_id: string } }>('/api/send-to-phone', {
+      method: 'POST',
+      body: { accountId, phoneNumber, content, contentType, mediaUrl, mediaMimeType },
+      token,
+    }),
 };
 
 // Contacts
