@@ -940,14 +940,15 @@ export default function ContextPanel({
   );
 
   // Render content based on active tab
+  // Call as functions (not components) to avoid recreating on every render which causes focus loss
   const renderContent = () => {
     switch (activeTab) {
       case 'profile':
-        return <ProfileContent />;
+        return ProfileContent();
       case 'notes':
-        return <NotesContent />;
+        return NotesContent();
       case 'orders':
-        return <OrdersContent />;
+        return OrdersContent();
       default:
         return null;
     }
