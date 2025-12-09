@@ -1036,6 +1036,22 @@ router.post('/conversation/:conversationId/orders/:orderId/sync', async (req: Re
       due = due.data || due;
     }
 
+    // Fetch driver info if driver_id exists but driver_name is null
+    if (order.trip?.driver_id && !order.trip?.driver_name) {
+      try {
+        const driverRes = await orderOpsRequest(`/drivers/${order.trip.driver_id}`, { method: 'GET' });
+        if (driverRes.ok) {
+          const driverData = await driverRes.json();
+          const driver = driverData.data || driverData;
+          order.trip.driver_name = driver.name;
+          order.trip.driver = driver;
+          console.log(`[OrderOps] Fetched driver ${order.trip.driver_id}: ${driver.name}`);
+        }
+      } catch (err) {
+        console.error('[OrderOps] Failed to fetch driver info:', err);
+      }
+    }
+
     // Update local record
     await execute(`
       UPDATE contact_orders SET
