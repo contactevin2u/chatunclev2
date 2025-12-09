@@ -18,11 +18,11 @@ import NodeCache from 'node-cache';
 import { GroupMetadata } from '@whiskeysockets/baileys';
 
 class GroupMetadataCacheService {
-  // Per-account caches (5 minute TTL as recommended)
+  // Per-account caches (10 minute TTL - increased for better cache hit rate)
   private caches: Map<string, NodeCache> = new Map();
 
-  // Default TTL in seconds
-  private defaultTTL = 300; // 5 minutes
+  // Default TTL in seconds (increased from 5 min to 10 min for better hit rate)
+  private defaultTTL = 600; // 10 minutes
 
   /**
    * Get or create cache for an account
@@ -31,9 +31,9 @@ class GroupMetadataCacheService {
     if (!this.caches.has(accountId)) {
       const cache = new NodeCache({
         stdTTL: this.defaultTTL,
-        checkperiod: 60,       // Check for expired every minute
-        useClones: false,      // Don't clone for performance
-        maxKeys: 500,          // Max 500 groups per account
+        checkperiod: 120,      // Check for expired every 2 minutes
+        useClones: false,      // Don't clone for performance - critical for speed
+        maxKeys: 1000,         // Max 1000 groups per account (increased for heavy users)
       });
 
       this.caches.set(accountId, cache);

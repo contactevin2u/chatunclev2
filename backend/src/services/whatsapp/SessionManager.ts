@@ -199,6 +199,7 @@ class SessionManager {
     const { state, saveCreds } = await usePostgresAuthState(accountId);
 
     // Create socket with proper configuration based on latest Baileys documentation
+    // Reference: https://baileys.wiki/docs/api/type-aliases/SocketConfig/
     const sock = makeWASocket({
       version,
       auth: {
@@ -220,24 +221,51 @@ class SessionManager {
       // cachedGroupMetadata for faster group operations (5-min TTL cache)
       // Reduces API calls to WhatsApp servers and improves performance
       cachedGroupMetadata: groupMetadataCache.createCacheFunction(accountId),
-      // Performance: Emit own events to batch multiple updates into single emissions
+
+      // ============ PERFORMANCE OPTIMIZATIONS ============
+      // Reference: https://www.builderbot.app/en/providers/baileys
+
+      // Emit own events to batch multiple updates into single emissions
       // Reduces socket.io traffic and improves multi-account performance
       emitOwnEvents: true,
-      // Performance: Filter which history chunks to sync during download
+
+      // Connection timeouts - optimized for reliability
+      connectTimeoutMs: 60000,        // 60 seconds for initial connection
+      defaultQueryTimeoutMs: 60000,   // 60 seconds for queries
+      keepAliveIntervalMs: 25000,     // 25 second ping-pong interval
+      retryRequestDelayMs: 250,       // 250ms between retry requests (fast retries)
+
+      // QR code timeout - give users enough time to scan
+      qrTimeout: 60000,               // 60 seconds per QR code
+
+      // Max retry count for failed messages
+      maxMsgRetryCount: 5,
+
+      // Filter which history chunks to sync during download
       // Only sync recent history (last 7 days) to reduce initial load time
       shouldSyncHistoryMessage: (historyNotification) => {
-        // Check the oldest message timestamp in this chunk
         const oldestTimestamp = historyNotification.oldestMsgInChunkTimestampSec;
-        if (!oldestTimestamp) return true; // If no timestamp, sync to be safe
+        if (!oldestTimestamp) return true;
         const timestamp = typeof oldestTimestamp === 'number' ? oldestTimestamp : (oldestTimestamp as any).low || 0;
         const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
-        // Only sync chunks that contain messages from the last 7 days
         return timestamp >= sevenDaysAgo;
       },
-      // Performance: Patch messages before sending for optimization
+
+      // Filter JIDs to ignore - skip status broadcasts and newsletters
+      // Reduces event processing overhead significantly
+      shouldIgnoreJid: (jid) => {
+        // Ignore status broadcasts (@broadcast)
+        if (isJidBroadcast(jid)) return true;
+        // Ignore newsletter channels (@newsletter)
+        if (jid.endsWith('@newsletter')) return true;
+        // Ignore call status
+        if (jid.endsWith('@call')) return true;
+        return false;
+      },
+
+      // Patch messages before sending for optimization
       // Removes unnecessary fields that bloat message size
       patchMessageBeforeSending: (msg) => {
-        // Remove empty or undefined fields to reduce message size
         const clean = (obj: any): any => {
           if (obj === null || obj === undefined) return obj;
           if (typeof obj !== 'object') return obj;

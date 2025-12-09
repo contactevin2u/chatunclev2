@@ -22,18 +22,19 @@ interface StoredMessage {
 }
 
 class MessageStoreService {
-  // In-memory cache with 30 minute TTL (messages older than this use DB lookup)
+  // In-memory cache with 1 hour TTL (messages older than this use DB lookup)
+  // Increased TTL for better cache hit rate and reduced DB queries
   private cache: NodeCache;
 
   // Maximum messages to keep in memory per account
-  private maxMessagesPerAccount = 1000;
+  private maxMessagesPerAccount = 2000;
 
   constructor() {
     this.cache = new NodeCache({
-      stdTTL: 1800,        // 30 minutes TTL
-      checkperiod: 300,    // Check for expired keys every 5 minutes
-      useClones: false,    // Don't clone for performance
-      maxKeys: 50000,      // Max 50k messages across all accounts (increased from 10k)
+      stdTTL: 3600,        // 1 hour TTL (increased from 30 min for better hit rate)
+      checkperiod: 600,    // Check for expired keys every 10 minutes
+      useClones: false,    // Don't clone for performance - critical for speed
+      maxKeys: 100000,     // Max 100k messages across all accounts (increased for multi-account)
     });
 
     // Log cache stats periodically
