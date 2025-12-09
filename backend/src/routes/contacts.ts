@@ -96,7 +96,8 @@ router.get('/:id', async (req: Request, res: Response) => {
         wa.name as account_name
       FROM contacts ct
       JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      WHERE ct.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!contact) {
