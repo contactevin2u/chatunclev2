@@ -12,6 +12,7 @@ import ContextPanel from '@/components/chat/ContextPanel';
 import { MessageSquare, RefreshCw, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
+import OrderOpsToast from '@/components/ui/OrderOpsToast';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -37,6 +38,7 @@ export default function InboxPage() {
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const [showAccountSelector, setShowAccountSelector] = useState(false);
   const [newAchievements, setNewAchievements] = useState<any[]>([]);
+  const [orderOpsResult, setOrderOpsResult] = useState<any>(null);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
 
@@ -310,12 +312,19 @@ export default function InboxPage() {
     }
   }, []);
 
+  // Handle OrderOps result notifications
+  const handleOrderOpsResult = useCallback((data: any) => {
+    console.log('[OrderOps] Result received:', data);
+    setOrderOpsResult(data);
+  }, []);
+
   useSocket({
     onNewMessage: handleNewMessage,
     onSyncProgress: handleSyncProgress,
     onMessageStatus: handleMessageStatus,
     onMessageReaction: handleMessageReaction,
     onAchievement: handleAchievement,
+    onOrderOpsResult: handleOrderOpsResult,
   });
 
   // Load conversations on mount
@@ -900,6 +909,14 @@ export default function InboxPage() {
         <AchievementToast
           achievements={newAchievements}
           onDismiss={() => setNewAchievements([])}
+        />
+      )}
+
+      {/* OrderOps Toast Notification */}
+      {orderOpsResult && (
+        <OrderOpsToast
+          result={orderOpsResult}
+          onDismiss={() => setOrderOpsResult(null)}
         />
       )}
     </div>

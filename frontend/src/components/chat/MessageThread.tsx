@@ -186,7 +186,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
     setConfirmModal({ isOpen: false, messageId: '', content: '' });
   };
 
-  // Confirmed - send to OrderOps
+  // Confirmed - send to OrderOps (async - returns immediately)
   const handleConfirmSend = async () => {
     if (!token || !conversationId) return;
 
@@ -195,8 +195,16 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
     setParseResult(null);
 
     try {
-      const result = await orderops.parseMessage(token, messageId, conversationId);
-      setParseResult({ id: messageId, success: result.success, data: result.result });
+      const result = await orderops.parseMessage(token, messageId, conversationId) as any;
+
+      if (result.processing) {
+        // Async processing - close modal, result will come via socket
+        setParseResult({ id: messageId, success: true, data: { processing: true } });
+      } else if (result.success) {
+        // Immediate success (shouldn't happen with new async flow, but handle anyway)
+        setParseResult({ id: messageId, success: true, data: result.result });
+      }
+
       setConfirmModal({ isOpen: false, messageId: '', content: '' });
     } catch (error: any) {
       setParseResult({ id: messageId, success: false, data: error.message });
@@ -495,7 +503,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                       {parsingId === message.id ? (
                         <>
                           <Loader2 className="h-3 w-3 animate-spin" />
-                          <span>Parsing...</span>
+                          <span>Sending...</span>
                         </>
                       ) : (
                         <>

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { queryOne, query, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
+import { getIO } from '../services/socket';
 
 const router = Router();
 
@@ -264,15 +265,19 @@ router.post('/test-parse', async (req: Request, res: Response) => {
 router.use(authenticate);
 
 /**
- * Send a message to OrderOps for parsing
+ * Send a message to OrderOps for parsing (async - returns immediately)
  * POST /api/orderops/parse
  *
  * Uses the /parse/advanced endpoint which is a 4-stage LLM parsing pipeline
  * for complex WhatsApp messages (deliveries, returns, buybacks, etc.)
+ *
+ * Returns immediately and processes in background.
+ * Emits 'orderops:result' socket event when complete.
  */
 router.post('/parse', async (req: Request, res: Response) => {
   try {
     const { messageId, conversationId } = req.body;
+    const userId = req.user!.userId;
 
     if (!messageId || !conversationId) {
       res.status(400).json({ error: 'messageId and conversationId are required' });
@@ -298,18 +303,57 @@ router.post('/parse', async (req: Request, res: Response) => {
       return;
     }
 
+    // Return immediately - processing happens in background
+    res.json({
+      success: true,
+      processing: true,
+      messageId,
+      message: 'Order is being processed. You will be notified when complete.',
+    });
+
+    // Process in background (not awaited)
+    processOrderAsync(userId, messageId, conversationId, message.content).catch(err => {
+      console.error('[OrderOps] Background processing error:', err);
+    });
+
+  } catch (error: any) {
+    console.error('[OrderOps] Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Background processor for OrderOps parsing
+ */
+async function processOrderAsync(
+  userId: string,
+  messageId: string,
+  conversationId: string,
+  messageContent: string
+): Promise<void> {
+  const io = getIO();
+  const startTime = Date.now();
+
+  try {
+    console.log(`[OrderOps] Starting async parse for message ${messageId}`);
+
     // Call OrderOps API with auto-retry on 401
     const fetchRes = await orderOpsRequest('/parse/advanced', {
       method: 'POST',
-      body: JSON.stringify({ message: message.content }),
+      body: JSON.stringify({ message: messageContent }),
     });
 
     if (!fetchRes.ok) {
       const errorText = await fetchRes.text();
       console.error('[OrderOps] API error:', fetchRes.status, errorText);
-      res.status(fetchRes.status).json({
-        error: 'OrderOps API error',
-        details: errorText
+
+      // Notify failure
+      io.to(`user:${userId}`).emit('orderops:result', {
+        success: false,
+        messageId,
+        conversationId,
+        error: `OrderOps API error: ${fetchRes.status}`,
+        duration: Date.now() - startTime,
       });
       return;
     }
@@ -320,9 +364,19 @@ router.post('/parse', async (req: Request, res: Response) => {
     console.log('[OrderOps] Parse result:', JSON.stringify(data).substring(0, 300));
 
     // Store order reference if parsing was successful
+    let orderCode = null;
     if (data.status === 'success' && (data.order_id || data.mother_order_id)) {
       const orderId = data.order_id || data.mother_order_id;
-      const orderCode = data.order_code || data.mother_order_code;
+      orderCode = data.order_code || data.mother_order_code;
+
+      // Extract nested fields from parsed data
+      const parsedOrder = data.parsed_data?.order;
+      const parsedCustomer = data.parsed_data?.customer;
+      const customerName = parsedCustomer?.name || null;
+      const orderTotal = parsedOrder?.totals?.total || parsedOrder?.total || null;
+      const orderBalance = parsedOrder?.totals?.to_collect || parsedOrder?.balance || null;
+      const orderType = parsedOrder?.type || data.type || 'DELIVERY';
+      const deliveryDate = parsedOrder?.delivery_date || null;
 
       // Get contact_id from conversation
       const conv = await queryOne(`
@@ -334,10 +388,13 @@ router.post('/parse', async (req: Request, res: Response) => {
           INSERT INTO contact_orders (
             contact_id, conversation_id, message_id,
             orderops_order_id, order_code, order_type,
-            customer_name, status, parsed_data
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            customer_name, total, balance, status, parsed_data
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (orderops_order_id) DO UPDATE SET
             order_code = EXCLUDED.order_code,
+            customer_name = EXCLUDED.customer_name,
+            total = EXCLUDED.total,
+            balance = EXCLUDED.balance,
             status = EXCLUDED.status,
             parsed_data = EXCLUDED.parsed_data,
             updated_at = NOW()
@@ -347,26 +404,44 @@ router.post('/parse', async (req: Request, res: Response) => {
           messageId,
           orderId,
           orderCode,
-          data.type || 'delivery',
-          data.parsed_data?.customer_name || null,
+          orderType,
+          customerName,
+          orderTotal,
+          orderBalance,
           data.status,
           JSON.stringify(data)
         ]);
 
-        console.log('[OrderOps] Order stored:', orderCode);
+        console.log('[OrderOps] Order stored:', orderCode, '| Customer:', customerName, '| Total:', orderTotal);
       }
     }
 
-    res.json({
+    const duration = Date.now() - startTime;
+    console.log(`[OrderOps] Async parse completed in ${duration}ms`);
+
+    // Notify success
+    io.to(`user:${userId}`).emit('orderops:result', {
       success: data.status === 'success',
+      messageId,
+      conversationId,
+      orderCode,
       result: data,
-      message: data.message || 'Message sent to OrderOps for parsing',
+      duration,
     });
+
   } catch (error: any) {
-    console.error('[OrderOps] Error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('[OrderOps] Async processing error:', error);
+
+    // Notify failure
+    io.to(`user:${userId}`).emit('orderops:result', {
+      success: false,
+      messageId,
+      conversationId,
+      error: error.message,
+      duration: Date.now() - startTime,
+    });
   }
-});
+}
 
 /**
  * Send message for quotation parsing (simpler, no order creation)

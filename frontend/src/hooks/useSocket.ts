@@ -13,6 +13,7 @@ interface SocketEvents {
   onQrUpdate?: (data: any) => void;
   onSyncProgress?: (data: any) => void;
   onAchievement?: (data: any) => void;
+  onOrderOpsResult?: (data: any) => void;
 }
 
 export function useSocket(events: SocketEvents = {}) {
@@ -53,6 +54,10 @@ export function useSocket(events: SocketEvents = {}) {
       socket.on('gamification:achievement', events.onAchievement);
     }
 
+    if (events.onOrderOpsResult) {
+      socket.on('orderops:result', events.onOrderOpsResult);
+    }
+
     return () => {
       if (events.onNewMessage) {
         socket.off('message:new', events.onNewMessage);
@@ -75,8 +80,11 @@ export function useSocket(events: SocketEvents = {}) {
       if (events.onAchievement) {
         socket.off('gamification:achievement', events.onAchievement);
       }
+      if (events.onOrderOpsResult) {
+        socket.off('orderops:result', events.onOrderOpsResult);
+      }
     };
-  }, [token, events.onNewMessage, events.onMessageStatus, events.onMessageReaction, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress, events.onAchievement]);
+  }, [token, events.onNewMessage, events.onMessageStatus, events.onMessageReaction, events.onAccountStatus, events.onQrUpdate, events.onSyncProgress, events.onAchievement, events.onOrderOpsResult]);
 
   const joinAccount = useCallback((accountId: string) => {
     socketRef.current?.emit('join:account', accountId);
