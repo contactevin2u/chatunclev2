@@ -414,6 +414,8 @@ async function processOrderAsync(
             customer_name, total, balance, status, parsed_data
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           ON CONFLICT (orderops_order_id) DO UPDATE SET
+            conversation_id = EXCLUDED.conversation_id,
+            message_id = EXCLUDED.message_id,
             order_code = EXCLUDED.order_code,
             customer_name = EXCLUDED.customer_name,
             total = EXCLUDED.total,

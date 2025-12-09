@@ -479,8 +479,13 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
               {message.content_type === 'text' && message.content && message.content.length > 20 && (
                 <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
                   {parseResult?.id === message.id ? (
-                    <div className={`text-xs ${parseResult.success ? 'text-green-600' : 'text-red-600'}`}>
-                      {parseResult.success ? (
+                    <div className={`text-xs ${parseResult.success ? (parseResult.data?.processing ? 'text-purple-600' : 'text-green-600') : 'text-red-600'}`}>
+                      {parseResult.data?.processing ? (
+                        <div className="flex items-center space-x-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span>Processing order... (result will appear as notification)</span>
+                        </div>
+                      ) : parseResult.success ? (
                         <div className="space-y-1">
                           <div className="font-medium">✓ {parseResult.data?.order_code || parseResult.data?.mother_order_code || 'Order'} created</div>
                           {parseResult.data?.type && (
