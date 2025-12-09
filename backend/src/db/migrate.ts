@@ -642,6 +642,29 @@ CREATE INDEX IF NOT EXISTS idx_agent_achievements_agent ON agent_achievements(ag
 CREATE INDEX IF NOT EXISTS idx_points_transactions_agent ON points_transactions(agent_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_team_challenges_active ON team_challenges(status, end_date) WHERE status = 'active';
 
+-- ============================================================
+-- LID/PN MAPPING TABLE (WhatsApp ID Deduplication)
+-- ============================================================
+-- WhatsApp uses two JID formats: LID (Linked ID) and PN (Phone Number)
+-- The same user can appear as both formats causing duplicate contacts
+-- This table stores bidirectional mappings between LID and PN
+
+CREATE TABLE IF NOT EXISTS lid_pn_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE,
+  lid VARCHAR(100) NOT NULL,
+  pn VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(whatsapp_account_id, lid),
+  UNIQUE(whatsapp_account_id, pn)
+);
+
+-- Indexes for fast mapping lookups
+CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_account ON lid_pn_mappings(whatsapp_account_id);
+CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_lid ON lid_pn_mappings(lid);
+CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_pn ON lid_pn_mappings(pn);
+
 -- Insert default achievements
 INSERT INTO achievements (code, name, description, icon, color, points, criteria_type, criteria_value) VALUES
   ('first_message', 'First Contact', 'Send your first message', 'message-circle', 'blue', 50, 'messages_sent', 1),
