@@ -10,7 +10,7 @@ router.use(authenticate);
 // Get current user's stats
 router.get('/stats', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -40,7 +40,7 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
 // Get current user's achievements
 router.get('/achievements', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -56,7 +56,7 @@ router.get('/achievements', async (req: Request, res: Response) => {
 // Get active challenges
 router.get('/challenges', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     const challenges = await gamificationService.getActiveChallenges(userId);
     res.json({ challenges });
   } catch (error) {
@@ -68,7 +68,7 @@ router.get('/challenges', async (req: Request, res: Response) => {
 // Join a challenge
 router.post('/challenges/:id/join', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -84,7 +84,7 @@ router.post('/challenges/:id/join', async (req: Request, res: Response) => {
 // Get points history
 router.get('/points-history', async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?.id;
+    const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
