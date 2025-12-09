@@ -33,7 +33,7 @@ class MessageStoreService {
       stdTTL: 1800,        // 30 minutes TTL
       checkperiod: 300,    // Check for expired keys every 5 minutes
       useClones: false,    // Don't clone for performance
-      maxKeys: 10000,      // Max 10k messages across all accounts
+      maxKeys: 50000,      // Max 50k messages across all accounts (increased from 10k)
     });
 
     // Log cache stats periodically

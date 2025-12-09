@@ -75,6 +75,17 @@ interface AccountRateState {
 
 const accountRateStates = new Map<string, AccountRateState>();
 
+// Per-contact rate limiting - track last message time to each contact
+// Key: accountId:contactWaId, Value: timestamp
+const contactLastMessageTime = new Map<string, number>();
+
+// Minimum delay between messages to the SAME contact (prevents spam detection)
+const MIN_SAME_CONTACT_DELAY_MS = 6000; // 6 seconds - WhatsApp's pair rate limit
+
+// Cache for hasMessagedContactBefore to avoid DB queries
+// Key: accountId:contactWaId, Value: boolean
+const contactMessagedCache = new Map<string, boolean>();
+
 // Get or create rate state for an account
 function getAccountRateState(accountId: string): AccountRateState {
   if (!accountRateStates.has(accountId)) {
@@ -116,17 +127,24 @@ export function getRandomDelay(min: number = RATE_LIMITS.MIN_DELAY_MS, max: numb
 }
 
 /**
- * Generate typing indicator duration (human-like but SHORT)
- * Presence expires after 10 seconds, so keep this under 3 seconds
+ * Generate typing indicator duration (human-like)
+ * Average typing speed: 40-60 WPM = 200-300 chars/min = ~50ms per char
+ * We use a more natural range with variation
  */
 export function getTypingDuration(messageLength: number = 50): number {
-  // Keep it short: 0.5 - 2 seconds with slight variation
-  // Don't scale too much with length - typing should feel natural not robotic
-  const baseTime = RATE_LIMITS.MIN_TYPING_MS;
-  const lengthBonus = Math.min(messageLength * 5, 500); // Max 500ms bonus for long messages
-  const randomVariation = Math.floor(Math.random() * 500);
+  // Base: ~40-80ms per character (realistic typing speed)
+  const msPerChar = 40 + Math.random() * 40; // 40-80ms per char
+  const baseDuration = messageLength * msPerChar;
 
-  return Math.min(baseTime + lengthBonus + randomVariation, RATE_LIMITS.MAX_TYPING_MS);
+  // Add random "thinking" pauses (simulates human hesitation)
+  const thinkingPause = Math.random() * 500; // 0-500ms random pause
+
+  // Total duration with min/max bounds
+  const totalDuration = baseDuration + thinkingPause;
+
+  // Minimum 800ms (feels natural), maximum 8 seconds (don't look like bot)
+  // WhatsApp presence expires after 10s, so stay under that
+  return Math.min(Math.max(totalDuration, 800), 8000);
 }
 
 /**
@@ -298,6 +316,66 @@ export function recordBatchMessage(accountId: string): void {
 }
 
 /**
+ * Check if we can send to a specific contact (per-contact rate limiting)
+ * WhatsApp pair rate limit: 1 message per 6 seconds to same contact
+ */
+export function canSendToContact(accountId: string, contactWaId: string): { allowed: boolean; waitMs: number; reason?: string } {
+  const key = `${accountId}:${contactWaId}`;
+  const lastSent = contactLastMessageTime.get(key) || 0;
+  const now = Date.now();
+  const elapsed = now - lastSent;
+
+  if (elapsed < MIN_SAME_CONTACT_DELAY_MS) {
+    return {
+      allowed: false,
+      waitMs: MIN_SAME_CONTACT_DELAY_MS - elapsed,
+      reason: `Per-contact rate limit: wait ${Math.ceil((MIN_SAME_CONTACT_DELAY_MS - elapsed) / 1000)}s before messaging same contact`,
+    };
+  }
+
+  return { allowed: true, waitMs: 0 };
+}
+
+/**
+ * Record message sent to a specific contact (for per-contact rate limiting)
+ */
+export function recordContactMessage(accountId: string, contactWaId: string): void {
+  const key = `${accountId}:${contactWaId}`;
+  contactLastMessageTime.set(key, Date.now());
+
+  // Cleanup old entries periodically (keep last 1000)
+  if (contactLastMessageTime.size > 1000) {
+    const entries = Array.from(contactLastMessageTime.entries());
+    entries.sort((a, b) => b[1] - a[1]); // Sort by timestamp desc
+    contactLastMessageTime.clear();
+    entries.slice(0, 500).forEach(([k, v]) => contactLastMessageTime.set(k, v));
+  }
+}
+
+/**
+ * Check if we've messaged a contact before (cached to avoid DB queries)
+ */
+export function hasMessagedContactCached(accountId: string, contactWaId: string): boolean | undefined {
+  const key = `${accountId}:${contactWaId}`;
+  return contactMessagedCache.get(key);
+}
+
+/**
+ * Set cached value for hasMessagedContact
+ */
+export function setMessagedContactCache(accountId: string, contactWaId: string, hasMessaged: boolean): void {
+  const key = `${accountId}:${contactWaId}`;
+  contactMessagedCache.set(key, hasMessaged);
+
+  // Cleanup old entries periodically (keep last 5000)
+  if (contactMessagedCache.size > 5000) {
+    const entries = Array.from(contactMessagedCache.entries());
+    contactMessagedCache.clear();
+    entries.slice(-2500).forEach(([k, v]) => contactMessagedCache.set(k, v));
+  }
+}
+
+/**
  * Get anti-ban statistics for an account
  */
 export async function getAntiBanStats(accountId: string): Promise<{
@@ -379,9 +457,23 @@ export async function preSendCheck(
   contactWaId: string,
   options: { skipNewContactCheck?: boolean } = {}
 ): Promise<{ canSend: boolean; reason?: string }> {
-  // Check if new contact and within limits
+  // Check per-contact rate limit first (prevents spamming same contact)
+  const contactCheck = canSendToContact(accountId, contactWaId);
+  if (!contactCheck.allowed) {
+    console.log(`[AntiBan] Per-contact rate limit: waiting ${contactCheck.waitMs}ms`);
+    // Wait for per-contact limit automatically
+    await sleep(contactCheck.waitMs);
+  }
+
+  // Check if new contact and within limits (use cache first)
   if (!options.skipNewContactCheck) {
-    const hasMessaged = await hasMessagedContactBefore(accountId, contactWaId);
+    let hasMessaged = hasMessagedContactCached(accountId, contactWaId);
+
+    // If not in cache, check DB and cache the result
+    if (hasMessaged === undefined) {
+      hasMessaged = await hasMessagedContactBefore(accountId, contactWaId);
+      setMessagedContactCache(accountId, contactWaId, hasMessaged);
+    }
 
     if (!hasMessaged) {
       const newContactCheck = await canSendToNewContact(accountId);
@@ -410,9 +502,21 @@ export async function preSendCheck(
  * Call this after successfully sending a message
  */
 export async function postSendRecord(accountId: string, contactWaId: string): Promise<void> {
-  const hasMessaged = await hasMessagedContactBefore(accountId, contactWaId);
+  // Check cache first, then DB if needed
+  let hasMessaged = hasMessagedContactCached(accountId, contactWaId);
+  if (hasMessaged === undefined) {
+    hasMessaged = await hasMessagedContactBefore(accountId, contactWaId);
+  }
+
+  // Record general message stats
   recordMessageSent(accountId, !hasMessaged);
   recordBatchMessage(accountId);
+
+  // Record per-contact rate limit timestamp
+  recordContactMessage(accountId, contactWaId);
+
+  // Update cache - they've now been messaged
+  setMessagedContactCache(accountId, contactWaId, true);
 }
 
 /**

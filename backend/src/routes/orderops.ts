@@ -10,12 +10,14 @@ const ORDEROPS_API_URL = process.env.ORDEROPS_API_URL || 'https://orderops-api-v
 const ORDEROPS_USERNAME = process.env.ORDEROPS_USERNAME || '';
 const ORDEROPS_PASSWORD = process.env.ORDEROPS_PASSWORD || '';
 
-// Token cache
+// Token cache with lock to prevent race conditions
 let cachedToken: string | null = null;
 let tokenExpiry: number = 0;
+let tokenRefreshPromise: Promise<string> | null = null;
 
 /**
  * Get a valid OrderOps token, logging in if needed
+ * Uses a lock to prevent multiple concurrent login requests
  */
 async function getOrderOpsToken(): Promise<string> {
   // Return cached token if still valid (with 5 min buffer)
@@ -23,6 +25,27 @@ async function getOrderOpsToken(): Promise<string> {
     return cachedToken;
   }
 
+  // If a refresh is already in progress, wait for it
+  if (tokenRefreshPromise) {
+    console.log('[OrderOps] Waiting for existing token refresh...');
+    return tokenRefreshPromise;
+  }
+
+  // Start a new token refresh with lock
+  tokenRefreshPromise = refreshToken();
+
+  try {
+    const token = await tokenRefreshPromise;
+    return token;
+  } finally {
+    tokenRefreshPromise = null;
+  }
+}
+
+/**
+ * Actually perform the token refresh (called only once per refresh cycle)
+ */
+async function refreshToken(): Promise<string> {
   if (!ORDEROPS_USERNAME || !ORDEROPS_PASSWORD) {
     throw new Error('OrderOps credentials not configured. Set ORDEROPS_USERNAME and ORDEROPS_PASSWORD env variables.');
   }

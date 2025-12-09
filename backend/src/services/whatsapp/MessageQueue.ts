@@ -45,6 +45,9 @@ class MessageQueueService {
   // Default concurrency per account (conservative for anti-ban)
   private defaultConcurrency = 1;  // Process one message at a time per account
 
+  // Maximum queue size per account (prevents memory exhaustion if WhatsApp is down)
+  private maxQueueSize = 500;
+
   // Queue options
   private queueOptions = {
     concurrency: 1,
@@ -89,6 +92,13 @@ class MessageQueueService {
   ): Promise<string> {
     const queue = this.getQueue(message.accountId);
     const priority = message.priority ?? 0;
+
+    // Check queue size limit (backpressure)
+    const currentSize = queue.size + queue.pending;
+    if (currentSize >= this.maxQueueSize) {
+      console.warn(`[MessageQueue] Account ${message.accountId}: Queue full (${currentSize}/${this.maxQueueSize}), rejecting message`);
+      throw new Error(`Message queue full for account. Please try again later. (${currentSize} messages pending)`);
+    }
 
     return queue.add(async () => {
       // Add delay based on message type (bulk vs reply)
