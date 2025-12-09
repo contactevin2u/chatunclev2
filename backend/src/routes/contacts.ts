@@ -127,12 +127,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { name } = req.body;
 
-    // Verify ownership
+    // Verify ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
       JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      WHERE ct.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!contact) {
@@ -158,12 +159,13 @@ router.post('/:id/labels', async (req: Request, res: Response) => {
   try {
     const { labelId } = req.body;
 
-    // Verify contact ownership
+    // Verify contact ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
       JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      WHERE ct.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!contact) {
@@ -198,12 +200,13 @@ router.post('/:id/labels', async (req: Request, res: Response) => {
 // Remove label from contact
 router.delete('/:id/labels/:labelId', async (req: Request, res: Response) => {
   try {
-    // Verify contact ownership
+    // Verify contact ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
       JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      WHERE ct.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!contact) {

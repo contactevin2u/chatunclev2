@@ -15,12 +15,13 @@ router.get('/', async (req: Request, res: Response) => {
 
     let messages;
     if (conversationId) {
-      // Verify ownership and get for specific conversation
+      // Verify ownership or shared access and get for specific conversation
       const conversation = await queryOne(`
         SELECT c.id
         FROM conversations c
         JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-        WHERE c.id = $1 AND wa.user_id = $2
+        LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+        WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
       `, [conversationId, userId]);
 
       if (!conversation) {
@@ -38,14 +39,15 @@ router.get('/', async (req: Request, res: Response) => {
         ORDER BY sm.scheduled_at ASC
       `, [conversationId]);
     } else {
-      // Get all for user
+      // Get all for user (owned or shared access)
       messages = await query(`
         SELECT sm.*, ct.name as contact_name, ct.phone_number as contact_phone
         FROM scheduled_messages sm
         JOIN conversations c ON sm.conversation_id = c.id
         LEFT JOIN contacts ct ON c.contact_id = ct.id
         JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-        WHERE wa.user_id = $1
+        LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
+        WHERE wa.user_id = $1 OR aa.agent_id IS NOT NULL
         ORDER BY sm.scheduled_at DESC
       `, [userId]);
     }
@@ -84,12 +86,13 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify ownership
+    // Verify ownership or shared access
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
