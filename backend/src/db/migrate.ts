@@ -265,6 +265,8 @@ CREATE TABLE IF NOT EXISTS account_access (
 -- Index for fast access lookup
 CREATE INDEX IF NOT EXISTS idx_account_access_agent ON account_access(agent_id);
 CREATE INDEX IF NOT EXISTS idx_account_access_account ON account_access(whatsapp_account_id);
+-- CRITICAL: Composite index for the common JOIN pattern (wa.id, agent_id) used in every route
+CREATE INDEX IF NOT EXISTS idx_account_access_account_agent ON account_access(whatsapp_account_id, agent_id);
 
 -- ============================================================
 -- MESSAGE DEDUPLICATION
@@ -498,6 +500,18 @@ CREATE INDEX IF NOT EXISTS idx_ai_context_jsonb ON ai_conversation_context USING
 -- 7. Composite indexes for common query patterns
 CREATE INDEX IF NOT EXISTS idx_messages_conv_sender ON messages(conversation_id, sender_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_contacts_account_name ON contacts(whatsapp_account_id, LOWER(name));
+
+-- CRITICAL: Index for wa_message_id duplicate checks (used in every message sync)
+CREATE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id) WHERE wa_message_id IS NOT NULL;
+
+-- CRITICAL: Index for contact lookups by wa_id (used in message handling)
+CREATE INDEX IF NOT EXISTS idx_contacts_account_waid ON contacts(whatsapp_account_id, wa_id);
+
+-- CRITICAL: Index for conversation lookups by contact (used in message routing)
+CREATE INDEX IF NOT EXISTS idx_conversations_account_contact ON conversations(whatsapp_account_id, contact_id);
+
+-- CRITICAL: Index for group conversation lookups
+CREATE INDEX IF NOT EXISTS idx_conversations_account_group ON conversations(whatsapp_account_id, group_id) WHERE group_id IS NOT NULL;
 
 -- 8. Analytics optimization indexes
 CREATE INDEX IF NOT EXISTS idx_messages_analytics ON messages(created_at, sender_type, agent_id)

@@ -76,12 +76,19 @@ pool.on('remove', (client) => {
   }
 });
 
-// Log pool statistics periodically in development
-if (config.nodeEnv === 'development') {
-  setInterval(() => {
-    console.log(`[DB Pool] Total: ${pool.totalCount}, Idle: ${pool.idleCount}, Waiting: ${pool.waitingCount}`);
-  }, 60000);
-}
+// Log pool statistics periodically
+setInterval(() => {
+  const waitingCount = pool.waitingCount;
+  const totalCount = pool.totalCount;
+  const idleCount = pool.idleCount;
+
+  // Always log if there are waiting connections (potential bottleneck)
+  if (waitingCount > 0) {
+    console.warn(`[DB Pool] WARNING: ${waitingCount} queries waiting! Total: ${totalCount}, Idle: ${idleCount}`);
+  } else if (config.nodeEnv === 'development') {
+    console.log(`[DB Pool] Total: ${totalCount}, Idle: ${idleCount}, Waiting: ${waitingCount}`);
+  }
+}, 30000); // Check every 30 seconds
 
 /**
  * Execute a query and return all rows

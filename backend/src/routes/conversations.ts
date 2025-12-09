@@ -14,6 +14,7 @@ router.get('/', async (req: Request, res: Response) => {
     const { accountId, unreadOnly, groupsOnly, unifyGroups } = req.query;
 
     // Build query that handles both 1:1 and group conversations
+    // Uses LATERAL join instead of correlated subquery for better performance
     let sql = `
       SELECT
         c.id,
@@ -37,24 +38,26 @@ router.get('/', async (req: Request, res: Response) => {
         -- Account info
         wa.id as wa_account_id,
         wa.name as account_name,
-        -- Last message with sender info for groups
-        (
-          SELECT json_build_object(
-            'content', m.content,
-            'sender_type', m.sender_type,
-            'sender_name', m.sender_name,
-            'created_at', m.created_at
-          )
-          FROM messages m
-          WHERE m.conversation_id = c.id
-          ORDER BY m.created_at DESC
-          LIMIT 1
-        ) as last_message_data
+        -- Last message with sender info (using LATERAL join for performance)
+        lm.last_message_data
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
       LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
+      -- LATERAL join is more efficient than correlated subquery
+      LEFT JOIN LATERAL (
+        SELECT json_build_object(
+          'content', m.content,
+          'sender_type', m.sender_type,
+          'sender_name', m.sender_name,
+          'created_at', m.created_at
+        ) as last_message_data
+        FROM messages m
+        WHERE m.conversation_id = c.id
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) lm ON true
       WHERE (wa.user_id = $1 OR aa.agent_id IS NOT NULL)
     `;
 
