@@ -721,13 +721,39 @@ router.get('/conversation/:conversationId/orders', async (req: Request, res: Res
     }
 
     // Get linked orders
-    const orders = await query(`
+    const rawOrders = await query(`
       SELECT co.*,
         (SELECT json_agg(child.*) FROM contact_orders child WHERE child.mother_order_id = co.orderops_order_id) as child_orders
       FROM contact_orders co
       WHERE co.conversation_id = $1
       ORDER BY co.created_at DESC
     `, [conversationId]);
+
+    // Extract missing fields from parsed_data for backwards compatibility
+    const orders = rawOrders.map((order: any) => {
+      const parsedData = typeof order.parsed_data === 'string'
+        ? JSON.parse(order.parsed_data)
+        : order.parsed_data;
+
+      // Extract from nested parsed_data structure (OrderOps format)
+      const innerData = parsedData?.parsed_data;
+      const customer = innerData?.customer || {};
+      const orderDetails = innerData?.order || {};
+      const totals = orderDetails?.totals || {};
+
+      return {
+        ...order,
+        // Fill in nulls from parsed_data
+        customer_name: order.customer_name || customer.name || null,
+        total: order.total || totals.total || orderDetails.total || null,
+        balance: order.balance || totals.to_collect || orderDetails.balance || null,
+        // Also extract useful fields that aren't in top-level
+        customer_phone: customer.phone || null,
+        customer_address: customer.address || null,
+        delivery_date: orderDetails.delivery_date || null,
+        items: orderDetails.items || [],
+      };
+    });
 
     res.json({ success: true, orders });
   } catch (error: any) {
