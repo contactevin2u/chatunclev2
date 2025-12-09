@@ -800,6 +800,66 @@ $$ LANGUAGE plpgsql;
 -- Run conversation merge
 SELECT merge_duplicate_conversations();
 
+-- ============================================================
+-- MERGE DUPLICATE CONTACTS BY NAME
+-- ============================================================
+-- Finds contacts with same name but different wa_id (LID vs PN)
+-- and merges them, keeping the PN version as primary
+CREATE OR REPLACE FUNCTION merge_duplicate_contacts_by_name() RETURNS void AS $$
+DECLARE
+  dup RECORD;
+  primary_contact_id UUID;
+  secondary_contact_id UUID;
+BEGIN
+  -- Find contacts with same name in same account (potential LID/PN duplicates)
+  FOR dup IN
+    SELECT c.whatsapp_account_id, c.name,
+           array_agg(c.id ORDER BY
+             CASE WHEN c.jid_type = 'pn' THEN 0 ELSE 1 END,  -- Prefer PN
+             c.created_at ASC
+           ) as contact_ids
+    FROM contacts c
+    WHERE c.name IS NOT NULL AND c.name != ''
+    GROUP BY c.whatsapp_account_id, c.name
+    HAVING COUNT(*) > 1
+  LOOP
+    -- First contact is the primary (PN preferred, or oldest)
+    primary_contact_id := dup.contact_ids[1];
+
+    -- Merge all others into the primary
+    FOR i IN 2..array_length(dup.contact_ids, 1) LOOP
+      secondary_contact_id := dup.contact_ids[i];
+      RAISE NOTICE 'Merging duplicate contact % into % (name: %)', secondary_contact_id, primary_contact_id, dup.name;
+
+      -- Move conversations
+      UPDATE conversations
+      SET contact_id = primary_contact_id, updated_at = NOW()
+      WHERE contact_id = secondary_contact_id;
+
+      -- Move labels (ignore conflicts)
+      INSERT INTO contact_labels (contact_id, label_id)
+      SELECT primary_contact_id, label_id FROM contact_labels WHERE contact_id = secondary_contact_id
+      ON CONFLICT DO NOTHING;
+      DELETE FROM contact_labels WHERE contact_id = secondary_contact_id;
+
+      -- Move orders if table exists
+      BEGIN
+        UPDATE contact_orders
+        SET contact_id = primary_contact_id, updated_at = NOW()
+        WHERE contact_id = secondary_contact_id;
+      EXCEPTION WHEN undefined_table THEN NULL;
+      END;
+
+      -- Delete the duplicate
+      DELETE FROM contacts WHERE id = secondary_contact_id;
+    END LOOP;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Run name-based merge
+SELECT merge_duplicate_contacts_by_name();
+
 -- Insert default achievements
 INSERT INTO achievements (code, name, description, icon, color, points, criteria_type, criteria_value) VALUES
   ('first_message', 'First Contact', 'Send your first message', 'message-circle', 'blue', 50, 'messages_sent', 1),

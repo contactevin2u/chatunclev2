@@ -1273,16 +1273,57 @@ class SessionManager {
       if (mappedContact) {
         contact = mappedContact;
       } else {
-        // No mapping found - create new contact
-        // For LID contacts, if we resolved PN, store it. For PN contacts, wa_id IS the phone number
-        const phoneNumber = jidType === 'pn' ? waId : resolvedPn;
-        contact = await queryOne(
-          `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
-           VALUES ($1, $2, $3, $4, $5)
-           RETURNING *`,
-          [accountId, waId, phoneNumber, pushName, jidType]
-        );
-        console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}, jid_type: ${jidType}, phone: ${phoneNumber}`);
+        // No mapping found - try to find by name as last resort (prevents duplicates)
+        // This catches cases where LID and PN messages arrive before mapping is known
+        if (pushName) {
+          const nameMatch = await queryOne(
+            `SELECT * FROM contacts
+             WHERE whatsapp_account_id = $1 AND name = $2
+             AND jid_type != $3
+             ORDER BY created_at ASC LIMIT 1`,
+            [accountId, pushName, jidType]
+          );
+          if (nameMatch) {
+            console.log(`[WA] Found existing contact ${nameMatch.id} with same name "${pushName}" - linking ${jidType} ${waId}`);
+            // Store the mapping for future use
+            if (jidType === 'lid') {
+              await execute(
+                `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+                [accountId, waId, nameMatch.wa_id]
+              );
+            } else {
+              await execute(
+                `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (whatsapp_account_id, pn) DO UPDATE SET lid = $2, updated_at = NOW()`,
+                [accountId, nameMatch.wa_id, waId]
+              );
+            }
+            // Update existing contact with phone number if we have it
+            if (jidType === 'pn' && !nameMatch.phone_number) {
+              await execute(
+                `UPDATE contacts SET phone_number = $1, updated_at = NOW() WHERE id = $2`,
+                [waId, nameMatch.id]
+              );
+            }
+            contact = nameMatch;
+          }
+        }
+
+        if (!contact) {
+          // No match found - create new contact
+          // For LID contacts, if we resolved PN, store it. For PN contacts, wa_id IS the phone number
+          const phoneNumber = jidType === 'pn' ? waId : resolvedPn;
+          contact = await queryOne(
+            `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+            [accountId, waId, phoneNumber, pushName, jidType]
+          );
+          console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}, jid_type: ${jidType}, phone: ${phoneNumber}`);
+        }
       }
     } else {
       // Update contact if needed
