@@ -210,7 +210,7 @@ router.get('/', async (req: Request, res: Response) => {
 // Get single conversation with recent messages (supports both 1:1 and groups)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    // Get conversation with ownership check (handles both 1:1 and groups)
+    // Get conversation with ownership or shared access check (handles both 1:1 and groups)
     const conversation = await queryOne(`
       SELECT
         c.*,
@@ -232,7 +232,8 @@ router.get('/:id', async (req: Request, res: Response) => {
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!conversation) {
@@ -281,12 +282,13 @@ router.get('/:id', async (req: Request, res: Response) => {
 // Mark conversation as read
 router.patch('/:id/read', async (req: Request, res: Response) => {
   try {
-    // Verify ownership
+    // Verify ownership or shared access
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
     if (!conversation) {
