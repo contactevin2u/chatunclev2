@@ -9,6 +9,23 @@ import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/env';
 
 /**
+ * Helper to normalize IP addresses for rate limiting
+ * Handles IPv6 addresses properly by normalizing them
+ */
+function normalizeIP(ip: string | undefined): string {
+  if (!ip) return 'unknown';
+
+  // Handle IPv6 addresses - extract the base address
+  // IPv6 addresses like ::ffff:192.168.1.1 should use the IPv4 part
+  if (ip.startsWith('::ffff:')) {
+    return ip.substring(7);
+  }
+
+  // For pure IPv6, use the full address (express-rate-limit handles the rest)
+  return ip;
+}
+
+/**
  * Rate limiter for authentication endpoints
  * Prevents brute force attacks
  */
@@ -19,11 +36,11 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: false,
-  // Trust proxy is set in index.ts, but skip validation as backup
-  validate: { xForwardedForHeader: false },
+  // Disable IP validation since we handle it ourselves
+  validate: { xForwardedForHeader: false, ip: false },
   keyGenerator: (req: Request) => {
-    // Use IP address for rate limiting
-    return req.ip || req.socket.remoteAddress || 'unknown';
+    // Use normalized IP address for rate limiting
+    return normalizeIP(req.ip);
   },
 });
 
@@ -37,8 +54,8 @@ export const apiRateLimiter = rateLimit({
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Trust proxy is set in index.ts, but skip validation as backup
-  validate: { xForwardedForHeader: false },
+  // Disable IP validation since we handle it ourselves
+  validate: { xForwardedForHeader: false, ip: false },
   skip: (req: Request) => {
     // Skip rate limiting for health checks
     return req.path === '/health';
@@ -55,11 +72,11 @@ export const messageRateLimiter = rateLimit({
   message: { error: 'Message rate limit exceeded. Please wait before sending more messages.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Trust proxy is set in index.ts, but skip validation as backup
-  validate: { xForwardedForHeader: false },
+  // Disable IP validation since we use user ID
+  validate: { xForwardedForHeader: false, ip: false },
   keyGenerator: (req: Request) => {
     // Rate limit per user, not per IP
-    return req.user?.userId || req.ip || 'unknown';
+    return req.user?.userId || normalizeIP(req.ip);
   },
 });
 
