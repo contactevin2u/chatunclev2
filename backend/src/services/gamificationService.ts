@@ -36,8 +36,9 @@ interface LeaderboardEntry {
 class GamificationService {
   /**
    * Record agent activity and update daily stats
+   * Returns any new achievements earned
    */
-  async recordMessageSent(agentId: string, responseTimeMs?: number): Promise<void> {
+  async recordMessageSent(agentId: string, responseTimeMs?: number): Promise<Achievement[]> {
     const today = new Date().toISOString().split('T')[0];
 
     // Upsert daily stats
@@ -61,8 +62,8 @@ class GamificationService {
     // Update streak
     await this.updateStreak(agentId);
 
-    // Check for new achievements
-    await this.checkAchievements(agentId);
+    // Check for new achievements and return them
+    return this.checkAchievements(agentId);
   }
 
   /**

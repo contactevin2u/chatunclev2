@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
+import { getContactProfilePic } from '../services/profilePicService';
 
 const router = Router();
 
@@ -119,6 +120,33 @@ router.get('/:id', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get contact error:', error);
     res.status(500).json({ error: 'Failed to get contact' });
+  }
+});
+
+// Get contact profile picture (fetches from WhatsApp if not cached)
+router.get('/:id/profile-pic', async (req: Request, res: Response) => {
+  try {
+    // Verify contact ownership or shared access
+    const contact = await queryOne(`
+      SELECT ct.id, ct.whatsapp_account_id, ct.profile_pic_url
+      FROM contacts ct
+      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [req.params.id, req.user!.userId]);
+
+    if (!contact) {
+      res.status(404).json({ error: 'Contact not found' });
+      return;
+    }
+
+    // Get profile pic (will fetch from WhatsApp and cache if needed)
+    const profilePicUrl = await getContactProfilePic(contact.whatsapp_account_id, contact.id);
+
+    res.json({ profile_pic_url: profilePicUrl });
+  } catch (error) {
+    console.error('Get contact profile pic error:', error);
+    res.status(500).json({ error: 'Failed to get profile picture' });
   }
 });
 

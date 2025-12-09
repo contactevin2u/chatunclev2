@@ -309,7 +309,9 @@ export default function InboxPage() {
 
   // Handle achievement notifications
   const handleAchievement = useCallback((data: { achievements: any[] }) => {
+    console.log('[UI] Achievement notification received:', data);
     if (data.achievements && data.achievements.length > 0) {
+      console.log('[UI] Setting achievements:', data.achievements);
       setNewAchievements(data.achievements);
     }
   }, []);

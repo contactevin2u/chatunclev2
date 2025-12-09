@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
+import { getConversationProfilePic } from '../services/profilePicService';
 
 const router = Router();
 
@@ -305,6 +306,34 @@ router.patch('/:id/read', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Mark read error:', error);
     res.status(500).json({ error: 'Failed to mark as read' });
+  }
+});
+
+// Get conversation profile picture (fetches from WhatsApp if not cached)
+// Works for both contact and group conversations
+router.get('/:id/profile-pic', async (req: Request, res: Response) => {
+  try {
+    // Verify ownership or shared access
+    const conversation = await queryOne(`
+      SELECT c.id, c.whatsapp_account_id
+      FROM conversations c
+      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [req.params.id, req.user!.userId]);
+
+    if (!conversation) {
+      res.status(404).json({ error: 'Conversation not found' });
+      return;
+    }
+
+    // Get profile pic (will fetch from WhatsApp and cache if needed)
+    const profilePicUrl = await getConversationProfilePic(conversation.whatsapp_account_id, conversation.id);
+
+    res.json({ profile_pic_url: profilePicUrl });
+  } catch (error) {
+    console.error('Get conversation profile pic error:', error);
+    res.status(500).json({ error: 'Failed to get profile picture' });
   }
 });
 

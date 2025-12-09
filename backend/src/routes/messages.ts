@@ -230,20 +230,22 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
 
         // Track gamification stats
         try {
-          await gamificationService.recordMessageSent(agentId, responseTimeMs || undefined);
+          // recordMessageSent now returns any new achievements
+          const newAchievements = await gamificationService.recordMessageSent(agentId, responseTimeMs || undefined);
 
           // If this is a first response (no prior agent response in conversation), record it
           if (!conversation.first_response_at && responseTimeMs) {
             await gamificationService.recordFirstResponse(agentId, responseTimeMs);
           }
 
-          // Check for new achievements and notify
-          const newAchievements = await gamificationService.checkAchievements(agentId);
+          // Notify about new achievements
           if (newAchievements.length > 0) {
+            console.log(`[Gamification] New achievements for agent ${agentId}:`, newAchievements.map(a => a.name));
             const io = getIO();
             io.to(`user:${agentId}`).emit('gamification:achievement', {
               achievements: newAchievements
             });
+            console.log(`[Gamification] Emitted gamification:achievement to user:${agentId}`);
           }
         } catch (gamificationError) {
           console.error('Gamification tracking error:', gamificationError);

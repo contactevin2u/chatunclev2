@@ -665,6 +665,23 @@ CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_account ON lid_pn_mappings(whatsa
 CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_lid ON lid_pn_mappings(lid);
 CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_pn ON lid_pn_mappings(pn);
 
+-- ============================================================
+-- PROFILE PICTURE CACHING
+-- ============================================================
+-- Track when profile pictures were last fetched to enable caching
+-- Profile pics are downloaded from WhatsApp, uploaded to Cloudinary, and cached
+
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS profile_pic_fetched_at TIMESTAMP;
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS profile_pic_fetched_at TIMESTAMP;
+
+-- Index for finding stale profile pics
+CREATE INDEX IF NOT EXISTS idx_contacts_profile_pic_stale
+  ON contacts(whatsapp_account_id, profile_pic_fetched_at)
+  WHERE profile_pic_url IS NULL OR profile_pic_fetched_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_groups_profile_pic_stale
+  ON groups(whatsapp_account_id, profile_pic_fetched_at)
+  WHERE profile_pic_url IS NULL OR profile_pic_fetched_at IS NULL;
+
 -- Insert default achievements
 INSERT INTO achievements (code, name, description, icon, color, points, criteria_type, criteria_value) VALUES
   ('first_message', 'First Contact', 'Send your first message', 'message-circle', 'blue', 50, 'messages_sent', 1),
