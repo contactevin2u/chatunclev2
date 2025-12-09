@@ -13,6 +13,7 @@ import { MessageSquare, RefreshCw, Tag, Plus, X, Check, Edit2, User, Search, Fil
 import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
 import OrderOpsToast from '@/components/ui/OrderOpsToast';
+import NewChatModal from '@/components/chat/NewChatModal';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -39,6 +40,7 @@ export default function InboxPage() {
   const [showAccountSelector, setShowAccountSelector] = useState(false);
   const [newAchievements, setNewAchievements] = useState<any[]>([]);
   const [orderOpsResult, setOrderOpsResult] = useState<any>(null);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
 
@@ -484,12 +486,28 @@ export default function InboxPage() {
     }
   };
 
+  // Handle new chat success - select the newly created conversation
+  const handleNewChatSuccess = async (conversationId: string) => {
+    // Reload conversations to get the new one
+    await loadConversations();
+    // Find and select the new conversation
+    setConversationsList((prev) => {
+      const newConv = prev.find(c => c.id === conversationId);
+      if (newConv) {
+        setSelectedConversation(newConv);
+        setActiveConversationId(null);
+        setMobileShowChat(true);
+      }
+      return prev;
+    });
+  };
+
   return (
     <div className="h-screen flex overflow-hidden relative">
       {/* Conversations sidebar - hidden on mobile when chat is shown */}
       <div className={`
         w-full md:w-80 lg:w-96
-        border-r border-gray-200 bg-white flex flex-col
+        border-r border-gray-200 bg-white flex flex-col relative
         transition-transform duration-250 ease-out
         ${mobileShowChat ? 'hidden md:flex' : 'flex'}
         md:pb-0 pb-16
@@ -608,6 +626,15 @@ export default function InboxPage() {
             onSelect={handleSelectConversation}
           />
         </div>
+
+        {/* Floating Action Button for New Chat - positioned relative to sidebar */}
+        <button
+          onClick={() => setShowNewChatModal(true)}
+          className="absolute bottom-20 md:bottom-4 right-4 w-14 h-14 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95 z-20"
+          title="New Chat"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
       </div>
 
       {/* Message area - hidden on mobile when showing list */}
@@ -919,6 +946,13 @@ export default function InboxPage() {
           onDismiss={() => setOrderOpsResult(null)}
         />
       )}
+
+      {/* New Chat Modal */}
+      <NewChatModal
+        isOpen={showNewChatModal}
+        onClose={() => setShowNewChatModal(false)}
+        onSuccess={handleNewChatSuccess}
+      />
     </div>
   );
 }
