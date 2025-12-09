@@ -333,6 +333,16 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 isSent ? 'chat-bubble-sent' : 'chat-bubble-received'
               )}
             >
+              {/* Agent name for sent messages */}
+              {isSent && message.agent_name && (
+                <p className="text-xs font-medium text-emerald-600 mb-1">
+                  {message.agent_name}
+                  {message.is_auto_reply && (
+                    <span className="ml-1 text-gray-400 font-normal">(auto)</span>
+                  )}
+                </p>
+              )}
+
               {/* Sender name for group messages */}
               {isGroup && !isSent && message.sender_name && (
                 <p className="text-xs font-medium text-blue-600 mb-1">

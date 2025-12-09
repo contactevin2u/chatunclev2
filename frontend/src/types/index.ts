@@ -107,6 +107,10 @@ export interface Message {
   media_mime_type: string | null;
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   created_at: string;
+  // Agent tracking fields
+  agent_id: string | null;
+  agent_name: string | null;
+  is_auto_reply?: boolean;
   // Group message fields
   sender_jid: string | null;
   sender_name: string | null;
