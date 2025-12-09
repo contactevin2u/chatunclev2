@@ -43,6 +43,8 @@ import pino from 'pino';
 import { messageStore } from './MessageStore';
 import { groupMetadataCache } from './GroupMetadataCache';
 import { messageQueue } from './MessageQueue';
+import { messageDeduplicator } from './MessageDeduplicator';
+import { healthMonitor } from './HealthMonitor';
 
 /**
  * Check if JID is a user (supports both @s.whatsapp.net and @lid formats)
@@ -134,6 +136,18 @@ class SessionManager {
   constructor() {
     // Setup graceful shutdown handlers
     this.setupShutdownHandlers();
+
+    // Setup health monitor reconnect callback
+    healthMonitor.setReconnectCallback(async (accountId: string, reason: string) => {
+      console.log(`[WA] Health monitor triggered reconnect for ${accountId}: ${reason}`);
+      const account = await queryOne<{ user_id: string }>(
+        'SELECT user_id FROM whatsapp_accounts WHERE id = $1',
+        [accountId]
+      );
+      if (account) {
+        await this.reconnectSession(accountId, account.user_id);
+      }
+    });
   }
 
   /**
@@ -161,6 +175,8 @@ class SessionManager {
       messageStore.cleanup();
       groupMetadataCache.cleanupAll();
       messageQueue.cleanupAll();
+      messageDeduplicator.shutdown();
+      healthMonitor.shutdown();
 
       console.log('[WA] All sessions and caches closed gracefully');
     };
@@ -242,13 +258,13 @@ class SessionManager {
       maxMsgRetryCount: 5,
 
       // Filter which history chunks to sync during download
-      // Only sync recent history (last 7 days) to reduce initial load time
+      // Only sync recent history (last 3 days) for FASTER initial connection
       shouldSyncHistoryMessage: (historyNotification) => {
         const oldestTimestamp = historyNotification.oldestMsgInChunkTimestampSec;
         if (!oldestTimestamp) return true;
         const timestamp = typeof oldestTimestamp === 'number' ? oldestTimestamp : (oldestTimestamp as any).low || 0;
-        const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
-        return timestamp >= sevenDaysAgo;
+        const threeDaysAgo = Math.floor(Date.now() / 1000) - (3 * 24 * 60 * 60);
+        return timestamp >= threeDaysAgo;
       },
 
       // Filter JIDs to ignore - skip status broadcasts and newsletters
@@ -391,6 +407,9 @@ class SessionManager {
           session.isReady = true;
           session.resolveReady();
           console.log(`[WA] Session ${accountId} is now ready for sending messages`);
+
+          // Start health monitoring for this session
+          healthMonitor.startMonitoring(accountId, sock);
         }
       }
     });
@@ -406,12 +425,30 @@ class SessionManager {
       const { messages, type } = upsert;
       console.log(`[WA] messages.upsert - type: ${type}, count: ${messages.length}`);
 
+      // Record activity for health monitoring
+      healthMonitor.recordMessageReceived(accountId);
+
+      // PRE-WARM: Store all messages in MessageStore for getMessage callback
+      // This ensures decryption retries always have message content available
+      for (const msg of messages) {
+        if (msg.key && msg.message) {
+          messageStore.store(accountId, msg.key, msg.message);
+        }
+      }
+
       // Process all message types: 'notify' (real-time) and 'append' (history)
       for (const msg of messages) {
         if (!msg.key) continue;
         const remoteJid = msg.key.remoteJid;
         const fromMe = msg.key.fromMe;
         const messageId = msg.key.id;
+
+        // DEDUPLICATION: Skip if we've already processed this message
+        // Prevents duplicate processing on reconnects and history overlaps
+        if (messageId && messageDeduplicator.checkAndMark(accountId, messageId)) {
+          console.log(`[WA] Skipping duplicate message: ${messageId}`);
+          continue;
+        }
 
         console.log(`[WA] Message: jid=${remoteJid}, fromMe=${fromMe}, id=${messageId}, type=${type}`);
 
@@ -2936,10 +2973,12 @@ class SessionManager {
       }
       this.sessions.delete(accountId);
 
-      // Cleanup caches for this account
+      // Cleanup caches and monitoring for this account
       messageStore.clearAccount(accountId);
       groupMetadataCache.cleanup(accountId);
       messageQueue.cleanup(accountId);
+      messageDeduplicator.clearAccount(accountId);
+      healthMonitor.stopMonitoring(accountId);
     }
 
     // Keep in deletingAccounts set for a while to catch any straggling async handlers

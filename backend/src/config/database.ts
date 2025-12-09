@@ -42,9 +42,9 @@ const poolConfig: PoolConfig = {
   ssl: getSSLConfig(),
 
   // Connection pool settings
-  max: 40, // Maximum number of clients in the pool (Render free tier allows 97)
-  min: 2, // Minimum number of idle clients
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  max: 50, // OPTIMIZED: Increased for parallel processing // Maximum number of clients in the pool (Render free tier allows 97)
+  min: 5, // OPTIMIZED: Higher minimum for faster cold starts // Minimum number of idle clients
+  idleTimeoutMillis: 60000, // OPTIMIZED: Keep connections warm longer // Close idle clients after 30 seconds
   connectionTimeoutMillis: 10000, // Return error after 10 seconds if no connection available
 
   // Query settings
@@ -53,7 +53,7 @@ const poolConfig: PoolConfig = {
 
   // Keep connections alive
   keepAlive: true,
-  keepAliveInitialDelayMillis: 10000,
+  keepAliveInitialDelayMillis: 5000, // OPTIMIZED: Faster keepalive
 };
 
 export const pool = new Pool(poolConfig);
