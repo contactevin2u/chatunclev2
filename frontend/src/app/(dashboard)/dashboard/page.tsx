@@ -14,6 +14,7 @@ import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
 import OrderOpsToast from '@/components/ui/OrderOpsToast';
 import NewChatModal from '@/components/chat/NewChatModal';
+import PenguinToast from '@/components/ui/PenguinToast';
 
 export default function InboxPage() {
   const { token } = useAuth();
@@ -41,6 +42,8 @@ export default function InboxPage() {
   const [newAchievements, setNewAchievements] = useState<any[]>([]);
   const [orderOpsResult, setOrderOpsResult] = useState<any>(null);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showPenguinToast, setShowPenguinToast] = useState(false);
+  const messageCountRef = useRef(0);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
 
@@ -434,6 +437,15 @@ export default function InboxPage() {
             : conv
         )
       );
+
+      // Random penguin motivation! 🐧
+      // Shows after every 5-10 messages randomly
+      messageCountRef.current += 1;
+      const triggerThreshold = 5 + Math.floor(Math.random() * 6); // Random between 5-10
+      if (messageCountRef.current >= triggerThreshold && !showPenguinToast) {
+        setShowPenguinToast(true);
+        messageCountRef.current = 0;
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
     } finally {
@@ -955,6 +967,11 @@ export default function InboxPage() {
         onClose={() => setShowNewChatModal(false)}
         onSuccess={handleNewChatSuccess}
       />
+
+      {/* Penguin Motivation Toast 🐧 */}
+      {showPenguinToast && (
+        <PenguinToast onDismiss={() => setShowPenguinToast(false)} />
+      )}
     </div>
   );
 }
