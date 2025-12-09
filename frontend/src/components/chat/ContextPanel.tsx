@@ -484,16 +484,26 @@ export default function ContextPanel({
     const dueDetails = parsedData?.due;
     const hasChildren = order.child_orders && order.child_orders.length > 0;
 
-    // Extract details
-    const customer = orderDetails?.customer || {};
+    // Extract details from parsed_data (nested structure from OrderOps)
+    const innerParsedData = parsedData?.parsed_data; // OrderOps nests data here
+    const customer = innerParsedData?.customer || orderDetails?.customer || {};
     const trip = orderDetails?.trip || {};
-    const items = orderDetails?.items || [];
+    const items = innerParsedData?.order?.items || orderDetails?.items || [];
     const payments = orderDetails?.payments || [];
-    const plan = orderDetails?.plan;
-    const deliveryDate = orderDetails?.delivery_date;
-    const notes = orderDetails?.notes;
+    const plan = orderDetails?.plan || innerParsedData?.order?.plan;
+    const deliveryDate = innerParsedData?.order?.delivery_date || orderDetails?.delivery_date;
+    const notes = innerParsedData?.order?.notes || orderDetails?.notes;
+    const totals = innerParsedData?.order?.totals || orderDetails?.totals || {};
 
-    const balanceAmount = parseFloat(order.balance) || 0;
+    // Extract total/balance with fallbacks to parsed_data
+    const totalAmount = parseFloat(order.total) ||
+      parseFloat(totals.total) ||
+      parseFloat(orderDetails?.total) || 0;
+    const balanceAmount = parseFloat(order.balance) ||
+      parseFloat(dueDetails?.balance) ||
+      parseFloat(totals.to_collect) ||
+      parseFloat(orderDetails?.balance) || 0;
+    const customerName = order.customer_name || customer.name || orderDetails?.customer_name || '';
     const hasBalance = balanceAmount > 0;
 
     return (
@@ -550,13 +560,13 @@ export default function ContextPanel({
 
             {/* Summary row */}
             <div className="mt-1 flex items-center justify-between text-xs">
-              <span className="text-gray-600 truncate">{order.customer_name || customer.name || '-'}</span>
+              <span className="text-gray-600 truncate">{customerName || '-'}</span>
               <div className="flex items-center space-x-2">
-                <span className="font-medium">{formatCurrency(order.total)}</span>
+                <span className="font-medium">{formatCurrency(totalAmount)}</span>
                 {hasBalance && (
                   <span className="text-orange-600 font-medium flex items-center">
                     <DollarSign className="h-3 w-3" />
-                    {formatCurrency(order.balance)}
+                    {formatCurrency(balanceAmount)}
                   </span>
                 )}
               </div>
@@ -579,10 +589,10 @@ export default function ContextPanel({
                             const itemsList = items.map((item: any) => `• ${item.name || item.product_name} x${item.qty || item.quantity || 1}`).join('\n');
                             parts.push(itemsList);
                           }
-                          parts.push(`\nTotal: ${formatCurrency(order.total)}`);
-                          const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                          parts.push(`\nTotal: ${formatCurrency(totalAmount)}`);
+                          const paidAmount = parseFloat(orderDetails?.paid_amount) || parseFloat(totals.paid) || 0;
                           if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
-                          parts.push(`*Balance Due: ${formatCurrency(order.balance)}*`);
+                          parts.push(`*Balance Due: ${formatCurrency(balanceAmount)}*`);
                           parts.push(`\nPlease make payment at your earliest convenience. Thank you!`);
                           sendQuickMessage(parts.join('\n'));
                         }}
@@ -628,10 +638,10 @@ export default function ContextPanel({
                           });
                         }
                         parts.push(`\n*Payment:*`);
-                        parts.push(`Total: ${formatCurrency(order.total)}`);
-                        const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                        parts.push(`Total: ${formatCurrency(totalAmount)}`);
+                        const paidAmount = parseFloat(orderDetails?.paid_amount) || parseFloat(totals.paid) || 0;
                         if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
-                        if (hasBalance) parts.push(`Balance: ${formatCurrency(order.balance)}`);
+                        if (hasBalance) parts.push(`Balance: ${formatCurrency(balanceAmount)}`);
                         parts.push(`\nStatus: ${order.status}`);
                         const driverName = trip?.driver_name || trip?.driver?.name;
                         if (driverName) parts.push(`Driver: ${driverName}`);
@@ -773,12 +783,12 @@ export default function ContextPanel({
                   )}
                   <div className="flex items-center justify-between text-xs font-bold mt-1 pt-1 border-t border-gray-100">
                     <span>Total</span>
-                    <span>{formatCurrency(order.total)}</span>
+                    <span>{formatCurrency(totalAmount)}</span>
                   </div>
-                  {(orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0) || (dueDetails?.paid && parseFloat(dueDetails.paid) > 0) ? (
+                  {(orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0) || (dueDetails?.paid && parseFloat(dueDetails.paid) > 0) || (totals.paid && totals.paid > 0) ? (
                     <div className="flex items-center justify-between text-xs text-green-600">
                       <span>Paid</span>
-                      <span>-{formatCurrency(orderDetails?.paid_amount || dueDetails?.paid)}</span>
+                      <span>-{formatCurrency(orderDetails?.paid_amount || dueDetails?.paid || totals.paid)}</span>
                     </div>
                   ) : null}
                   {hasBalance && (
@@ -787,7 +797,7 @@ export default function ContextPanel({
                         <DollarSign className="h-3 w-3" />
                         <span>Balance Due</span>
                       </span>
-                      <span>{formatCurrency(order.balance)}</span>
+                      <span>{formatCurrency(balanceAmount)}</span>
                     </div>
                   )}
                 </div>
