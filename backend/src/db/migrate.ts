@@ -696,6 +696,106 @@ CREATE INDEX IF NOT EXISTS idx_groups_profile_pic_stale
   ON groups(whatsapp_account_id, profile_pic_fetched_at)
   WHERE profile_pic_url IS NULL OR profile_pic_fetched_at IS NULL;
 
+-- ============================================================
+-- CLEANUP DUPLICATE LID/PN CONTACTS
+-- ============================================================
+-- One-time cleanup: Find and merge duplicate contacts where both LID and PN
+-- versions exist for the same user. Uses the lid_pn_mappings table to identify.
+-- Safe to run multiple times (idempotent).
+
+-- Create a function to merge duplicates (only if it doesn't exist)
+CREATE OR REPLACE FUNCTION merge_lid_pn_duplicates() RETURNS void AS $$
+DECLARE
+  mapping RECORD;
+  lid_contact_id UUID;
+  pn_contact_id UUID;
+BEGIN
+  -- Loop through all mappings to find duplicates
+  FOR mapping IN
+    SELECT m.whatsapp_account_id, m.lid, m.pn
+    FROM lid_pn_mappings m
+  LOOP
+    -- Check if both LID and PN contacts exist
+    SELECT id INTO lid_contact_id
+    FROM contacts
+    WHERE whatsapp_account_id = mapping.whatsapp_account_id AND wa_id = mapping.lid;
+
+    SELECT id INTO pn_contact_id
+    FROM contacts
+    WHERE whatsapp_account_id = mapping.whatsapp_account_id AND wa_id = mapping.pn;
+
+    -- If both exist and are different, merge them
+    IF lid_contact_id IS NOT NULL AND pn_contact_id IS NOT NULL AND lid_contact_id != pn_contact_id THEN
+      RAISE NOTICE 'Merging duplicate contacts: LID % -> PN % (keeping %)', mapping.lid, mapping.pn, pn_contact_id;
+
+      -- Move LID contact's conversations to PN contact
+      UPDATE conversations
+      SET contact_id = pn_contact_id, updated_at = NOW()
+      WHERE contact_id = lid_contact_id;
+
+      -- Move LID contact's labels to PN contact (ignore conflicts)
+      INSERT INTO contact_labels (contact_id, label_id)
+      SELECT pn_contact_id, label_id FROM contact_labels WHERE contact_id = lid_contact_id
+      ON CONFLICT DO NOTHING;
+
+      -- Delete LID contact's labels
+      DELETE FROM contact_labels WHERE contact_id = lid_contact_id;
+
+      -- Move contact_orders if table exists (safely)
+      BEGIN
+        UPDATE contact_orders
+        SET contact_id = pn_contact_id, updated_at = NOW()
+        WHERE contact_id = lid_contact_id;
+      EXCEPTION WHEN undefined_table THEN
+        -- Table doesn't exist, skip
+        NULL;
+      END;
+
+      -- Delete the LID contact
+      DELETE FROM contacts WHERE id = lid_contact_id;
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Run the cleanup function
+SELECT merge_lid_pn_duplicates();
+
+-- Drop the function after use (optional, keeps it for future cleanups)
+-- DROP FUNCTION IF EXISTS merge_lid_pn_duplicates();
+
+-- Also merge conversations if both LID and PN conversations exist for same contact
+-- This handles cases where contact was merged but conversations weren't
+CREATE OR REPLACE FUNCTION merge_duplicate_conversations() RETURNS void AS $$
+DECLARE
+  dup RECORD;
+BEGIN
+  -- Find contacts with multiple conversations (shouldn't happen with UNIQUE constraint, but check anyway)
+  FOR dup IN
+    SELECT c.whatsapp_account_id, c.contact_id, array_agg(c.id ORDER BY c.last_message_at DESC NULLS LAST) as conv_ids
+    FROM conversations c
+    GROUP BY c.whatsapp_account_id, c.contact_id
+    HAVING COUNT(*) > 1
+  LOOP
+    RAISE NOTICE 'Merging duplicate conversations for contact %: %', dup.contact_id, dup.conv_ids;
+
+    -- Keep the first (most recent) conversation, merge messages from others
+    FOR i IN 2..array_length(dup.conv_ids, 1) LOOP
+      -- Move messages from duplicate to primary
+      UPDATE messages
+      SET conversation_id = dup.conv_ids[1], updated_at = NOW()
+      WHERE conversation_id = dup.conv_ids[i];
+
+      -- Delete the duplicate conversation
+      DELETE FROM conversations WHERE id = dup.conv_ids[i];
+    END LOOP;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Run conversation merge
+SELECT merge_duplicate_conversations();
+
 -- Insert default achievements
 INSERT INTO achievements (code, name, description, icon, color, points, criteria_type, criteria_value) VALUES
   ('first_message', 'First Contact', 'Send your first message', 'message-circle', 'blue', 50, 'messages_sent', 1),
