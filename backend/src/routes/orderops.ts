@@ -1041,7 +1041,7 @@ router.post('/conversation/:conversationId/orders/:orderId/sync', async (req: Re
       try {
         const driverRes = await orderOpsRequest(`/drivers/${order.trip.driver_id}`, { method: 'GET' });
         if (driverRes.ok) {
-          const driverData = await driverRes.json();
+          const driverData = await driverRes.json() as any;
           const driver = driverData.data || driverData;
           order.trip.driver_name = driver.name;
           order.trip.driver = driver;
