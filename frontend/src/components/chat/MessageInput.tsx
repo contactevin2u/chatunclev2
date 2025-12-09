@@ -4,15 +4,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Paperclip, Mic, Smile, FileText, Command, X, Image, Video, Clock, Square, Loader2, MapPin } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { templates as templatesApi, media as mediaApi, scheduledMessages as scheduledApi } from '@/lib/api';
+import { Template } from '@/types';
 import data from '@emoji-mart/data';
 import Picker from '@emoji-mart/react';
-
-interface Template {
-  id: string;
-  name: string;
-  content: string;
-  shortcut?: string;
-}
 
 interface MessageInputProps {
   onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) => void;
@@ -139,6 +133,13 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   }, []);
 
   const handleSelectTemplate = (template: Template) => {
+    // If template has media, send it directly
+    if (template.content_type && template.content_type !== 'text' && template.media_url) {
+      onSend(template.content || '', template.content_type, template.media_url, template.media_mime_type);
+      setShowTemplates(false);
+      return;
+    }
+    // Text-only template - put in input for editing
     setMessage(template.content);
     setShowTemplates(false);
     inputRef.current?.focus();

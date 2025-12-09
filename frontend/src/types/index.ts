@@ -124,6 +124,9 @@ export interface Template {
   name: string;
   content: string;
   shortcut: string | null;
+  content_type?: 'text' | 'image' | 'video' | 'audio';
+  media_url?: string;
+  media_mime_type?: string;
   created_at: string;
 }
 
