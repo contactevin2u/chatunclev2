@@ -457,6 +457,10 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS group_id UUID REFERENCES grou
 -- Modify contact_id to be nullable for group conversations
 ALTER TABLE conversations ALTER COLUMN contact_id DROP NOT NULL;
 
+-- Add unique constraint for group conversations (needed for ON CONFLICT)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_group_unique
+  ON conversations(whatsapp_account_id, group_id) WHERE group_id IS NOT NULL;
+
 -- Add sender_jid to messages for group messages (to identify who sent it)
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_jid VARCHAR(100);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name VARCHAR(255);

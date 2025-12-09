@@ -1,25 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch",
-      "WebFetch(domain:baileys.wiki)",
-      "WebFetch(domain:wwebjs.dev)",
-      "Bash(git init:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git remote:*)",
-      "Bash(git branch:*)",
-      "Bash(git push:*)",
-      "WebFetch(domain:render.com)",
-      "Bash(git rev-parse:*)",
-      "Bash(npx vercel --prod)",
-      "Bash(git config:*)",
-      "WebFetch(domain:community.vercel.com)",
-      "Bash(cat:*)",
-      "WebFetch(domain:www.npmjs.com)",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(git restore:*)"
+      "Bash(node:*)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" log --oneline -3)",
+      "Bash(curl:*)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" commit -m \"$(cat <<''EOF''\nFetch driver name from /drivers endpoint when missing\n\nOrderOps API returns driver_id but sometimes driver_name is null.\nNow the sync endpoint fetches driver info from /drivers/{id} when\ndriver_name is missing, ensuring driver name is always populated.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" commit -m \"Fix TypeScript error in driver fetch\")",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" log --oneline --all -- backend/src/services/antiBan.ts backend/src/services/whatsapp/)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" commit -m \"Show OrderOps error message in failure toast\")",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" log --oneline -10 -- frontend/src/components/chat/MessageThread.tsx)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" show b0d46ea --stat)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" show b0d46ea -- frontend/src/components/chat/MessageThread.tsx)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" diff 7abeca7..4d735f5 -- backend/src/routes/orderops.ts)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" add backend/src/db/migrate.ts backend/src/routes/orderops.ts backend/src/services/whatsapp/SessionManager.ts)",
+      "Bash(git -C \"C:/Users/User/Documents/CHATUNCLE\" commit -m \"$(cat <<''EOF''\nAdd LID/PN deduplication and fix OrderOps logging\n\n- Add lid_pn_mappings table to prevent duplicate contacts\n- Update SessionManager to store LID/PN mappings on lid-mapping.update event\n- Auto-merge duplicate contacts when mapping is received\n- Check for existing contacts via mapping before creating new ones\n- Add detailed logging for OrderOps socket emit debugging\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []

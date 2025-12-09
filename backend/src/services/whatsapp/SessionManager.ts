@@ -595,7 +595,8 @@ class SessionManager {
                 await queryOne(
                   `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
                    VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
-                   ON CONFLICT DO NOTHING
+                   ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO UPDATE SET
+                     last_message_at = GREATEST(conversations.last_message_at, EXCLUDED.last_message_at)
                    RETURNING *`,
                   [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
                 );
@@ -620,7 +621,7 @@ class SessionManager {
               await queryOne(
                 `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
                  VALUES ($1, $2, TRUE, NOW())
-                 ON CONFLICT DO NOTHING
+                 ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
                  RETURNING *`,
                 [accountId, group.id]
               );
@@ -906,7 +907,7 @@ class SessionManager {
           await queryOne(
             `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
              VALUES ($1, $2, TRUE, NOW())
-             ON CONFLICT DO NOTHING
+             ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
              RETURNING *`,
             [accountId, group.id]
           );
