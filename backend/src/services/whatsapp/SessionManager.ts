@@ -45,6 +45,8 @@ import { groupMetadataCache } from './GroupMetadataCache';
 import { messageQueue } from './MessageQueue';
 import { messageDeduplicator } from './MessageDeduplicator';
 import { healthMonitor } from './HealthMonitor';
+import { setupBufferedEventProcessing } from './BufferedEventHandler';
+import { reconnectManager } from './ReconnectManager';
 
 /**
  * Check if JID is a user (supports both @s.whatsapp.net and @lid formats)
@@ -369,14 +371,22 @@ class SessionManager {
           status: 'disconnected',
         });
 
-        // Reconnect if not logged out
+        // Reconnect if not logged out - use exponential backoff
         if (shouldReconnect) {
-          console.log(`[WA] Reconnecting session ${accountId} in 5 seconds...`);
-          setTimeout(() => {
-            this.reconnectSession(accountId, userId);
-          }, 5000);
+          const canReconnect = reconnectManager.canReconnect(accountId);
+          if (canReconnect.allowed) {
+            const delay = reconnectManager.scheduleReconnect(accountId, async () => {
+              await this.reconnectSession(accountId, userId);
+            });
+            if (delay > 0) {
+              console.log(`[WA] Scheduled reconnect for ${accountId} in ${delay}ms (exponential backoff)`);
+            }
+          } else {
+            console.log(`[WA] Reconnection blocked for ${accountId}: ${canReconnect.reason}`);
+          }
         } else {
           // Clean up session files on logout
+          reconnectManager.clearState(accountId);
           this.cleanupSession(accountId);
         }
       }
@@ -407,6 +417,9 @@ class SessionManager {
           session.isReady = true;
           session.resolveReady();
           console.log(`[WA] Session ${accountId} is now ready for sending messages`);
+
+          // Reset reconnect state on successful connection
+          reconnectManager.resetState(accountId);
 
           // Start health monitoring for this session
           healthMonitor.startMonitoring(accountId, sock);
@@ -2979,6 +2992,7 @@ class SessionManager {
       messageQueue.cleanup(accountId);
       messageDeduplicator.clearAccount(accountId);
       healthMonitor.stopMonitoring(accountId);
+      reconnectManager.clearState(accountId);
     }
 
     // Keep in deletingAccounts set for a while to catch any straggling async handlers
@@ -2996,6 +3010,8 @@ class SessionManager {
     console.log(`[WA] Cleaning up session data for ${accountId}`);
     // Clear PostgreSQL auth state on logout
     await clearPostgresAuthState(accountId);
+    // Clear reconnect manager state
+    reconnectManager.clearState(accountId);
   }
 
   async restoreAllSessions(): Promise<void> {
