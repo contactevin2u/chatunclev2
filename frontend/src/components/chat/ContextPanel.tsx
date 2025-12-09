@@ -4,9 +4,9 @@ import { useState, useEffect, useRef } from 'react';
 import {
   X, User, StickyNote, Package, ChevronLeft, ChevronRight,
   Phone, Calendar, MapPin, Tag, Clock, Plus, Trash2,
-  RefreshCw, ChevronDown, DollarSign, Truck,
+  RefreshCw, ChevronDown, ChevronRight as ChevronRightIcon, DollarSign, Truck,
   Send, Copy, Check, CreditCard, MessageSquare,
-  Loader2, ExternalLink
+  Loader2, ExternalLink, FileText
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { notes as notesApi, orderops, contacts as contactsApi } from '@/lib/api';
@@ -80,9 +80,11 @@ export default function ContextPanel({
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [showLinkForm, setShowLinkForm] = useState(false);
   const [linkInput, setLinkInput] = useState('');
   const [isLinking, setIsLinking] = useState(false);
+  const [syncingOrders, setSyncingOrders] = useState<Set<number>>(new Set());
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -187,6 +189,45 @@ export default function ContextPanel({
     }
   };
 
+  // Unlink order
+  const handleUnlinkOrder = async (orderId: number) => {
+    if (!token || !confirm('Unlink this order from this conversation?')) return;
+    try {
+      await orderops.unlinkOrder(token, conversationId, orderId);
+      loadOrders();
+    } catch (err: any) {
+      console.error('Failed to unlink order:', err);
+    }
+  };
+
+  // Sync order
+  const handleSyncOrder = async (orderId: number) => {
+    if (!token) return;
+    setSyncingOrders(prev => new Set(prev).add(orderId));
+    try {
+      await orderops.syncOrder(token, conversationId, orderId);
+      loadOrders();
+    } catch (err: any) {
+      console.error('Failed to sync order:', err);
+    } finally {
+      setSyncingOrders(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(orderId);
+        return newSet;
+      });
+    }
+  };
+
+  // Toggle expanded section
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(sectionId)) newSet.delete(sectionId);
+      else newSet.add(sectionId);
+      return newSet;
+    });
+  };
+
   // Copy to clipboard
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -203,6 +244,54 @@ export default function ContextPanel({
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // Format date short (for orders)
+  const formatDateShort = (dateStr: string | null | undefined) => {
+    if (!dateStr) return '-';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-MY', {
+        day: 'numeric', month: 'short', year: 'numeric'
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount: string | number | null | undefined) => {
+    if (!amount) return 'RM 0.00';
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    return `RM ${num?.toFixed(2) || '0.00'}`;
+  };
+
+  // Status colors
+  const getStatusColor = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case 'NEW': return 'bg-blue-100 text-blue-800';
+      case 'CONFIRMED': return 'bg-green-100 text-green-800';
+      case 'DELIVERED': return 'bg-emerald-100 text-emerald-800';
+      case 'CANCELLED': return 'bg-red-100 text-red-800';
+      case 'VOID': return 'bg-gray-100 text-gray-800';
+      default: return 'bg-gray-100 text-gray-600';
+    }
+  };
+
+  const getDeliveryStatusColor = (status: string) => {
+    switch (status?.toUpperCase()) {
+      case 'ASSIGNED': return 'bg-yellow-100 text-yellow-800';
+      case 'PICKING_UP': return 'bg-amber-100 text-amber-800';
+      case 'EN_ROUTE': return 'bg-orange-100 text-orange-800';
+      case 'DELIVERED': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-600';
+    }
+  };
+
+  // Send quick message helper
+  const sendQuickMessage = (message: string) => {
+    if (onSendMessage) {
+      onSendMessage(message);
+    }
   };
 
   // Tab configuration
@@ -386,88 +475,455 @@ export default function ContextPanel({
     </div>
   );
 
+  // Render single order with full details
+  const renderOrder = (order: Order, isChild = false) => {
+    const isExpanded = expandedOrders.has(order.orderops_order_id);
+    const isSyncing = syncingOrders.has(order.orderops_order_id);
+    const parsedData = typeof order.parsed_data === 'string' ? JSON.parse(order.parsed_data) : order.parsed_data;
+    const orderDetails = parsedData?.order;
+    const dueDetails = parsedData?.due;
+    const hasChildren = order.child_orders && order.child_orders.length > 0;
+
+    // Extract details
+    const customer = orderDetails?.customer || {};
+    const trip = orderDetails?.trip || {};
+    const items = orderDetails?.items || [];
+    const payments = orderDetails?.payments || [];
+    const plan = orderDetails?.plan;
+    const deliveryDate = orderDetails?.delivery_date;
+    const notes = orderDetails?.notes;
+
+    const balanceAmount = parseFloat(order.balance) || 0;
+    const hasBalance = balanceAmount > 0;
+
+    return (
+      <div key={order.id} className={`${isChild ? 'ml-3 border-l-2 border-blue-200 pl-2' : ''}`}>
+        <div className={`bg-white rounded-lg border ${hasBalance ? 'border-orange-300' : 'border-gray-200'} mb-2 overflow-hidden`}>
+          {/* Compact Header */}
+          <div
+            className="p-2.5 cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => {
+              const newExpanded = new Set(expandedOrders);
+              if (newExpanded.has(order.orderops_order_id)) {
+                newExpanded.delete(order.orderops_order_id);
+              } else {
+                newExpanded.add(order.orderops_order_id);
+              }
+              setExpandedOrders(newExpanded);
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <ChevronRightIcon className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                <a
+                  href={`https://www.aalyx.com/orders/${order.orderops_order_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-bold text-blue-600 hover:text-blue-800 hover:underline text-sm"
+                  title="Open in OrderOps"
+                >
+                  {order.order_code}
+                </a>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${getStatusColor(order.status)}`}>
+                  {order.status}
+                </span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleSyncOrder(order.orderops_order_id); }}
+                  disabled={isSyncing}
+                  className="p-1 text-gray-400 hover:text-blue-600 rounded"
+                  title="Refresh"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleUnlinkOrder(order.orderops_order_id); }}
+                  className="p-1 text-gray-400 hover:text-red-600 rounded"
+                  title="Unlink"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Summary row */}
+            <div className="mt-1 flex items-center justify-between text-xs">
+              <span className="text-gray-600 truncate">{order.customer_name || customer.name || '-'}</span>
+              <div className="flex items-center space-x-2">
+                <span className="font-medium">{formatCurrency(order.total)}</span>
+                {hasBalance && (
+                  <span className="text-orange-600 font-medium flex items-center">
+                    <DollarSign className="h-3 w-3" />
+                    {formatCurrency(order.balance)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Expanded Details */}
+          {isExpanded && (
+            <div className="border-t border-gray-100 bg-gray-50">
+              {/* Quick Actions */}
+              {onSendMessage && (
+                <div className="p-2 border-b border-gray-100 bg-blue-50">
+                  <div className="text-[10px] font-medium text-blue-800 mb-1">Quick Send:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {hasBalance && (
+                      <button
+                        onClick={() => {
+                          const parts = [`*Order ${order.order_code}*`];
+                          if (items.length > 0) {
+                            const itemsList = items.map((item: any) => `• ${item.name || item.product_name} x${item.qty || item.quantity || 1}`).join('\n');
+                            parts.push(itemsList);
+                          }
+                          parts.push(`\nTotal: ${formatCurrency(order.total)}`);
+                          const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                          if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
+                          parts.push(`*Balance Due: ${formatCurrency(order.balance)}*`);
+                          parts.push(`\nPlease make payment at your earliest convenience. Thank you!`);
+                          sendQuickMessage(parts.join('\n'));
+                        }}
+                        className="px-1.5 py-1 text-[10px] bg-orange-100 text-orange-700 rounded hover:bg-orange-200 flex items-center space-x-0.5"
+                      >
+                        <DollarSign className="h-2.5 w-2.5" />
+                        <span>Balance</span>
+                      </button>
+                    )}
+                    {(trip?.driver_name || trip?.driver?.name) && (
+                      <button
+                        onClick={() => {
+                          const driverName = trip.driver_name || trip.driver?.name;
+                          const tripStatus = trip.status || order.delivery_status;
+                          const parts = [`Order ${order.order_code}`, `Driver: *${driverName}*`];
+                          if (tripStatus) parts.push(`Status: ${tripStatus}`);
+                          if (deliveryDate) parts.push(`Delivery: ${formatDateShort(deliveryDate)}`);
+                          sendQuickMessage(parts.join('\n'));
+                        }}
+                        className="px-1.5 py-1 text-[10px] bg-green-100 text-green-700 rounded hover:bg-green-200 flex items-center space-x-0.5"
+                      >
+                        <Truck className="h-2.5 w-2.5" />
+                        <span>Driver</span>
+                      </button>
+                    )}
+                    {deliveryDate && (
+                      <button
+                        onClick={() => sendQuickMessage(`Your order ${order.order_code} is scheduled for delivery on ${formatDateShort(deliveryDate)}. We will notify you when the driver is on the way.`)}
+                        className="px-1.5 py-1 text-[10px] bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center space-x-0.5"
+                      >
+                        <Calendar className="h-2.5 w-2.5" />
+                        <span>Date</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        const parts = [`*Order ${order.order_code}*`];
+                        if (order.order_type) parts.push(`Type: ${order.order_type}`);
+                        if (items.length > 0) {
+                          parts.push(`\n*Items:*`);
+                          items.forEach((item: any) => {
+                            parts.push(`• ${item.name || item.product_name} x${item.qty || item.quantity || 1}`);
+                          });
+                        }
+                        parts.push(`\n*Payment:*`);
+                        parts.push(`Total: ${formatCurrency(order.total)}`);
+                        const paidAmount = parseFloat(orderDetails?.paid_amount) || 0;
+                        if (paidAmount > 0) parts.push(`Paid: ${formatCurrency(paidAmount)}`);
+                        if (hasBalance) parts.push(`Balance: ${formatCurrency(order.balance)}`);
+                        parts.push(`\nStatus: ${order.status}`);
+                        const driverName = trip?.driver_name || trip?.driver?.name;
+                        if (driverName) parts.push(`Driver: ${driverName}`);
+                        if (deliveryDate) parts.push(`Delivery: ${formatDateShort(deliveryDate)}`);
+                        if (notes) parts.push(`\nNote: ${notes}`);
+                        sendQuickMessage(parts.join('\n'));
+                      }}
+                      className="px-1.5 py-1 text-[10px] bg-gray-100 text-gray-700 rounded hover:bg-gray-200 flex items-center space-x-0.5"
+                    >
+                      <FileText className="h-2.5 w-2.5" />
+                      <span>Summary</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Order Info */}
+              <div className="p-2 space-y-2">
+                {/* Type & Delivery Date */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-gray-500 text-[10px]">Type</span>
+                    <div className="font-medium">{order.order_type || orderDetails?.type || '-'}</div>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 text-[10px]">Delivery</span>
+                    <div className="font-medium flex items-center space-x-1">
+                      <Calendar className="h-3 w-3 text-gray-400" />
+                      <span>{formatDateShort(deliveryDate)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Customer Details */}
+                {(customer.phone || customer.address) && (
+                  <div className="bg-white rounded p-2 border border-gray-200">
+                    <div className="text-[10px] font-medium text-gray-500 mb-1">Customer</div>
+                    {customer.phone && (
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center space-x-1 text-gray-700">
+                          <Phone className="h-3 w-3 text-gray-400" />
+                          <span>{customer.phone}</span>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(customer.phone, `phone-${order.id}`)}
+                          className="p-0.5 text-gray-400 hover:text-blue-600"
+                        >
+                          {copiedField === `phone-${order.id}` ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    )}
+                    {customer.address && (
+                      <div className="flex items-start space-x-1 text-xs text-gray-600 mt-1">
+                        <MapPin className="h-3 w-3 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <span className="text-[10px]">{customer.address}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Driver/Trip Info */}
+                {(trip?.driver_name || trip?.driver?.name) && (
+                  <div className="bg-green-50 rounded p-2 border border-green-200">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-medium text-green-800">Driver</div>
+                      {(trip.status || order.delivery_status) && (
+                        <span className={`px-1 py-0.5 rounded text-[10px] ${getDeliveryStatusColor(trip.status || order.delivery_status)}`}>
+                          {trip.status || order.delivery_status}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="flex items-center space-x-1 text-xs">
+                        <User className="h-3 w-3 text-green-600" />
+                        <span className="font-medium">{trip.driver_name || trip.driver?.name}</span>
+                      </div>
+                      {(trip.driver?.phone) && (
+                        <div className="flex items-center space-x-1">
+                          <span className="text-[10px] text-gray-600">{trip.driver.phone}</span>
+                          <button
+                            onClick={() => copyToClipboard(trip.driver.phone, `driver-${order.id}`)}
+                            className="p-0.5 text-gray-400 hover:text-blue-600"
+                          >
+                            {copiedField === `driver-${order.id}` ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Items Section */}
+                {items.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => toggleSection(`items-${order.id}`)}
+                      className="flex items-center justify-between w-full text-[10px] font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      <span>Items ({items.length})</span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${expandedSections.has(`items-${order.id}`) ? 'rotate-180' : ''}`} />
+                    </button>
+                    {expandedSections.has(`items-${order.id}`) && (
+                      <div className="mt-1 bg-white rounded border border-gray-200 divide-y divide-gray-100">
+                        {items.map((item: any, idx: number) => (
+                          <div key={idx} className="p-1.5 text-xs flex justify-between">
+                            <div>
+                              <span className="font-medium">{item.name || item.product_name}</span>
+                              <span className="text-gray-500 ml-1">x{item.qty || item.quantity || 1}</span>
+                            </div>
+                            <span className="text-gray-600">{formatCurrency(item.price || item.unit_price)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Payment Info */}
+                <div className="bg-white rounded p-2 border border-gray-200">
+                  <div className="text-[10px] font-medium text-gray-500 mb-1 flex items-center space-x-1">
+                    <CreditCard className="h-3 w-3" />
+                    <span>Payment</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-gray-500">Subtotal</span>
+                    <span>{formatCurrency(orderDetails?.subtotal)}</span>
+                  </div>
+                  {orderDetails?.delivery_fee && parseFloat(orderDetails.delivery_fee) > 0 && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-gray-500">Delivery</span>
+                      <span>{formatCurrency(orderDetails.delivery_fee)}</span>
+                    </div>
+                  )}
+                  {orderDetails?.discount && parseFloat(orderDetails.discount) > 0 && (
+                    <div className="flex items-center justify-between text-xs text-green-600">
+                      <span>Discount</span>
+                      <span>-{formatCurrency(orderDetails.discount)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-xs font-bold mt-1 pt-1 border-t border-gray-100">
+                    <span>Total</span>
+                    <span>{formatCurrency(order.total)}</span>
+                  </div>
+                  {(orderDetails?.paid_amount && parseFloat(orderDetails.paid_amount) > 0) || (dueDetails?.paid && parseFloat(dueDetails.paid) > 0) ? (
+                    <div className="flex items-center justify-between text-xs text-green-600">
+                      <span>Paid</span>
+                      <span>-{formatCurrency(orderDetails?.paid_amount || dueDetails?.paid)}</span>
+                    </div>
+                  ) : null}
+                  {hasBalance && (
+                    <div className="flex items-center justify-between text-xs font-bold text-orange-600 mt-1 pt-1 border-t border-gray-100">
+                      <span className="flex items-center space-x-1">
+                        <DollarSign className="h-3 w-3" />
+                        <span>Balance Due</span>
+                      </span>
+                      <span>{formatCurrency(order.balance)}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Payments History */}
+                {payments.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => toggleSection(`payments-${order.id}`)}
+                      className="flex items-center justify-between w-full text-[10px] font-medium text-gray-500 hover:text-gray-700"
+                    >
+                      <span className="flex items-center space-x-1">
+                        <Clock className="h-3 w-3" />
+                        <span>Payment History ({payments.length})</span>
+                      </span>
+                      <ChevronDown className={`h-3 w-3 transition-transform ${expandedSections.has(`payments-${order.id}`) ? 'rotate-180' : ''}`} />
+                    </button>
+                    {expandedSections.has(`payments-${order.id}`) && (
+                      <div className="mt-1 bg-white rounded border border-gray-200 divide-y divide-gray-100">
+                        {payments.map((payment: any, idx: number) => (
+                          <div key={idx} className="p-1.5 text-xs">
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center space-x-1">
+                                <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${
+                                  payment.status === 'COMPLETED' || payment.status === 'SUCCESS'
+                                    ? 'bg-green-100 text-green-700'
+                                    : payment.status === 'PENDING'
+                                      ? 'bg-yellow-100 text-yellow-700'
+                                      : 'bg-gray-100 text-gray-700'
+                                }`}>
+                                  {payment.method || payment.type || 'Payment'}
+                                </span>
+                                <span className="text-gray-400 text-[10px]">{formatDateShort(payment.date || payment.created_at)}</span>
+                              </div>
+                              <span className="text-green-600 font-medium">{formatCurrency(payment.amount)}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Plan (for installments) */}
+                {plan && (
+                  <div className="bg-purple-50 rounded p-2 border border-purple-200">
+                    <div className="text-[10px] font-medium text-purple-800 flex items-center space-x-1">
+                      <Clock className="h-3 w-3" />
+                      <span>Installment Plan</span>
+                    </div>
+                    <div className="text-xs mt-1">
+                      {plan.name || `${plan.months || plan.installments} months`}
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {notes && (
+                  <div className="text-[10px] text-gray-500 bg-yellow-50 rounded p-2 border border-yellow-200">
+                    <span className="font-medium">Note:</span> {notes}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Child orders */}
+        {hasChildren && isExpanded && (
+          <div className="mt-1">
+            {order.child_orders!.map(child => renderOrder(child, true))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Orders Tab Content
   const OrdersContent = () => (
     <div className="flex flex-col h-full">
-      {/* Header Actions */}
-      <div className="p-3 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50">
-        <span className="text-sm font-medium text-gray-700">
-          {orders.length} order{orders.length !== 1 ? 's' : ''} linked
-        </span>
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={loadOrders}
-            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-white rounded-lg transition-colors"
-            title="Refresh"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setShowLinkForm(!showLinkForm)}
-            className="flex items-center space-x-1 px-2.5 py-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors text-sm"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Link</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Link Form */}
-      {showLinkForm && (
-        <div className="p-3 bg-blue-50 border-b border-blue-100 animate-in slide-in-from-top-2 duration-200">
-          <div className="flex space-x-2">
+      {/* Link form */}
+      <div className="p-2 border-b border-gray-200 bg-white">
+        {showLinkForm ? (
+          <div className="space-y-2">
             <input
               type="text"
               value={linkInput}
               onChange={(e) => setLinkInput(e.target.value)}
-              placeholder="Order ID or code..."
-              className="flex-1 px-3 py-2 border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="Order ID or Code (e.g. 7037 or WC5577)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()}
+              autoFocus
             />
-            <button
-              onClick={handleLinkOrder}
-              disabled={!linkInput.trim() || isLinking}
-              className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
-            >
-              {isLinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            </button>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleLinkOrder}
+                disabled={isLinking || !linkInput.trim()}
+                className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isLinking ? 'Linking...' : 'Link Order'}
+              </button>
+              <button
+                onClick={() => { setShowLinkForm(false); setLinkInput(''); }}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <button
+            onClick={() => setShowLinkForm(true)}
+            className="w-full flex items-center justify-center space-x-2 px-3 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            <span className="text-sm font-medium">Link Order</span>
+          </button>
+        )}
+      </div>
 
       {/* Orders List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto p-2">
         {isLoadingOrders ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
           </div>
         ) : orders.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
-            <Package className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-            <p>No orders linked</p>
-            <p className="text-xs mt-1">Link orders to track customer purchases</p>
+            <Package className="h-10 w-10 mx-auto mb-2 text-gray-300" />
+            <p className="text-sm">No orders linked</p>
+            <p className="text-xs mt-1">Link orders by ID or code above</p>
           </div>
         ) : (
-          orders.map((order, idx) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              isExpanded={expandedOrders.has(order.orderops_order_id)}
-              onToggle={() => {
-                const newExpanded = new Set(expandedOrders);
-                if (newExpanded.has(order.orderops_order_id)) {
-                  newExpanded.delete(order.orderops_order_id);
-                } else {
-                  newExpanded.add(order.orderops_order_id);
-                }
-                setExpandedOrders(newExpanded);
-              }}
-              onCopy={copyToClipboard}
-              copiedField={copiedField}
-              onSendMessage={onSendMessage}
-              animationDelay={idx * 50}
-            />
-          ))
+          <div className="space-y-2">
+            {orders.map(order => renderOrder(order))}
+          </div>
         )}
       </div>
     </div>
@@ -635,120 +1091,5 @@ export default function ContextPanel({
         )}
       </div>
     </>
-  );
-}
-
-// Order Card Component
-interface OrderCardProps {
-  order: Order;
-  isExpanded: boolean;
-  onToggle: () => void;
-  onCopy: (text: string, field: string) => void;
-  copiedField: string | null;
-  onSendMessage?: (message: string) => void;
-  animationDelay: number;
-}
-
-function OrderCard({ order, isExpanded, onToggle, onCopy, copiedField, onSendMessage, animationDelay }: OrderCardProps) {
-  const getStatusColor = (status: string) => {
-    const s = status?.toLowerCase() || '';
-    if (s.includes('complete') || s.includes('paid')) return 'bg-green-100 text-green-700';
-    if (s.includes('pending') || s.includes('process')) return 'bg-yellow-100 text-yellow-700';
-    if (s.includes('cancel') || s.includes('fail')) return 'bg-red-100 text-red-700';
-    return 'bg-gray-100 text-gray-700';
-  };
-
-  const parsed = order.parsed_data || {};
-
-  return (
-    <div
-      className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-all animate-in slide-in-from-right-2 duration-300"
-      style={{ animationDelay: `${animationDelay}ms` }}
-    >
-      {/* Header */}
-      <button
-        onClick={onToggle}
-        className="w-full p-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white">
-            <Package className="h-5 w-5" />
-          </div>
-          <div className="text-left">
-            <a
-              href={`https://www.aalyx.com/orders/${order.orderops_order_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="font-semibold text-blue-600 hover:text-blue-700 hover:underline flex items-center group"
-              title="Open in OrderOps"
-            >
-              #{order.order_code}
-              <ExternalLink className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </a>
-            <p className="text-xs text-gray-500">{order.customer_name}</p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
-            {order.status}
-          </span>
-          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-        </div>
-      </button>
-
-      {/* Expanded Content */}
-      {isExpanded && (
-        <div className="px-3 pb-3 space-y-3 border-t border-gray-100 animate-in slide-in-from-top-2 duration-200">
-          {/* Price Info */}
-          <div className="grid grid-cols-2 gap-2 pt-3">
-            <div className="p-2 bg-green-50 rounded-lg">
-              <p className="text-xs text-green-600 flex items-center"><DollarSign className="h-3 w-3 mr-1" />Total</p>
-              <p className="font-bold text-green-700">{order.total}</p>
-            </div>
-            <div className="p-2 bg-orange-50 rounded-lg">
-              <p className="text-xs text-orange-600 flex items-center"><CreditCard className="h-3 w-3 mr-1" />Balance</p>
-              <p className="font-bold text-orange-700">{order.balance}</p>
-            </div>
-          </div>
-
-          {/* Delivery Status */}
-          {order.delivery_status && (
-            <div className="flex items-center space-x-2 p-2 bg-blue-50 rounded-lg">
-              <Truck className="h-4 w-4 text-blue-600" />
-              <span className="text-sm text-blue-700">{order.delivery_status}</span>
-            </div>
-          )}
-
-          {/* Address */}
-          {parsed.shipping_address && (
-            <div className="p-2 bg-gray-50 rounded-lg">
-              <p className="text-xs text-gray-500 flex items-center mb-1"><MapPin className="h-3 w-3 mr-1" />Shipping</p>
-              <p className="text-sm text-gray-700">{parsed.shipping_address}</p>
-            </div>
-          )}
-
-          {/* Quick Actions */}
-          <div className="flex space-x-2 pt-2">
-            <button
-              onClick={() => onCopy(order.order_code, `order-${order.id}`)}
-              className="flex-1 flex items-center justify-center space-x-1 px-2 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs"
-            >
-              {copiedField === `order-${order.id}` ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-              <span>Copy</span>
-            </button>
-            {onSendMessage && (
-              <button
-                onClick={() => onSendMessage(`Order #${order.order_code}\nTotal: ${order.total}\nStatus: ${order.status}`)}
-                className="flex-1 flex items-center justify-center space-x-1 px-2 py-1.5 bg-whatsapp-light text-whatsapp-dark rounded-lg hover:bg-whatsapp-teal hover:text-white transition-colors text-xs"
-              >
-                <Send className="h-3 w-3" />
-                <span>Send</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

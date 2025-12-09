@@ -552,6 +552,7 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         </button>
 
         {/* Location button */}
+        {/* Location button - hidden for now (bugged)
         <button
           type="button"
           onClick={handleShareLocation}
@@ -565,6 +566,7 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
             <MapPin className="h-6 w-6" />
           )}
         </button>
+        */}
 
         {/* Template button */}
         <button
