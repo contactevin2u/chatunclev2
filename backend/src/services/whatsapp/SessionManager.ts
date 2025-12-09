@@ -1122,6 +1122,30 @@ class SessionManager {
 
     console.log(`[WA] Processing message from ${waId} (${jidType}), pushName: ${pushName}, realtime: ${isRealTime}`);
 
+    // Try to get PN from Baileys' internal LID mapping store if this is a LID
+    let resolvedPn: string | null = null;
+    if (jidType === 'lid') {
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket?.signalRepository?.lidMapping) {
+          const pnJid = await session.socket.signalRepository.lidMapping.getPNForLID(remoteJid);
+          if (pnJid) {
+            resolvedPn = extractUserIdFromJid(pnJid);
+            console.log(`[WA] Baileys lidMapping resolved LID ${waId} -> PN ${resolvedPn}`);
+            // Store this mapping in our database for future use
+            await execute(
+              `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+              [accountId, waId, resolvedPn]
+            );
+          }
+        }
+      } catch (err) {
+        console.log(`[WA] Could not resolve LID via Baileys lidMapping:`, err);
+      }
+    }
+
     // Get or create contact with LID/PN deduplication
     let contact = await queryOne(
       'SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2',
@@ -1134,15 +1158,19 @@ class SessionManager {
       let mappedContact = null;
 
       if (jidType === 'lid') {
-        // This is a LID - check if we have a mapping to a PN contact
-        const mapping = await queryOne(
-          `SELECT pn FROM lid_pn_mappings WHERE whatsapp_account_id = $1 AND lid = $2`,
-          [accountId, waId]
-        );
-        if (mapping?.pn) {
+        // This is a LID - first try Baileys-resolved PN, then our DB mapping
+        let pnToLookup = resolvedPn;
+        if (!pnToLookup) {
+          const mapping = await queryOne(
+            `SELECT pn FROM lid_pn_mappings WHERE whatsapp_account_id = $1 AND lid = $2`,
+            [accountId, waId]
+          );
+          pnToLookup = mapping?.pn || null;
+        }
+        if (pnToLookup) {
           mappedContact = await queryOne(
             `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
-            [accountId, mapping.pn]
+            [accountId, pnToLookup]
           );
           if (mappedContact) {
             console.log(`[WA] Found existing PN contact ${mappedContact.id} for LID ${waId} via mapping`);
@@ -1178,16 +1206,15 @@ class SessionManager {
         contact = mappedContact;
       } else {
         // No mapping found - create new contact
-        // For LID contacts, phone_number might not be the actual phone - store wa_id
-        // For PN contacts, wa_id IS the phone number
-        const phoneNumber = jidType === 'pn' ? waId : null;
+        // For LID contacts, if we resolved PN, store it. For PN contacts, wa_id IS the phone number
+        const phoneNumber = jidType === 'pn' ? waId : resolvedPn;
         contact = await queryOne(
           `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
            VALUES ($1, $2, $3, $4, $5)
            RETURNING *`,
           [accountId, waId, phoneNumber, pushName, jidType]
         );
-        console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}, jid_type: ${jidType}`);
+        console.log(`[WA] Created new contact: ${contact.id} with name: ${pushName}, jid_type: ${jidType}, phone: ${phoneNumber}`);
       }
     } else {
       // Update contact if needed
