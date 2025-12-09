@@ -220,6 +220,45 @@ class SessionManager {
       // cachedGroupMetadata for faster group operations (5-min TTL cache)
       // Reduces API calls to WhatsApp servers and improves performance
       cachedGroupMetadata: groupMetadataCache.createCacheFunction(accountId),
+      // Performance: Emit own events to batch multiple updates into single emissions
+      // Reduces socket.io traffic and improves multi-account performance
+      emitOwnEvents: true,
+      // Performance: Filter which history chunks to sync during download
+      // Only sync recent history (last 7 days) to reduce initial load time
+      shouldSyncHistoryMessage: (historyNotification) => {
+        // Check the oldest message timestamp in this chunk
+        const oldestTimestamp = historyNotification.oldestMsgInChunkTimestampSec;
+        if (!oldestTimestamp) return true; // If no timestamp, sync to be safe
+        const timestamp = typeof oldestTimestamp === 'number' ? oldestTimestamp : (oldestTimestamp as any).low || 0;
+        const sevenDaysAgo = Math.floor(Date.now() / 1000) - (7 * 24 * 60 * 60);
+        // Only sync chunks that contain messages from the last 7 days
+        return timestamp >= sevenDaysAgo;
+      },
+      // Performance: Patch messages before sending for optimization
+      // Removes unnecessary fields that bloat message size
+      patchMessageBeforeSending: (msg) => {
+        // Remove empty or undefined fields to reduce message size
+        const clean = (obj: any): any => {
+          if (obj === null || obj === undefined) return obj;
+          if (typeof obj !== 'object') return obj;
+          const result: any = Array.isArray(obj) ? [] : {};
+          for (const key of Object.keys(obj)) {
+            const val = obj[key];
+            if (val !== null && val !== undefined && val !== '') {
+              if (typeof val === 'object') {
+                const cleaned = clean(val);
+                if (Object.keys(cleaned).length > 0 || Array.isArray(cleaned)) {
+                  result[key] = cleaned;
+                }
+              } else {
+                result[key] = val;
+              }
+            }
+          }
+          return result;
+        };
+        return clean(msg);
+      },
     });
 
     // Create session state with ready promise
