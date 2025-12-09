@@ -3,13 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { templates as templatesApi, templateSequences, media } from '@/lib/api';
-import { Plus, Edit2, Trash2, FileText, Command, Image, Video, Mic, Clock, X, Upload, StopCircle, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, FileText, Command, Image, Video, Mic, Clock, X, Upload, StopCircle, Loader2, File as FileIcon } from 'lucide-react';
 
 interface Template { id: string; name: string; content: string; shortcut?: string; content_type: string; media_url?: string; media_mime_type?: string; }
-interface SequenceItem { id?: string; content_type: string; content?: string; media_url?: string; media_mime_type?: string; delay_min_seconds: number; delay_max_seconds: number; localFile?: File; localPreviewUrl?: string; }
+interface SequenceItem { id?: string; content_type: string; content?: string; media_url?: string; media_mime_type?: string; delay_min_seconds: number; delay_max_seconds: number; localFile?: globalThis.File; localPreviewUrl?: string; }
 interface Sequence { id: string; name: string; description?: string; shortcut?: string; is_active: boolean; items: SequenceItem[]; }
-type ContentType = 'text' | 'image' | 'video' | 'audio';
-const CONTENT_TYPES: { value: ContentType; label: string; icon: any }[] = [{ value: 'text', label: 'Text', icon: FileText }, { value: 'image', label: 'Image', icon: Image }, { value: 'video', label: 'Video', icon: Video }, { value: 'audio', label: 'Voice', icon: Mic }];
+type ContentType = 'text' | 'image' | 'video' | 'audio' | 'document';
+const CONTENT_TYPES: { value: ContentType; label: string; icon: any }[] = [{ value: 'text', label: 'Text', icon: FileText }, { value: 'image', label: 'Image', icon: Image }, { value: 'video', label: 'Video', icon: Video }, { value: 'audio', label: 'Voice', icon: Mic }, { value: 'document', label: 'Document', icon: FileIcon }];
 
 function VoiceRecorder({ onRecordComplete, existingUrl, onClear }: { onRecordComplete: (blob: Blob, duration: number) => void; existingUrl?: string; onClear: () => void }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -110,8 +110,8 @@ export default function TemplatesPage() {
   const handleSaveSequence = async () => { if (!token || !sequenceForm.name || !sequenceForm.items.length) return; const items = await Promise.all(sequenceForm.items.map(async (x) => { let mUrl = x.media_url, mType = x.media_mime_type; if (x.localFile) { const r = await uploadFile(x.localFile); if (r) { mUrl = r.url; mType = r.mimeType; } } return { content_type: x.content_type, content: x.content, media_url: mUrl, media_mime_type: mType, delay_min_seconds: x.delay_min_seconds, delay_max_seconds: x.delay_max_seconds }; })); try { if (editingSequence) { const { sequence } = await templateSequences.update(token, editingSequence.id, { name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => p.map(x => x.id === sequence.id ? sequence : x)); } else { const { sequence } = await templateSequences.create(token, { name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => [sequence, ...p]); } setShowSequenceModal(false); } catch (e) { console.error(e); } };
   const handleDeleteSequence = async (id: string) => { if (!token || !confirm('Delete?')) return; try { await templateSequences.delete(token, id); setSequencesList(p => p.filter(x => x.id !== id)); } catch {} };
 
-  const getIcon = (t: string) => { switch (t) { case 'image': return <Image className="h-4 w-4" />; case 'video': return <Video className="h-4 w-4" />; case 'audio': return <Mic className="h-4 w-4" />; default: return <FileText className="h-4 w-4" />; } };
-  const getAccept = (t: string) => { switch (t) { case 'image': return 'image/*'; case 'video': return 'video/*'; case 'audio': return 'audio/*'; default: return '*/*'; } };
+  const getIcon = (t: string) => { switch (t) { case 'image': return <Image className="h-4 w-4" />; case 'video': return <Video className="h-4 w-4" />; case 'audio': return <Mic className="h-4 w-4" />; case 'document': return <FileIcon className="h-4 w-4" />; default: return <FileText className="h-4 w-4" />; } };
+  const getAccept = (t: string) => { switch (t) { case 'image': return 'image/*'; case 'video': return 'video/*'; case 'audio': return 'audio/*'; case 'document': return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'; default: return '*/*'; } };
 
   if (isLoading) return <div className="h-full flex items-center justify-center"><div className="animate-pulse text-gray-500">Loading...</div></div>;
 
