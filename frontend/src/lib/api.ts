@@ -146,10 +146,20 @@ export const messages = {
       { token }
     ),
 
-  send: (token: string, conversationId: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string) =>
+  send: (token: string, conversationId: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) =>
     request<{ message: any }>(`/api/messages/conversation/${conversationId}`, {
       method: 'POST',
-      body: { content, contentType, mediaUrl, mediaMimeType },
+      body: {
+        content,
+        contentType,
+        mediaUrl,
+        mediaMimeType,
+        ...(locationData && {
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          locationName: locationData.locationName,
+        }),
+      },
       token,
     }),
 
@@ -171,6 +181,9 @@ export const contacts = {
     const query = searchParams.toString();
     return request<{ contacts: any[] }>(`/api/contacts${query ? `?${query}` : ''}`, { token });
   },
+
+  get: (token: string, id: string) =>
+    request<{ contact: any }>(`/api/contacts/${id}`, { token }),
 
   update: (token: string, id: string, data: { name?: string }) =>
     request<{ contact: any }>(`/api/contacts/${id}`, {

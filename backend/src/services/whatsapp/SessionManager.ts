@@ -109,10 +109,14 @@ const logger = pino({
 });
 
 interface MessagePayload {
-  type: 'text' | 'image' | 'video' | 'audio' | 'document';
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'location';
   content?: string;
   mediaUrl?: string;
   mediaMimeType?: string;
+  // Location fields
+  latitude?: number;
+  longitude?: number;
+  locationName?: string;
 }
 
 interface SessionState {
@@ -1309,9 +1313,16 @@ class SessionManager {
         break;
       case 'locationMessage':
       case 'liveLocationMessage':
-        contentType = 'text';
+        contentType = 'location';
         const loc = messageContent?.locationMessage || messageContent?.liveLocationMessage;
-        content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
+        // Store location data as JSON for frontend to parse
+        // Note: name and address only exist on locationMessage, not liveLocationMessage
+        content = JSON.stringify({
+          latitude: loc?.degreesLatitude,
+          longitude: loc?.degreesLongitude,
+          name: (loc as any)?.name || null,
+          address: (loc as any)?.address || null,
+        });
         break;
       case 'reactionMessage':
         // Reactions are handled by messages.reaction event - skip here
@@ -1618,9 +1629,16 @@ class SessionManager {
         break;
       case 'locationMessage':
       case 'liveLocationMessage':
-        contentType = 'text';
+        contentType = 'location';
         const loc = messageContent?.locationMessage || messageContent?.liveLocationMessage;
-        content = `[Location: ${loc?.degreesLatitude?.toFixed(4)}, ${loc?.degreesLongitude?.toFixed(4)}]`;
+        // Store location data as JSON for frontend to parse
+        // Note: name and address only exist on locationMessage, not liveLocationMessage
+        content = JSON.stringify({
+          latitude: loc?.degreesLatitude,
+          longitude: loc?.degreesLongitude,
+          name: (loc as any)?.name || null,
+          address: (loc as any)?.address || null,
+        });
         break;
       case 'reactionMessage':
         // Reactions are handled by messages.reaction event - skip here
@@ -1796,6 +1814,19 @@ class SessionManager {
           });
           break;
 
+        case 'location':
+          if (payload.latitude === undefined || payload.longitude === undefined) {
+            throw new Error('Latitude and longitude are required for location');
+          }
+          result = await sock.sendMessage(jid, {
+            location: {
+              degreesLatitude: payload.latitude,
+              degreesLongitude: payload.longitude,
+              name: payload.locationName || undefined,
+            },
+          });
+          break;
+
         default:
           throw new Error('Unsupported message type');
       }
@@ -1941,6 +1972,19 @@ class SessionManager {
             document: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'application/octet-stream',
             fileName: payload.content || 'document',
+          });
+          break;
+
+        case 'location':
+          if (payload.latitude === undefined || payload.longitude === undefined) {
+            throw new Error('Latitude and longitude are required for location');
+          }
+          result = await sock.sendMessage(groupJid, {
+            location: {
+              degreesLatitude: payload.latitude,
+              degreesLongitude: payload.longitude,
+              name: payload.locationName || undefined,
+            },
           });
           break;
 
@@ -2530,6 +2574,10 @@ class SessionManager {
     }
 
     console.log(`[WA] Sending reaction ${emoji || '(remove)'} to message ${messageKey.id}`);
+
+    // === ANTI-BAN: Small delay before reaction (500-1000ms) ===
+    const reactionDelay = 500 + Math.floor(Math.random() * 500);
+    await sleep(reactionDelay);
 
     try {
       await sock.sendMessage(remoteJid, {

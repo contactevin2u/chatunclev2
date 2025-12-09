@@ -101,7 +101,7 @@ export interface Message {
   conversation_id: string;
   wa_message_id: string | null;
   sender_type: 'agent' | 'contact';
-  content_type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker';
+  content_type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location';
   content: string | null;
   media_url: string | null;
   media_mime_type: string | null;

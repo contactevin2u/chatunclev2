@@ -8,9 +8,8 @@ import { Conversation, Message, Label, GroupAccount } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
-import InternalNotes from '@/components/chat/InternalNotes';
-import OrdersPanel from '@/components/chat/OrdersPanel';
-import { MessageSquare, RefreshCw, StickyNote, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, Package } from 'lucide-react';
+import ContextPanel from '@/components/chat/ContextPanel';
+import { MessageSquare, RefreshCw, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, PanelRightOpen, PanelRightClose } from 'lucide-react';
 import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
 
@@ -24,8 +23,7 @@ export default function InboxPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
-  const [showNotes, setShowNotes] = useState(false);
-  const [showOrders, setShowOrders] = useState(false);
+  const [showContextPanel, setShowContextPanel] = useState(false);
   const [prefillMessage, setPrefillMessage] = useState<string | null>(null);
   const [allLabels, setAllLabels] = useState<Label[]>([]);
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
@@ -390,9 +388,9 @@ export default function InboxPage() {
     loadMessages();
   }, [token, selectedConversation, activeConversationId]);
 
-  const handleSendMessage = async (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string) => {
+  const handleSendMessage = async (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) => {
     if (!token || !selectedConversation) return;
-    if (!content.trim() && !mediaUrl) return;
+    if (!content.trim() && !mediaUrl && contentType !== 'location') return;
 
     // Get the effective conversation ID for sending
     const effectiveId = selectedConversation.is_unified_group
@@ -406,13 +404,16 @@ export default function InboxPage() {
 
     setIsSending(true);
     try {
-      const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType);
+      const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType, locationData);
       setMessagesList((prev) => [...prev, message]);
 
       // Update conversation list
-      const displayContent = mediaUrl
-        ? (contentType === 'image' ? '📷 Photo' : contentType === 'video' ? '🎥 Video' : contentType === 'audio' ? '🎤 Voice note' : content)
-        : content;
+      let displayContent = content;
+      if (contentType === 'location') {
+        displayContent = '📍 Location';
+      } else if (mediaUrl) {
+        displayContent = contentType === 'image' ? '📷 Photo' : contentType === 'video' ? '🎥 Video' : contentType === 'audio' ? '🎤 Voice note' : content;
+      }
       setConversationsList((prev) =>
         prev.map((conv) =>
           conv.id === selectedConversation.id
@@ -809,22 +810,19 @@ export default function InboxPage() {
                     </div>
                     )}
                     <button
-                      onClick={() => setShowNotes(!showNotes)}
-                      className={`p-2.5 md:p-2 rounded-lg transition-colors active:scale-95 ${
-                        showNotes ? 'bg-yellow-100 text-yellow-600' : 'hover:bg-gray-200 text-gray-500 active:bg-gray-300'
+                      onClick={() => setShowContextPanel(!showContextPanel)}
+                      className={`p-2.5 md:p-2 rounded-lg transition-all active:scale-95 ${
+                        showContextPanel
+                          ? 'bg-whatsapp-light text-whatsapp-dark shadow-sm'
+                          : 'hover:bg-gray-200 text-gray-500 active:bg-gray-300'
                       }`}
-                      title="Internal Notes"
+                      title={showContextPanel ? 'Hide Details' : 'Show Details'}
                     >
-                      <StickyNote className="h-5 w-5" />
-                    </button>
-                    <button
-                      onClick={() => setShowOrders(!showOrders)}
-                      className={`p-2.5 md:p-2 rounded-lg transition-colors active:scale-95 ${
-                        showOrders ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-200 text-gray-500 active:bg-gray-300'
-                      }`}
-                      title="Orders"
-                    >
-                      <Package className="h-5 w-5" />
+                      {showContextPanel ? (
+                        <PanelRightClose className="h-5 w-5" />
+                      ) : (
+                        <PanelRightOpen className="h-5 w-5" />
+                      )}
                     </button>
                   </div>
                 </div>
@@ -878,20 +876,14 @@ export default function InboxPage() {
           )}
         </div>
 
-        {/* Internal Notes Panel */}
-        {showNotes && selectedConversation && (
-          <InternalNotes
+        {/* Unified Context Panel (Profile, Notes, Orders) */}
+        {selectedConversation && (
+          <ContextPanel
             conversationId={getEffectiveConversationId() || selectedConversation.id}
-            onClose={() => setShowNotes(false)}
-          />
-        )}
-
-        {/* Orders Panel */}
-        {showOrders && selectedConversation && (
-          <OrdersPanel
-            conversationId={getEffectiveConversationId() || selectedConversation.id}
-            onClose={() => setShowOrders(false)}
+            contactId={selectedConversation.contact_id || undefined}
+            onClose={() => setShowContextPanel(false)}
             onSendMessage={(msg) => setPrefillMessage(msg)}
+            isOpen={showContextPanel}
           />
         )}
       </div>

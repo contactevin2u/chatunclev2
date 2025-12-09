@@ -71,7 +71,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
 // Supports both 1:1 and group conversations
 router.post('/conversation/:conversationId', async (req: Request, res: Response) => {
   try {
-    const { content, contentType = 'text', mediaUrl, mediaMimeType } = req.body;
+    const { content, contentType = 'text', mediaUrl, mediaMimeType, latitude, longitude, locationName } = req.body;
     const agentId = req.user!.userId;
 
     // Verify ownership or shared access with send permission
@@ -183,6 +183,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
               content: processedContent,
               mediaUrl,
               mediaMimeType,
+              latitude,
+              longitude,
+              locationName,
             }
           );
         } else {
@@ -195,6 +198,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
               content: processedContent,
               mediaUrl,
               mediaMimeType,
+              latitude,
+              longitude,
+              locationName,
             },
             {
               jidType: conversation.jid_type || 'pn',  // Use stored JID type for correct format

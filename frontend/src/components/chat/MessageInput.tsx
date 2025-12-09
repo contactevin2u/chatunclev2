@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Mic, Smile, FileText, Command, X, Image, Video, Clock, Square, Loader2 } from 'lucide-react';
+import { Send, Paperclip, Mic, Smile, FileText, Command, X, Image, Video, Clock, Square, Loader2, MapPin } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { templates as templatesApi, media as mediaApi, scheduledMessages as scheduledApi } from '@/lib/api';
 import data from '@emoji-mart/data';
@@ -15,7 +15,7 @@ interface Template {
 }
 
 interface MessageInputProps {
-  onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string) => void;
+  onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) => void;
   disabled?: boolean;
   conversationId?: string;
   prefillMessage?: string;
@@ -56,6 +56,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+
+  // Location sharing state
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
 
   // Handle prefill message from external source (e.g., OrdersPanel quick actions)
   useEffect(() => {
@@ -237,6 +240,50 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Handle sharing current location
+  const handleShareLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setIsGettingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        // Send location message
+        onSend('', 'location', undefined, undefined, { latitude, longitude });
+        setIsGettingLocation(false);
+        // Refocus input after sending
+        requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
+      },
+      (error) => {
+        setIsGettingLocation(false);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            alert('Location permission denied. Please enable location access in your browser settings.');
+            break;
+          case error.POSITION_UNAVAILABLE:
+            alert('Location information is unavailable.');
+            break;
+          case error.TIMEOUT:
+            alert('Location request timed out. Please try again.');
+            break;
+          default:
+            alert('An error occurred while getting your location.');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -498,10 +545,25 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          disabled={isRecording || isUploading}
+          disabled={isRecording || isUploading || isGettingLocation}
           className="hidden md:block p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors disabled:opacity-50"
         >
           <Paperclip className="h-6 w-6" />
+        </button>
+
+        {/* Location button */}
+        <button
+          type="button"
+          onClick={handleShareLocation}
+          disabled={isRecording || isUploading || isGettingLocation || disabled}
+          className="hidden md:block p-2 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-200 transition-colors disabled:opacity-50"
+          title="Share your location"
+        >
+          {isGettingLocation ? (
+            <Loader2 className="h-6 w-6 animate-spin" />
+          ) : (
+            <MapPin className="h-6 w-6" />
+          )}
         </button>
 
         {/* Template button */}

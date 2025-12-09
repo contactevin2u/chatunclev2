@@ -79,6 +79,48 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// Get single contact
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const contact = await queryOne(`
+      SELECT
+        ct.id,
+        ct.whatsapp_account_id,
+        ct.wa_id,
+        ct.name,
+        ct.phone_number,
+        ct.profile_pic_url,
+        ct.jid_type,
+        ct.created_at,
+        ct.updated_at,
+        wa.name as account_name
+      FROM contacts ct
+      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
+      WHERE ct.id = $1 AND wa.user_id = $2
+    `, [req.params.id, req.user!.userId]);
+
+    if (!contact) {
+      res.status(404).json({ error: 'Contact not found' });
+      return;
+    }
+
+    // Get labels for this contact
+    const labels = await query(`
+      SELECT l.id, l.name, l.color
+      FROM labels l
+      JOIN contact_labels cl ON l.id = cl.label_id
+      WHERE cl.contact_id = $1
+    `, [req.params.id]);
+
+    (contact as any).labels = labels;
+
+    res.json({ contact });
+  } catch (error) {
+    console.error('Get contact error:', error);
+    res.status(500).json({ error: 'Failed to get contact' });
+  }
+});
+
 // Update contact
 router.patch('/:id', async (req: Request, res: Response) => {
   try {

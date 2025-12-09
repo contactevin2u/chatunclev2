@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package, Smile } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package, Smile, MapPin } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { orderops, messages as messagesApi } from '@/lib/api';
 import { MessageReaction } from '@/types';
@@ -242,9 +242,44 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
         return <FileText className="h-4 w-4" />;
       case 'audio':
         return <Mic className="h-4 w-4" />;
+      case 'location':
+        return <MapPin className="h-4 w-4" />;
       default:
         return null;
     }
+  };
+
+  // Parse location data from message content
+  const parseLocationData = (content: string | null): { latitude: number; longitude: number; name?: string; address?: string } | null => {
+    if (!content) return null;
+    try {
+      // Try to parse as JSON (new format)
+      const data = JSON.parse(content);
+      if (data.latitude && data.longitude) {
+        return data;
+      }
+    } catch {
+      // Try to parse old format: [Location: lat, lng]
+      const match = content.match(/\[Location:\s*([-\d.]+),\s*([-\d.]+)\]/);
+      if (match) {
+        return {
+          latitude: parseFloat(match[1]),
+          longitude: parseFloat(match[2]),
+        };
+      }
+    }
+    return null;
+  };
+
+  // Generate OpenStreetMap static image URL
+  const getMapPreviewUrl = (lat: number, lng: number, zoom: number = 15) => {
+    // Using OpenStreetMap static map service
+    return `https://staticmap.openstreetmap.de/staticmap.php?center=${lat},${lng}&zoom=${zoom}&size=200x150&markers=${lat},${lng},red`;
+  };
+
+  // Generate Google Maps link
+  const getGoogleMapsUrl = (lat: number, lng: number) => {
+    return `https://www.google.com/maps?q=${lat},${lng}`;
   };
 
   return (
@@ -343,8 +378,45 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 />
               )}
 
-              {/* Content */}
-              {message.content && (
+              {/* Location preview */}
+              {message.content_type === 'location' && (() => {
+                const locationData = parseLocationData(message.content);
+                if (!locationData) return null;
+                return (
+                  <a
+                    href={getGoogleMapsUrl(locationData.latitude, locationData.longitude)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block mb-2 group/map"
+                  >
+                    <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                      <img
+                        src={getMapPreviewUrl(locationData.latitude, locationData.longitude)}
+                        alt="Location"
+                        className="w-[200px] h-[150px] object-cover"
+                        onError={(e) => {
+                          // Fallback if static map fails
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover/map:bg-black/10 transition-colors flex items-center justify-center">
+                        <div className="absolute bottom-2 left-2 right-2 bg-white/90 rounded px-2 py-1">
+                          <div className="flex items-center gap-1 text-xs text-gray-700">
+                            <MapPin className="h-3 w-3 text-red-500" />
+                            <span className="truncate">
+                              {locationData.name || locationData.address || `${locationData.latitude.toFixed(4)}, ${locationData.longitude.toFixed(4)}`}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-blue-500 mt-1 group-hover/map:underline">Open in Google Maps</p>
+                  </a>
+                );
+              })()}
+
+              {/* Content (skip for location messages as they render their own UI) */}
+              {message.content && message.content_type !== 'location' && (
                 <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">
                   {message.content}
                 </p>

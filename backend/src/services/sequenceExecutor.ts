@@ -26,15 +26,23 @@ interface ExecutionContext {
 // Active sequence executions (to prevent duplicates)
 const activeExecutions = new Map<string, boolean>();
 
+// Minimum delay between sequence items (anti-ban protection)
+const MIN_SEQUENCE_DELAY_MS = 500; // 0.5 seconds minimum
+
 /**
  * Get a random delay between min and max seconds
+ * Enforces minimum delay for anti-ban protection
  */
 function getRandomDelay(minSeconds: number, maxSeconds: number): number {
-  if (minSeconds >= maxSeconds) {
-    return minSeconds * 1000;
+  // Enforce minimum delay of 0.5 seconds for anti-ban
+  const effectiveMin = Math.max(minSeconds, 0.5);
+  const effectiveMax = Math.max(maxSeconds, effectiveMin);
+
+  if (effectiveMin >= effectiveMax) {
+    return effectiveMin * 1000;
   }
-  const range = maxSeconds - minSeconds;
-  const randomSeconds = minSeconds + Math.random() * range;
+  const range = effectiveMax - effectiveMin;
+  const randomSeconds = effectiveMin + Math.random() * range;
   return Math.round(randomSeconds * 1000); // Convert to milliseconds
 }
 
