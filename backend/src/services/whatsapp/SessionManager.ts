@@ -293,10 +293,16 @@ class SessionManager {
       },
 
       // Filter which history chunks to sync during download
-      // Only sync recent history (last 3 days) for FASTER initial connection
+      // CRITICAL: Return false for no-timestamp checks to skip 20-second AwaitingInitialSync wait
+      // Baileys tests this with a fake RECENT notification (no timestamp) to decide if it should wait
+      // Return false = events flow immediately (no buffering)
+      // Return true = 20 second buffer wait before events are delivered
       shouldSyncHistoryMessage: (historyNotification) => {
         const oldestTimestamp = historyNotification.oldestMsgInChunkTimestampSec;
-        if (!oldestTimestamp) return true;
+        // IMPORTANT: Return FALSE when no timestamp - this is Baileys' initial check
+        // Returning false here skips the 20-second AwaitingInitialSync wait
+        if (!oldestTimestamp) return false;
+        // For actual history chunks with timestamps, sync last 3 days only
         const timestamp = typeof oldestTimestamp === 'number' ? oldestTimestamp : (oldestTimestamp as any).low || 0;
         const threeDaysAgo = Math.floor(Date.now() / 1000) - (3 * 24 * 60 * 60);
         return timestamp >= threeDaysAgo;
