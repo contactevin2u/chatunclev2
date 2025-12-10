@@ -121,6 +121,14 @@ interface MessagePayload {
   latitude?: number;
   longitude?: number;
   locationName?: string;
+  // Reply to message (quoted message)
+  quotedMessageId?: string;
+  quotedMessageKey?: {
+    remoteJid: string;
+    id: string;
+    fromMe?: boolean;
+    participant?: string;
+  };
 }
 
 interface SessionState {
@@ -1215,13 +1223,33 @@ class SessionManager {
 
     let result;
 
+    // Build quoted message for replies if provided
+    let quotedMsg: any = undefined;
+    if (payload.quotedMessageKey) {
+      // Get the original message from MessageStore for proper quoting
+      const originalMsg = messageStore.get(accountId, payload.quotedMessageKey as WAMessageKey);
+      if (originalMsg) {
+        quotedMsg = {
+          key: payload.quotedMessageKey,
+          message: originalMsg,
+        };
+        console.log(`[WA] Replying to message: ${payload.quotedMessageKey.id}`);
+      } else {
+        // Fallback: quote without message content (will show "this message")
+        quotedMsg = {
+          key: payload.quotedMessageKey,
+        };
+        console.log(`[WA] Replying to message (no content cache): ${payload.quotedMessageKey.id}`);
+      }
+    }
+
     try {
       switch (payload.type) {
         case 'text':
           if (!payload.content) {
             throw new Error('Text content is required');
           }
-          result = await sock.sendMessage(jid, { text: payload.content });
+          result = await sock.sendMessage(jid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
         case 'image':
@@ -1231,7 +1259,7 @@ class SessionManager {
           result = await sock.sendMessage(jid, {
             image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'video':
@@ -1241,7 +1269,7 @@ class SessionManager {
           result = await sock.sendMessage(jid, {
             video: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'audio':
@@ -1252,7 +1280,7 @@ class SessionManager {
             audio: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'audio/mp4',
             ptt: true,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'document':
@@ -1263,7 +1291,7 @@ class SessionManager {
             document: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'application/octet-stream',
             fileName: payload.content || 'document',
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'location':
@@ -1276,7 +1304,7 @@ class SessionManager {
               degreesLongitude: payload.longitude,
               name: payload.locationName || undefined,
             },
-          });
+          }, { quoted: quotedMsg });
           break;
 
         default:
@@ -1376,13 +1404,31 @@ class SessionManager {
 
     let result;
 
+    // Build quoted message for replies if provided
+    let quotedMsg: any = undefined;
+    if (payload.quotedMessageKey) {
+      const originalMsg = messageStore.get(accountId, payload.quotedMessageKey as WAMessageKey);
+      if (originalMsg) {
+        quotedMsg = {
+          key: payload.quotedMessageKey,
+          message: originalMsg,
+        };
+        console.log(`[WA][Group] Replying to message: ${payload.quotedMessageKey.id}`);
+      } else {
+        quotedMsg = {
+          key: payload.quotedMessageKey,
+        };
+        console.log(`[WA][Group] Replying to message (no content cache): ${payload.quotedMessageKey.id}`);
+      }
+    }
+
     try {
       switch (payload.type) {
         case 'text':
           if (!payload.content) {
             throw new Error('Text content is required');
           }
-          result = await sock.sendMessage(groupJid, { text: payload.content });
+          result = await sock.sendMessage(groupJid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
         case 'image':
@@ -1392,7 +1438,7 @@ class SessionManager {
           result = await sock.sendMessage(groupJid, {
             image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'video':
@@ -1402,7 +1448,7 @@ class SessionManager {
           result = await sock.sendMessage(groupJid, {
             video: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'audio':
@@ -1413,7 +1459,7 @@ class SessionManager {
             audio: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'audio/mp4',
             ptt: true,
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'document':
@@ -1424,7 +1470,7 @@ class SessionManager {
             document: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'application/octet-stream',
             fileName: payload.content || 'document',
-          });
+          }, { quoted: quotedMsg });
           break;
 
         case 'location':
@@ -1437,7 +1483,7 @@ class SessionManager {
               degreesLongitude: payload.longitude,
               name: payload.locationName || undefined,
             },
-          });
+          }, { quoted: quotedMsg });
           break;
 
         default:
@@ -2447,6 +2493,62 @@ class SessionManager {
       console.log(`[WA] Reaction sent successfully`);
     } catch (error) {
       console.error(`[WA] Failed to send reaction:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Forward a message to another chat
+   * @param accountId - WhatsApp account ID
+   * @param targetJid - The JID to forward to (contact or group)
+   * @param messageKey - The key of the message to forward
+   */
+  async forwardMessage(
+    accountId: string,
+    targetJid: string,
+    messageKey: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }
+  ): Promise<string> {
+    const session = this.sessions.get(accountId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    await this.waitForReady(accountId, 30000);
+
+    const sock = session.socket;
+    if (!sock.user) {
+      throw new Error('Session not connected - please reconnect');
+    }
+
+    console.log(`[WA] Forwarding message ${messageKey.id} to ${targetJid}`);
+
+    // Get the original message from MessageStore
+    const originalMsg = messageStore.get(accountId, messageKey as WAMessageKey);
+    if (!originalMsg) {
+      throw new Error('Original message not found in cache - cannot forward');
+    }
+
+    // Anti-ban: small delay before forwarding
+    const forwardDelay = 500 + Math.floor(Math.random() * 500);
+    await sleep(forwardDelay);
+
+    try {
+      // Use Baileys forward functionality
+      const result = await sock.sendMessage(targetJid, {
+        forward: {
+          key: messageKey,
+          message: originalMsg,
+        },
+      });
+
+      if (!result?.key?.id) {
+        throw new Error('Forward sent but no ID returned');
+      }
+
+      console.log(`[WA] Message forwarded successfully: ${result.key.id}`);
+      return result.key.id;
+    } catch (error) {
+      console.error(`[WA] Failed to forward message:`, error);
       throw error;
     }
   }

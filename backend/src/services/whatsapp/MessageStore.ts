@@ -178,6 +178,16 @@ class MessageStoreService {
   }
 
   /**
+   * Get a message from cache only (synchronous, no DB fallback)
+   * Use this for reply/forward where we need immediate access
+   */
+  get(accountId: string, key: WAMessageKey): proto.IMessage | undefined {
+    const cacheKey = this.getCacheKey(accountId, key);
+    const cached = this.cache.get<StoredMessage>(cacheKey);
+    return cached?.message;
+  }
+
+  /**
    * Delete a message from cache
    */
   delete(accountId: string, key: WAMessageKey): void {
