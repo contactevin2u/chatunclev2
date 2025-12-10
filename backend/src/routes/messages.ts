@@ -146,12 +146,23 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       agentName: agent?.name || ''
     }) : content;
 
+    // Get quoted message info if replying
+    let quotedInfo: { id: string; wa_message_id: string; content: string; sender_name: string | null } | null = null;
+    if (quotedMessageId) {
+      quotedInfo = await queryOne<{ id: string; wa_message_id: string; content: string; sender_name: string | null }>(
+        `SELECT id, wa_message_id, content, sender_name FROM messages WHERE id = $1`,
+        [quotedMessageId]
+      );
+    }
+
     // === OPTIMISTIC UI: Save message immediately with 'pending' status ===
     const message = await queryOne<Message>(`
-      INSERT INTO messages (conversation_id, sender_type, content_type, content, media_url, media_mime_type, status, agent_id, response_time_ms)
-      VALUES ($1, 'agent', $2, $3, $4, $5, 'pending', $6, $7)
+      INSERT INTO messages (conversation_id, sender_type, content_type, content, media_url, media_mime_type, status, agent_id, response_time_ms,
+                            quoted_message_id, quoted_wa_message_id, quoted_content, quoted_sender_name)
+      VALUES ($1, 'agent', $2, $3, $4, $5, 'pending', $6, $7, $8, $9, $10, $11)
       RETURNING *
-    `, [req.params.conversationId, contentType, processedContent, mediaUrl, mediaMimeType, agentId, responseTimeMs]);
+    `, [req.params.conversationId, contentType, processedContent, mediaUrl, mediaMimeType, agentId, responseTimeMs,
+        quotedInfo?.id || null, quotedInfo?.wa_message_id || null, quotedInfo?.content || null, quotedInfo?.sender_name || null]);
 
     // Update conversation immediately
     await execute(`

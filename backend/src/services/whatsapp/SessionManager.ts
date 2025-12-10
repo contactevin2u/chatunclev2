@@ -1387,6 +1387,7 @@ class SessionManager {
           message: originalMsg,
         };
         console.log(`[WA] Replying to message: ${payload.quotedMessageKey.id}`);
+        console.log(`[WA] Quote object:`, JSON.stringify(quotedMsg, null, 2));
       } else {
         // Cannot quote without message content - Baileys crashes with key-only quote
         // Skip quoting, message will still send without the reply preview
