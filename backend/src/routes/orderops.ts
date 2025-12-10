@@ -449,14 +449,18 @@ async function processOrderAsync(
     const userRoom = `user:${userId}`;
     const roomSize = io.sockets.adapter.rooms.get(userRoom)?.size || 0;
     console.log(`[OrderOps] Emitting result to ${userRoom} (${roomSize} clients) - success: ${isSuccess}, orderCode: ${orderCode}, data.status: ${data.status}`);
+
+    // Don't include full result data in socket emit - can be too large and cause issues
     io.to(userRoom).emit('orderops:result', {
       success: isSuccess,
       messageId,
       conversationId,
       orderCode,
       error: isSuccess ? undefined : (data.message || `OrderOps returned status: ${data.status}`),
-      result: data,
       duration,
+      // Only include essential info, not full parsed data
+      orderType: data.type,
+      customerName: data.parsed_data?.customer?.name,
     });
     console.log(`[OrderOps] Socket emit completed`);
 
