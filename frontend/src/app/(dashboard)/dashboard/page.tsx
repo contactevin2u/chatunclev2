@@ -50,11 +50,16 @@ export default function InboxPage() {
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
   const conversationsListRef = useRef<Conversation[]>([]);
+  const incognitoModeRef = useRef(false);
 
   // Keep refs in sync with state for stable callbacks
   useEffect(() => {
     conversationsListRef.current = conversationsList;
   }, [conversationsList]);
+
+  useEffect(() => {
+    incognitoModeRef.current = incognitoMode;
+  }, [incognitoMode]);
 
   // Load labels on mount
   useEffect(() => {
@@ -308,11 +313,15 @@ export default function InboxPage() {
     }
 
     // Update conversations list with proper unified group handling
+    // In incognito mode, ALWAYS increment unread count (even if viewing the conversation)
+    const isIncognito = incognitoModeRef.current;
+
     setConversationsList((prev) => {
       const updated = prev.map((conv) => {
         // Direct match
         if (conv.id === data.conversationId) {
-          const shouldIncrementUnread = !isCurrentConversation;
+          // Increment unread if not viewing OR if in incognito mode
+          const shouldIncrementUnread = !isCurrentConversation || isIncognito;
           return {
             ...conv,
             last_message: data.message.content,
@@ -325,8 +334,10 @@ export default function InboxPage() {
         if (conv.is_unified_group && conv.accounts) {
           const matchingAccount = conv.accounts.find(a => a.conversation_id === data.conversationId);
           if (matchingAccount) {
+            // Increment unread if not viewing OR if in incognito mode
             const shouldIncrementUnread = !isViewingUnifiedGroup ||
-              activeConversationIdRef.current !== data.conversationId;
+              activeConversationIdRef.current !== data.conversationId ||
+              isIncognito;
 
             const updatedAccounts = conv.accounts.map(a =>
               a.conversation_id === data.conversationId
