@@ -152,24 +152,25 @@ class HealthMonitorService {
     const now = Date.now();
     health.lastHealthCheck = now;
 
-    // Check WebSocket state
+    // Check connection state via socket.user (more reliable than checking ws internal)
+    // Baileys v7 changed internal structure, socket.ws may not be accessible
     try {
-      const ws = (socket as any).ws;
-      health.wsState = ws?.readyState ?? null;
+      // If socket.user exists, connection is authenticated and working
+      const isConnected = !!socket.user;
+      health.wsState = isConnected ? 1 : null;
 
-      // WebSocket states: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
-      if (health.wsState !== 1) {
+      if (!isConnected) {
         health.consecutiveFailures++;
         health.connectionState = 'unhealthy';
-        console.warn(`[HealthMonitor] Account ${accountId} WebSocket not open (state: ${health.wsState})`);
+        console.warn(`[HealthMonitor] Account ${accountId} not connected (no user data)`);
 
         if (health.consecutiveFailures >= this.config.maxConsecutiveFailures) {
-          await this.triggerReconnect(accountId, `WebSocket state ${health.wsState} for ${health.consecutiveFailures} checks`);
+          await this.triggerReconnect(accountId, `Not connected for ${health.consecutiveFailures} checks`);
         }
         return;
       }
     } catch (err) {
-      console.error(`[HealthMonitor] Error checking WebSocket for ${accountId}:`, err);
+      console.error(`[HealthMonitor] Error checking connection for ${accountId}:`, err);
       health.consecutiveFailures++;
     }
 
