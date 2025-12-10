@@ -140,6 +140,74 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Convert image blob to JPEG using canvas
+  const convertToJpeg = useCallback((blob: Blob): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img');
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
+        // Fill white background (for transparent PNGs)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob(
+          (jpegBlob) => {
+            if (jpegBlob) {
+              resolve(jpegBlob);
+            } else {
+              reject(new Error('Failed to convert to JPEG'));
+            }
+          },
+          'image/jpeg',
+          0.9 // 90% quality
+        );
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = URL.createObjectURL(blob);
+    });
+  }, []);
+
+  // Handle paste event for images
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+
+        try {
+          // Convert to JPEG
+          const jpegBlob = await convertToJpeg(blob);
+          const file = new File([jpegBlob], `pasted-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+          // Create preview and set as attachment
+          const preview = URL.createObjectURL(file);
+          setAttachedMedia({
+            file,
+            preview,
+            type: 'image',
+          });
+
+          console.log('[MessageInput] Image pasted and converted to JPEG:', file.size, 'bytes');
+        } catch (error) {
+          console.error('[MessageInput] Failed to process pasted image:', error);
+          alert('Failed to process pasted image');
+        }
+        return; // Only process first image
+      }
+    }
+  }, [convertToJpeg]);
+
   const handleSelectTemplate = (template: Template) => {
     // If template has media, show preview modal first
     if (template.content_type && template.content_type !== 'text' && template.media_url) {
@@ -739,6 +807,7 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={attachedMedia ? 'Add a caption...' : 'Type a message...'}
             disabled={disabled || isRecording}
             rows={1}
