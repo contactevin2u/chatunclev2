@@ -325,54 +325,15 @@ class SessionManager {
     // Store session state
     this.sessions.set(accountId, sessionState);
 
-    // Handle credentials update
-    sock.ev.on('creds.update', saveCreds);
-
-    // Handle connection updates
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-      console.log(`[WA] Connection update:`, { connection, hasQR: !!qr });
-
-      const io = getIO();
-
-      if (qr) {
-        console.log(`[WA] QR code generated for account ${accountId}`);
-        // Send QR code to frontend
-        io.to(`user:${userId}`).emit('qr:update', {
-          accountId,
-          qr,
-        });
-
-        await execute(
-          "UPDATE whatsapp_accounts SET status = 'qr_pending', updated_at = NOW() WHERE id = $1",
-          [accountId]
-        );
-      }
-
-      if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-
-        console.log(`[WA] Connection closed. Status code: ${statusCode}, shouldReconnect: ${shouldReconnect}`);
-
-        // Mark session as not ready
-        const session = this.sessions.get(accountId);
-        if (session) {
-          session.isReady = false;
-        }
-
-        await execute(
-          "UPDATE whatsapp_accounts SET status = 'disconnected', updated_at = NOW() WHERE id = $1",
-          [accountId]
-        );
-
-        io.to(`user:${userId}`).emit('account:status', {
-          accountId,
-          status: 'disconnected',
-        });
-
-        // Reconnect if not logged out - use exponential backoff
-        if (shouldReconnect) {
+    // Setup buffered event processing (sock.ev.process) for better performance
+    // This replaces all individual sock.ev.on() handlers with a single batched processor
+    setupBufferedEventProcessing(
+      {
+        accountId,
+        userId,
+        sock,
+        saveCreds,
+        onReconnect: () => {
           const canReconnect = reconnectManager.canReconnect(accountId);
           if (canReconnect.allowed) {
             const delay = reconnectManager.scheduleReconnect(accountId, async () => {
@@ -384,828 +345,38 @@ class SessionManager {
           } else {
             console.log(`[WA] Reconnection blocked for ${accountId}: ${canReconnect.reason}`);
           }
-        } else {
-          // Clean up session files on logout
+        },
+        onLogout: () => {
           reconnectManager.clearState(accountId);
           this.cleanupSession(accountId);
-        }
-      }
-
-      if (connection === 'open') {
-        console.log(`[WA] Session ${accountId} connected successfully!`);
-        console.log(`[WA] User:`, sock.user);
-
-        // Get phone number from socket
-        const phoneNumber = sock.user?.id?.split(':')[0] || null;
-        const name = sock.user?.name || null;
-
-        await execute(
-          "UPDATE whatsapp_accounts SET status = 'connected', phone_number = COALESCE($1, phone_number), name = COALESCE($2, name), updated_at = NOW() WHERE id = $3",
-          [phoneNumber, name, accountId]
-        );
-
-        io.to(`user:${userId}`).emit('account:status', {
-          accountId,
-          status: 'connected',
-          phoneNumber,
-          name,
-        });
-
-        // Mark session as ready for sending messages
-        const session = this.sessions.get(accountId);
-        if (session) {
-          session.isReady = true;
-          session.resolveReady();
-          console.log(`[WA] Session ${accountId} is now ready for sending messages`);
-
-          // Reset reconnect state on successful connection
+        },
+        onReady: () => {
           reconnectManager.resetState(accountId);
-
-          // Start health monitoring for this session
-          healthMonitor.startMonitoring(accountId, sock);
-        }
-      }
-    });
-
-    // Handle incoming messages - both real-time and history
-    sock.ev.on('messages.upsert', async (upsert) => {
-      // Skip processing if account is being deleted (prevents foreign key errors)
-      if (this.isAccountDeleting(accountId)) {
-        console.log(`[WA] Skipping messages.upsert - account ${accountId} is being deleted`);
-        return;
-      }
-
-      const { messages, type } = upsert;
-      console.log(`[WA] messages.upsert - type: ${type}, count: ${messages.length}`);
-
-      // Record activity for health monitoring
-      healthMonitor.recordMessageReceived(accountId);
-
-      // PRE-WARM: Store all messages in MessageStore for getMessage callback
-      // This ensures decryption retries always have message content available
-      for (const msg of messages) {
-        if (msg.key && msg.message) {
-          messageStore.store(accountId, msg.key, msg.message);
-        }
-      }
-
-      // Process all message types: 'notify' (real-time) and 'append' (history)
-      for (const msg of messages) {
-        if (!msg.key) continue;
-        const remoteJid = msg.key.remoteJid;
-        const fromMe = msg.key.fromMe;
-        const messageId = msg.key.id;
-
-        // DEDUPLICATION: Skip if we've already processed this message
-        // Prevents duplicate processing on reconnects and history overlaps
-        if (messageId && messageDeduplicator.checkAndMark(accountId, messageId)) {
-          console.log(`[WA] Skipping duplicate message: ${messageId}`);
-          continue;
-        }
-
-        console.log(`[WA] Message: jid=${remoteJid}, fromMe=${fromMe}, id=${messageId}, type=${type}`);
-
-        // Skip status broadcasts using Baileys helper
-        if (!remoteJid || isJidBroadcast(remoteJid)) continue;
-
-        // ============ GROUP MESSAGES ============
-        if (isJidGroup(remoteJid)) {
-          // Add account-specific delay for human-like behavior (prevents sync patterns)
-          const groupDelay = getAccountSpecificDelay(accountId, 200, 2000);
-          await sleep(groupDelay);
-
-          // Handle our own sent messages in groups
-          if (fromMe) {
-            console.log(`[WA] Sent group message from self: ${messageId}`);
-            const existingMsg = await queryOne(
-              'SELECT id FROM messages WHERE wa_message_id = $1',
-              [messageId]
-            );
-            if (existingMsg) {
-              await execute(
-                `UPDATE messages SET status = 'sent', updated_at = NOW() WHERE wa_message_id = $1`,
-                [messageId]
-              );
-            } else {
-              try {
-                await this.handleGroupOutgoingMessage(accountId, userId, msg, type === 'notify');
-              } catch (error) {
-                console.error(`[WA] Error saving outgoing group message:`, error);
-              }
-            }
-            continue;
-          }
-
-          // Handle incoming group messages
-          try {
-            await this.handleGroupIncomingMessage(accountId, userId, msg, type === 'notify');
-            console.log(`[WA] Group message ${messageId} processed successfully`);
-          } catch (error) {
-            console.error(`[WA] Error processing group message ${messageId}:`, error);
-          }
-          continue;
-        }
-
-        // ============ 1:1 USER MESSAGES ============
-        // Only process user messages
-        if (!isUserJid(remoteJid)) continue;
-
-        // Handle our own sent messages (from phone or ChatUncle)
-        if (fromMe) {
-          console.log(`[WA] Sent message from self: ${messageId}`);
-
-          // Check if message already exists in DB
-          const existingMsg = await queryOne(
-            'SELECT id FROM messages WHERE wa_message_id = $1',
-            [messageId]
-          );
-
-          if (existingMsg) {
-            // Update status of existing message (sent from ChatUncle)
-            await execute(
-              `UPDATE messages SET status = 'sent', updated_at = NOW() WHERE wa_message_id = $1`,
-              [messageId]
-            );
-          } else {
-            // Save message sent from phone - needs to be stored
-            try {
-              await this.handleOutgoingMessage(accountId, userId, msg, type === 'notify');
-            } catch (error) {
-              console.error(`[WA] Error saving outgoing message:`, error);
+        },
+        setReady: (ready: boolean) => {
+          const session = this.sessions.get(accountId);
+          if (session) {
+            session.isReady = ready;
+            if (ready) {
+              session.resolveReady();
             }
           }
-          continue;
-        }
-
-        try {
-          await this.handleIncomingMessage(accountId, userId, msg, type === 'notify');
-          console.log(`[WA] Message ${messageId} processed successfully`);
-        } catch (error) {
-          console.error(`[WA] Error processing message ${messageId}:`, error);
-        }
+        },
+      },
+      {
+        handleIncomingMessage: this.handleIncomingMessage.bind(this),
+        handleOutgoingMessage: this.handleOutgoingMessage.bind(this),
+        handleGroupIncomingMessage: this.handleGroupIncomingMessage.bind(this),
+        handleGroupOutgoingMessage: this.handleGroupOutgoingMessage.bind(this),
+        handleReaction: this.handleReaction.bind(this),
+        handleGroupUpsert: this.handleGroupUpsert.bind(this),
+        handleGroupUpdate: this.handleGroupUpdate.bind(this),
+        handleGroupParticipantsUpdate: this.handleGroupParticipantsUpdate.bind(this),
+        handleLidMapping: this.handleLidMapping.bind(this),
       }
-    });
+    );
 
-    // Handle message status updates (sent, delivered, read)
-    sock.ev.on('messages.update', async (updates) => {
-      // Skip processing if account is being deleted (prevents foreign key errors)
-      if (this.isAccountDeleting(accountId)) {
-        console.log(`[WA] Skipping messages.update - account ${accountId} is being deleted`);
-        return;
-      }
-
-      console.log(`[WA] messages.update - count: ${updates.length}`);
-      for (const update of updates) {
-        const waMessageId = update.key.id;
-        const newStatus = update.update.status;
-
-        if (newStatus !== undefined && newStatus !== null) {
-          const statusStr = this.mapMessageStatus(newStatus as number);
-          console.log(`[WA] Message ${waMessageId} status: ${newStatus} -> ${statusStr}`);
-
-          try {
-            // Update status in database and get the internal message ID
-            const updatedMsg = await queryOne(
-              `UPDATE messages SET status = $1, updated_at = NOW()
-               WHERE wa_message_id = $2
-               RETURNING id, conversation_id`,
-              [statusStr, waMessageId]
-            );
-
-            if (updatedMsg) {
-              // Emit to frontend with internal message ID
-              const io = getIO();
-              io.to(`user:${userId}`).emit('message:status', {
-                accountId,
-                messageId: updatedMsg.id,
-                waMessageId,
-                conversationId: updatedMsg.conversation_id,
-                status: statusStr,
-              });
-            }
-          } catch (error) {
-            console.error(`[WA] Failed to update message status:`, error);
-          }
-        }
-      }
-    });
-
-    // Handle history sync - this is the main event for getting old messages
-    sock.ev.on('messaging-history.set', async (historyData) => {
-      const { chats, contacts, messages, isLatest, progress, syncType } = historyData as any;
-
-      console.log(`[WA] messaging-history.set:`);
-      console.log(`  - chats: ${chats?.length || 0}`);
-      console.log(`  - contacts: ${contacts?.length || 0}`);
-      console.log(`  - messages: ${messages?.length || 0}`);
-      console.log(`  - isLatest: ${isLatest}`);
-      console.log(`  - progress: ${progress}`);
-      console.log(`  - syncType: ${syncType}`);
-
-      // Process chats from history - extract group chats and fetch metadata
-      if (chats && chats.length > 0) {
-        let groupChatCount = 0;
-        for (const chat of chats) {
-          try {
-            const chatJid = chat.id;
-            if (!chatJid || !isJidGroup(chatJid)) continue;
-
-            // This is a group chat - try to fetch metadata and create group record
-            groupChatCount++;
-            console.log(`[WA][Group] Found group chat in history: ${chatJid}`);
-
-            // Try to get group metadata from socket
-            try {
-              const metadata = await sock.groupMetadata(chatJid);
-              if (metadata) {
-                // Upsert group into database
-                const group = await queryOne(
-                  `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                   ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
-                     name = COALESCE(EXCLUDED.name, groups.name),
-                     description = COALESCE(EXCLUDED.description, groups.description),
-                     owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
-                     participant_count = COALESCE(EXCLUDED.participant_count, groups.participant_count),
-                     is_announce = COALESCE(EXCLUDED.is_announce, groups.is_announce),
-                     is_restrict = COALESCE(EXCLUDED.is_restrict, groups.is_restrict),
-                     updated_at = NOW()
-                   RETURNING *`,
-                  [
-                    accountId,
-                    chatJid,
-                    metadata.subject || chat.name || null,
-                    metadata.desc || null,
-                    metadata.owner || null,
-                    metadata.participants?.length || 0,
-                    metadata.announce || false,
-                    metadata.restrict || false,
-                  ]
-                );
-
-                // Create conversation for this group
-                await queryOne(
-                  `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
-                   VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
-                   ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO UPDATE SET
-                     last_message_at = GREATEST(conversations.last_message_at, EXCLUDED.last_message_at)
-                   RETURNING *`,
-                  [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
-                );
-
-                // Cache the metadata
-                groupMetadataCache.set(accountId, chatJid, metadata as any);
-                console.log(`[WA][Group] Created group from history: ${metadata.subject}`);
-              }
-            } catch (metaError) {
-              // Can't fetch metadata - create minimal group record from chat info
-              console.log(`[WA][Group] Could not fetch metadata for ${chatJid}, creating minimal record`);
-              const group = await queryOne(
-                `INSERT INTO groups (whatsapp_account_id, group_jid, name)
-                 VALUES ($1, $2, $3)
-                 ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
-                   name = COALESCE(EXCLUDED.name, groups.name),
-                   updated_at = NOW()
-                 RETURNING *`,
-                [accountId, chatJid, chat.name || extractGroupId(chatJid)]
-              );
-
-              await queryOne(
-                `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
-                 VALUES ($1, $2, TRUE, NOW())
-                 ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
-                 RETURNING *`,
-                [accountId, group.id]
-              );
-            }
-
-            // Small delay between group metadata fetches
-            await sleep(100);
-          } catch (error) {
-            console.error(`[WA][Group] Error processing group chat from history:`, error);
-          }
-        }
-        console.log(`[WA] Found ${groupChatCount} group chats in history`);
-      }
-
-      // Process contacts from history using Baileys jid helpers
-      if (contacts && contacts.length > 0) {
-        let processedContactCount = 0;
-        for (const contact of contacts) {
-          try {
-            // Skip non-user contacts (groups, broadcasts, etc)
-            if (!contact.id || !isUserJid(contact.id)) continue;
-
-            const waId = extractUserIdFromJid(contact.id);
-            const jidType = getJidType(contact.id);
-            const phoneNumber = jidType === 'pn' ? waId : null;
-
-            await queryOne(
-              `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
-               VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (whatsapp_account_id, wa_id) DO UPDATE SET
-               name = COALESCE(EXCLUDED.name, contacts.name),
-               jid_type = EXCLUDED.jid_type,
-               updated_at = NOW()
-               RETURNING *`,
-              [accountId, waId, phoneNumber, contact.name || contact.notify || null, jidType]
-            );
-            processedContactCount++;
-          } catch (error) {
-            console.error(`[WA] Error processing contact:`, error);
-          }
-        }
-        console.log(`[WA] Processed ${processedContactCount} contacts from history`);
-      }
-
-      // Process messages from history (including groups)
-      if (messages && messages.length > 0) {
-        let processedCount = 0;
-        let groupProcessedCount = 0;
-        for (const msg of messages) {
-          if (!msg.key) continue;
-          const remoteJid = msg.key.remoteJid;
-
-          // Skip status broadcasts
-          if (!remoteJid || isJidBroadcast(remoteJid)) continue;
-
-          try {
-            // Check if message already exists
-            const existingMsg = await queryOne(
-              'SELECT id FROM messages WHERE wa_message_id = $1',
-              [msg.key.id]
-            );
-            if (existingMsg) continue;
-
-            // Handle group messages
-            if (isJidGroup(remoteJid)) {
-              if (msg.key.fromMe) {
-                await this.handleGroupOutgoingMessage(accountId, userId, msg, false);
-              } else {
-                await this.handleGroupIncomingMessage(accountId, userId, msg, false);
-              }
-              groupProcessedCount++;
-              continue;
-            }
-
-            // Handle 1:1 messages
-            if (!isUserJid(remoteJid)) continue;
-
-            if (msg.key.fromMe) {
-              // Outgoing message sent from phone
-              await this.handleOutgoingMessage(accountId, userId, msg, false);
-            } else {
-              // Incoming message from contact
-              await this.handleIncomingMessage(accountId, userId, msg, false);
-            }
-            processedCount++;
-          } catch (error) {
-            // Ignore duplicate errors
-            if (!(error as any)?.message?.includes('duplicate')) {
-              console.error(`[WA] Error processing history message:`, error);
-            }
-          }
-        }
-        console.log(`[WA] Processed ${processedCount} messages + ${groupProcessedCount} group messages from history`);
-      }
-
-      // Notify frontend about sync progress
-      const io = getIO();
-      io.to(`user:${userId}`).emit('sync:progress', {
-        accountId,
-        progress: progress || 100,
-        isLatest,
-        chatsCount: chats?.length || 0,
-        messagesCount: messages?.length || 0,
-      });
-    });
-
-    // Handle chat updates
-    sock.ev.on('chats.upsert', async (chats) => {
-      console.log(`[WA] chats.upsert - count: ${chats.length}`);
-    });
-
-    sock.ev.on('chats.update', async (updates) => {
-      console.log(`[WA] chats.update - count: ${updates.length}`);
-    });
-
-    // Handle contacts using Baileys jid helpers
-    sock.ev.on('contacts.upsert', async (contacts) => {
-      // Skip processing if account is being deleted (prevents foreign key errors)
-      if (this.isAccountDeleting(accountId)) {
-        console.log(`[WA] Skipping contacts.upsert - account ${accountId} is being deleted`);
-        return;
-      }
-
-      console.log(`[WA] contacts.upsert - count: ${contacts.length}`);
-
-      for (const contact of contacts) {
-        try {
-          // Skip non-user contacts (groups, broadcasts, etc)
-          if (!contact.id || !isUserJid(contact.id)) continue;
-
-          const waId = extractUserIdFromJid(contact.id);
-          const jidType = getJidType(contact.id);
-          const phoneNumber = jidType === 'pn' ? waId : null;
-
-          await queryOne(
-            `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (whatsapp_account_id, wa_id) DO UPDATE SET
-             name = COALESCE(EXCLUDED.name, contacts.name),
-             jid_type = EXCLUDED.jid_type,
-             updated_at = NOW()
-             RETURNING *`,
-            [accountId, waId, phoneNumber, contact.name || contact.notify || null, jidType]
-          );
-        } catch (error) {
-          console.error(`[WA] Error upserting contact:`, error);
-        }
-      }
-    });
-
-    sock.ev.on('contacts.update', async (updates) => {
-      console.log(`[WA] contacts.update - count: ${updates.length}`);
-    });
-
-    // ============ REACTION EVENT HANDLER ============
-    sock.ev.on('messages.reaction', async (reactions) => {
-      // Skip processing if account is being deleted
-      if (this.isAccountDeleting(accountId)) {
-        console.log(`[WA] Skipping messages.reaction - account ${accountId} is being deleted`);
-        return;
-      }
-
-      console.log(`[WA] messages.reaction - count: ${reactions.length}`);
-
-      for (const reaction of reactions) {
-        try {
-          const targetMsgId = reaction.key.id;
-          const emoji = reaction.reaction?.text || '';
-          const senderJid = reaction.reaction?.key?.participant || reaction.key.remoteJid;
-          const senderId = senderJid ? extractUserIdFromJid(senderJid) : 'unknown';
-          const timestamp = Date.now();
-
-          console.log(`[WA] Reaction: ${emoji} on message ${targetMsgId} from ${senderId}`);
-
-          // Find the message by wa_message_id
-          const message = await queryOne<{ id: string; reactions: any[] }>(
-            `SELECT id, reactions FROM messages WHERE wa_message_id = $1`,
-            [targetMsgId]
-          );
-
-          if (!message) {
-            console.log(`[WA] Message not found for reaction: ${targetMsgId}`);
-            continue;
-          }
-
-          let reactions = message.reactions || [];
-
-          if (emoji === '') {
-            // Remove reaction from this sender
-            reactions = reactions.filter((r: any) => r.sender !== senderId);
-          } else {
-            // Remove any existing reaction from this sender, then add new one
-            reactions = reactions.filter((r: any) => r.sender !== senderId);
-            reactions.push({ emoji, sender: senderId, timestamp });
-          }
-
-          // Update message with new reactions
-          await execute(
-            `UPDATE messages SET reactions = $1::jsonb, updated_at = NOW() WHERE id = $2`,
-            [JSON.stringify(reactions), message.id]
-          );
-
-          // Emit to frontend
-          const io = getIO();
-          io.to(`user:${userId}`).emit('message:reaction', {
-            accountId,
-            messageId: message.id,
-            waMessageId: targetMsgId,
-            reactions,
-          });
-
-          console.log(`[WA] Updated reactions on message ${message.id}: ${reactions.length} total`);
-        } catch (error) {
-          console.error(`[WA] Error processing reaction:`, error);
-        }
-      }
-    });
-
-    // ============ GROUP EVENT HANDLERS ============
-
-    // Handle new groups discovered (full metadata)
-    sock.ev.on('groups.upsert', async (groupMetadatas) => {
-      // Skip processing if account is being deleted (prevents foreign key errors)
-      if (this.isAccountDeleting(accountId)) {
-        console.log(`[WA] Skipping groups.upsert - account ${accountId} is being deleted`);
-        return;
-      }
-
-      console.log(`[WA] groups.upsert - count: ${groupMetadatas.length}`);
-
-      for (const metadata of groupMetadatas) {
-        try {
-          const groupJid = metadata.id;
-          if (!groupJid || !isJidGroup(groupJid)) continue;
-
-          console.log(`[WA][Group] New group discovered: ${metadata.subject} (${extractGroupId(groupJid)})`);
-
-          // Upsert group into database
-          const group = await queryOne(
-            `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
-               name = COALESCE(EXCLUDED.name, groups.name),
-               description = COALESCE(EXCLUDED.description, groups.description),
-               owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
-               participant_count = COALESCE(EXCLUDED.participant_count, groups.participant_count),
-               is_announce = COALESCE(EXCLUDED.is_announce, groups.is_announce),
-               is_restrict = COALESCE(EXCLUDED.is_restrict, groups.is_restrict),
-               updated_at = NOW()
-             RETURNING *`,
-            [
-              accountId,
-              groupJid,
-              metadata.subject || null,
-              metadata.desc || null,
-              metadata.owner || null,
-              metadata.participants?.length || 0,
-              metadata.announce || false,
-              metadata.restrict || false,
-            ]
-          );
-
-          // Upsert participants
-          if (metadata.participants && metadata.participants.length > 0) {
-            for (const participant of metadata.participants) {
-              const pJid = typeof participant === 'string' ? participant : participant.id;
-              const isAdmin = typeof participant === 'object' && (participant.admin === 'admin' || participant.admin === 'superadmin');
-              const isSuperAdmin = typeof participant === 'object' && participant.admin === 'superadmin';
-
-              await execute(
-                `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (group_id, participant_jid) DO UPDATE SET
-                   is_admin = EXCLUDED.is_admin,
-                   is_superadmin = EXCLUDED.is_superadmin,
-                   updated_at = NOW()`,
-                [group.id, pJid, isAdmin, isSuperAdmin]
-              );
-            }
-          }
-
-          // Create conversation for this group if doesn't exist
-          await queryOne(
-            `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
-             VALUES ($1, $2, TRUE, NOW())
-             ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
-             RETURNING *`,
-            [accountId, group.id]
-          );
-
-          // Update cache
-          groupMetadataCache.set(accountId, groupJid, metadata as any);
-
-          console.log(`[WA][Group] Upserted group ${metadata.subject} with ${metadata.participants?.length || 0} participants`);
-        } catch (error) {
-          console.error(`[WA][Group] Error upserting group:`, error);
-        }
-      }
-    });
-
-    // Handle group metadata updates (name, description, profile pic, etc.)
-    sock.ev.on('groups.update', async (updates) => {
-      console.log(`[WA] groups.update - count: ${updates.length}`);
-
-      for (const update of updates) {
-        try {
-          const groupJid = update.id;
-          if (!groupJid) continue;
-
-          console.log(`[WA][Group] Metadata update for ${extractGroupId(groupJid)}:`, {
-            subject: update.subject,
-            desc: update.desc?.slice(0, 50),
-            announce: update.announce,
-            restrict: update.restrict,
-          });
-
-          // Update group in database
-          await execute(
-            `UPDATE groups
-             SET name = COALESCE($1, name),
-                 description = COALESCE($2, description),
-                 is_announce = COALESCE($3, is_announce),
-                 is_restrict = COALESCE($4, is_restrict),
-                 updated_at = NOW()
-             WHERE whatsapp_account_id = $5 AND group_jid = $6`,
-            [
-              update.subject || null,
-              update.desc || null,
-              update.announce !== undefined ? update.announce : null,
-              update.restrict !== undefined ? update.restrict : null,
-              accountId,
-              groupJid,
-            ]
-          );
-
-          // Update cache
-          groupMetadataCache.handleGroupUpdate(accountId, groupJid, {
-            subject: update.subject,
-            desc: update.desc,
-            announce: update.announce,
-            restrict: update.restrict,
-          });
-
-          // Emit to frontend
-          const io = getIO();
-          io.to(`user:${userId}`).emit('group:update', {
-            accountId,
-            groupJid,
-            updates: {
-              name: update.subject,
-              description: update.desc,
-              isAnnounce: update.announce,
-              isRestrict: update.restrict,
-            },
-          });
-        } catch (error) {
-          console.error(`[WA][Group] Error updating group metadata:`, error);
-        }
-      }
-    });
-
-    // Handle group participant updates (join, leave, promote, demote)
-    sock.ev.on('group-participants.update', async (update) => {
-      console.log(`[WA] group-participants.update:`, {
-        groupJid: update.id,
-        action: update.action,
-        participants: update.participants?.length,
-      });
-
-      try {
-        const groupJid = update.id;
-        const action = update.action;
-
-        // Extract participant JIDs - Baileys may return objects or strings depending on version
-        const rawParticipants = update.participants || [];
-        const participants: string[] = rawParticipants.map((p: any) =>
-          typeof p === 'string' ? p : (p.id || p.jid || String(p))
-        );
-
-        // Skip 'modify' action (not a standard participant change)
-        if (action !== 'add' && action !== 'remove' && action !== 'promote' && action !== 'demote') {
-          console.log(`[WA][Group] Skipping action: ${action}`);
-          return;
-        }
-
-        // Add account-specific delay to prevent synchronized behavior
-        const delay = getAccountSpecificDelay(accountId, 100, 1000);
-        await sleep(delay);
-
-        // Get the group record
-        const group = await queryOne(
-          'SELECT id FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
-          [accountId, groupJid]
-        );
-
-        if (!group) {
-          console.log(`[WA][Group] Group not found in DB for participant update: ${groupJid}`);
-          return;
-        }
-
-        // Update participants in database
-        for (const participantJid of participants) {
-          switch (action) {
-            case 'add':
-              await queryOne(
-                `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
-                 VALUES ($1, $2, FALSE, FALSE)
-                 ON CONFLICT (group_id, participant_jid) DO NOTHING
-                 RETURNING *`,
-                [group.id, participantJid]
-              );
-              break;
-
-            case 'remove':
-              await execute(
-                `DELETE FROM group_participants WHERE group_id = $1 AND participant_jid = $2`,
-                [group.id, participantJid]
-              );
-              break;
-
-            case 'promote':
-              await execute(
-                `UPDATE group_participants SET is_admin = TRUE, updated_at = NOW()
-                 WHERE group_id = $1 AND participant_jid = $2`,
-                [group.id, participantJid]
-              );
-              break;
-
-            case 'demote':
-              await execute(
-                `UPDATE group_participants SET is_admin = FALSE, updated_at = NOW()
-                 WHERE group_id = $1 AND participant_jid = $2`,
-                [group.id, participantJid]
-              );
-              break;
-          }
-        }
-
-        // Update participant count
-        const countResult = await queryOne(
-          `SELECT COUNT(*) as count FROM group_participants WHERE group_id = $1`,
-          [group.id]
-        );
-        await execute(
-          `UPDATE groups SET participant_count = $1, updated_at = NOW() WHERE id = $2`,
-          [countResult?.count || 0, group.id]
-        );
-
-        // Update cache (only for standard actions)
-        groupMetadataCache.handleParticipantUpdate(accountId, groupJid, participants, action);
-
-        console.log(`[WA][Group] Processed ${action} for ${participants.length} participants in ${extractGroupId(groupJid)}`);
-
-        // Emit to frontend
-        const io = getIO();
-        io.to(`user:${userId}`).emit('group:participants', {
-          accountId,
-          groupJid,
-          action,
-          participants,
-        });
-      } catch (error) {
-        console.error(`[WA][Group] Error updating participants:`, error);
-      }
-    });
-
-    // Handle LID-to-PN mapping updates (Baileys v7 feature)
-    // This event provides mappings between LID and phone number formats
-    sock.ev.on('lid-mapping.update', async (mappings) => {
-      console.log(`[WA] lid-mapping.update - mappings received:`, Object.keys(mappings).length);
-
-      for (const [lid, pn] of Object.entries(mappings)) {
-        try {
-          const lidClean = lid.replace('@lid', '');
-          const pnClean = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : pn;
-
-          // Store the LID/PN mapping in our database for future lookups
-          await execute(
-            `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
-            [accountId, lidClean, pnClean]
-          );
-
-          // Check if we have duplicate contacts (one with LID, one with PN)
-          const lidContact = await queryOne(
-            `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
-            [accountId, lidClean]
-          );
-          const pnContact = await queryOne(
-            `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
-            [accountId, pnClean]
-          );
-
-          if (lidContact && pnContact && lidContact.id !== pnContact.id) {
-            // We have duplicates! Merge them (keep the PN contact, merge LID conversations)
-            console.log(`[WA] Merging duplicate contacts: LID ${lidClean} -> PN ${pnClean}`);
-
-            // Update LID contact's conversations to point to PN contact
-            await execute(
-              `UPDATE conversations SET contact_id = $1, updated_at = NOW() WHERE contact_id = $2`,
-              [pnContact.id, lidContact.id]
-            );
-
-            // Update any orders linked to LID contact
-            await execute(
-              `UPDATE contact_orders SET contact_id = $1, updated_at = NOW() WHERE contact_id = $2`,
-              [pnContact.id, lidContact.id]
-            );
-
-            // Delete the LID contact (conversations already moved)
-            await execute(`DELETE FROM contacts WHERE id = $1`, [lidContact.id]);
-
-            console.log(`[WA] Merged contact ${lidContact.id} (LID) into ${pnContact.id} (PN)`);
-          } else if (lidContact && !pnContact) {
-            // Only LID contact exists - update with PN info
-            await execute(
-              `UPDATE contacts SET phone_number = $1, updated_at = NOW()
-               WHERE id = $2`,
-              [pnClean, lidContact.id]
-            );
-            console.log(`[WA] Updated LID contact ${lidContact.id} with phone: ${pnClean}`);
-          }
-
-          console.log(`[WA] Stored LID->PN mapping: ${lidClean} -> ${pnClean}`);
-        } catch (error) {
-          console.error(`[WA] Error processing LID mapping:`, error);
-        }
-      }
-    });
-
-    console.log(`[WA] Session ${accountId} event handlers registered`);
+    console.log(`[WA] Session ${accountId} buffered event processing setup complete`);
   }
 
   private mapMessageStatus(status: number): string {
@@ -2858,6 +2029,321 @@ class SessionManager {
           group_jid: group.group_jid,
         },
       });
+    }
+  }
+
+  // ============ BUFFERED EVENT HANDLERS ============
+  // These handlers are called by setupBufferedEventProcessing
+
+  /**
+   * Handle message reactions
+   */
+  private async handleReaction(accountId: string, userId: string, reaction: any): Promise<void> {
+    if (this.isAccountDeleting(accountId)) return;
+
+    const targetMsgId = reaction.key.id;
+    const emoji = reaction.reaction?.text || '';
+    const senderJid = reaction.reaction?.key?.participant || reaction.key.remoteJid;
+    const senderId = senderJid ? extractUserIdFromJid(senderJid) : 'unknown';
+    const timestamp = Date.now();
+
+    console.log(`[WA] Reaction: ${emoji} on message ${targetMsgId} from ${senderId}`);
+
+    const message = await queryOne<{ id: string; reactions: any[] }>(
+      `SELECT id, reactions FROM messages WHERE wa_message_id = $1`,
+      [targetMsgId]
+    );
+
+    if (!message) {
+      console.log(`[WA] Message not found for reaction: ${targetMsgId}`);
+      return;
+    }
+
+    let reactions = message.reactions || [];
+
+    if (emoji === '') {
+      reactions = reactions.filter((r: any) => r.sender !== senderId);
+    } else {
+      reactions = reactions.filter((r: any) => r.sender !== senderId);
+      reactions.push({ emoji, sender: senderId, timestamp });
+    }
+
+    await execute(
+      `UPDATE messages SET reactions = $1::jsonb, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(reactions), message.id]
+    );
+
+    const io = getIO();
+    io.to(`user:${userId}`).emit('message:reaction', {
+      accountId,
+      messageId: message.id,
+      waMessageId: targetMsgId,
+      reactions,
+    });
+
+    console.log(`[WA] Updated reactions on message ${message.id}: ${reactions.length} total`);
+  }
+
+  /**
+   * Handle group upsert (new groups discovered)
+   */
+  private async handleGroupUpsert(accountId: string, userId: string, metadata: any): Promise<void> {
+    if (this.isAccountDeleting(accountId)) return;
+
+    const groupJid = metadata.id;
+    if (!groupJid || !isJidGroup(groupJid)) return;
+
+    console.log(`[WA][Group] New group discovered: ${metadata.subject} (${extractGroupId(groupJid)})`);
+
+    const group = await queryOne(
+      `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+         name = COALESCE(EXCLUDED.name, groups.name),
+         description = COALESCE(EXCLUDED.description, groups.description),
+         owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
+         participant_count = COALESCE(EXCLUDED.participant_count, groups.participant_count),
+         is_announce = COALESCE(EXCLUDED.is_announce, groups.is_announce),
+         is_restrict = COALESCE(EXCLUDED.is_restrict, groups.is_restrict),
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        accountId,
+        groupJid,
+        metadata.subject || null,
+        metadata.desc || null,
+        metadata.owner || null,
+        metadata.participants?.length || 0,
+        metadata.announce || false,
+        metadata.restrict || false,
+      ]
+    );
+
+    if (metadata.participants && metadata.participants.length > 0) {
+      for (const participant of metadata.participants) {
+        const pJid = typeof participant === 'string' ? participant : participant.id;
+        const isAdmin = typeof participant === 'object' && (participant.admin === 'admin' || participant.admin === 'superadmin');
+        const isSuperAdmin = typeof participant === 'object' && participant.admin === 'superadmin';
+
+        await execute(
+          `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (group_id, participant_jid) DO UPDATE SET
+             is_admin = EXCLUDED.is_admin,
+             is_superadmin = EXCLUDED.is_superadmin,
+             updated_at = NOW()`,
+          [group.id, pJid, isAdmin, isSuperAdmin]
+        );
+      }
+    }
+
+    await queryOne(
+      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+       VALUES ($1, $2, TRUE, NOW())
+       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
+       RETURNING *`,
+      [accountId, group.id]
+    );
+
+    groupMetadataCache.set(accountId, groupJid, metadata as any);
+    console.log(`[WA][Group] Upserted group ${metadata.subject} with ${metadata.participants?.length || 0} participants`);
+  }
+
+  /**
+   * Handle group metadata updates
+   */
+  private async handleGroupUpdate(accountId: string, userId: string, update: any): Promise<void> {
+    const groupJid = update.id;
+    if (!groupJid) return;
+
+    console.log(`[WA][Group] Metadata update for ${extractGroupId(groupJid)}:`, {
+      subject: update.subject,
+      desc: update.desc?.slice(0, 50),
+    });
+
+    await execute(
+      `UPDATE groups
+       SET name = COALESCE($1, name),
+           description = COALESCE($2, description),
+           is_announce = COALESCE($3, is_announce),
+           is_restrict = COALESCE($4, is_restrict),
+           updated_at = NOW()
+       WHERE whatsapp_account_id = $5 AND group_jid = $6`,
+      [
+        update.subject || null,
+        update.desc || null,
+        update.announce !== undefined ? update.announce : null,
+        update.restrict !== undefined ? update.restrict : null,
+        accountId,
+        groupJid,
+      ]
+    );
+
+    groupMetadataCache.handleGroupUpdate(accountId, groupJid, {
+      subject: update.subject,
+      desc: update.desc,
+      announce: update.announce,
+      restrict: update.restrict,
+    });
+
+    const io = getIO();
+    io.to(`user:${userId}`).emit('group:update', {
+      accountId,
+      groupJid,
+      updates: {
+        name: update.subject,
+        description: update.desc,
+        isAnnounce: update.announce,
+        isRestrict: update.restrict,
+      },
+    });
+  }
+
+  /**
+   * Handle group participant updates (join, leave, promote, demote)
+   */
+  private async handleGroupParticipantsUpdate(accountId: string, userId: string, update: any): Promise<void> {
+    console.log(`[WA] group-participants.update:`, {
+      groupJid: update.id,
+      action: update.action,
+      participants: update.participants?.length,
+    });
+
+    const groupJid = update.id;
+    const action = update.action;
+
+    const rawParticipants = update.participants || [];
+    const participants: string[] = rawParticipants.map((p: any) =>
+      typeof p === 'string' ? p : (p.id || p.jid || String(p))
+    );
+
+    if (action !== 'add' && action !== 'remove' && action !== 'promote' && action !== 'demote') {
+      console.log(`[WA][Group] Skipping action: ${action}`);
+      return;
+    }
+
+    const delay = getAccountSpecificDelay(accountId, 100, 1000);
+    await sleep(delay);
+
+    const group = await queryOne(
+      'SELECT id FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      [accountId, groupJid]
+    );
+
+    if (!group) {
+      console.log(`[WA][Group] Group not found in DB for participant update: ${groupJid}`);
+      return;
+    }
+
+    for (const participantJid of participants) {
+      switch (action) {
+        case 'add':
+          await queryOne(
+            `INSERT INTO group_participants (group_id, participant_jid, is_admin, is_superadmin)
+             VALUES ($1, $2, FALSE, FALSE)
+             ON CONFLICT (group_id, participant_jid) DO NOTHING
+             RETURNING *`,
+            [group.id, participantJid]
+          );
+          break;
+        case 'remove':
+          await execute(
+            `DELETE FROM group_participants WHERE group_id = $1 AND participant_jid = $2`,
+            [group.id, participantJid]
+          );
+          break;
+        case 'promote':
+          await execute(
+            `UPDATE group_participants SET is_admin = TRUE, updated_at = NOW()
+             WHERE group_id = $1 AND participant_jid = $2`,
+            [group.id, participantJid]
+          );
+          break;
+        case 'demote':
+          await execute(
+            `UPDATE group_participants SET is_admin = FALSE, updated_at = NOW()
+             WHERE group_id = $1 AND participant_jid = $2`,
+            [group.id, participantJid]
+          );
+          break;
+      }
+    }
+
+    const countResult = await queryOne(
+      `SELECT COUNT(*) as count FROM group_participants WHERE group_id = $1`,
+      [group.id]
+    );
+    await execute(
+      `UPDATE groups SET participant_count = $1, updated_at = NOW() WHERE id = $2`,
+      [countResult?.count || 0, group.id]
+    );
+
+    groupMetadataCache.handleParticipantUpdate(accountId, groupJid, participants, action);
+    console.log(`[WA][Group] Processed ${action} for ${participants.length} participants in ${extractGroupId(groupJid)}`);
+
+    const io = getIO();
+    io.to(`user:${userId}`).emit('group:participants', {
+      accountId,
+      groupJid,
+      action,
+      participants,
+    });
+  }
+
+  /**
+   * Handle LID-to-PN mapping updates
+   */
+  private async handleLidMapping(accountId: string, mappings: Record<string, any>): Promise<void> {
+    console.log(`[WA] lid-mapping.update - mappings received:`, Object.keys(mappings).length);
+
+    for (const [lid, pn] of Object.entries(mappings)) {
+      try {
+        const lidClean = lid.replace('@lid', '');
+        const pnClean = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : pn;
+
+        await execute(
+          `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+          [accountId, lidClean, pnClean]
+        );
+
+        const lidContact = await queryOne(
+          `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+          [accountId, lidClean]
+        );
+        const pnContact = await queryOne(
+          `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+          [accountId, pnClean]
+        );
+
+        if (lidContact && pnContact && lidContact.id !== pnContact.id) {
+          console.log(`[WA] Merging duplicate contacts: LID ${lidClean} -> PN ${pnClean}`);
+
+          await execute(
+            `UPDATE conversations SET contact_id = $1, updated_at = NOW() WHERE contact_id = $2`,
+            [pnContact.id, lidContact.id]
+          );
+
+          await execute(
+            `UPDATE contact_orders SET contact_id = $1, updated_at = NOW() WHERE contact_id = $2`,
+            [pnContact.id, lidContact.id]
+          );
+
+          await execute(`DELETE FROM contacts WHERE id = $1`, [lidContact.id]);
+          console.log(`[WA] Merged contact ${lidContact.id} (LID) into ${pnContact.id} (PN)`);
+        } else if (lidContact && !pnContact) {
+          await execute(
+            `UPDATE contacts SET phone_number = $1, updated_at = NOW() WHERE id = $2`,
+            [pnClean, lidContact.id]
+          );
+          console.log(`[WA] Updated LID contact ${lidContact.id} with phone: ${pnClean}`);
+        }
+
+        console.log(`[WA] Stored LID->PN mapping: ${lidClean} -> ${pnClean}`);
+      } catch (error) {
+        console.error(`[WA] Error processing LID mapping:`, error);
+      }
     }
   }
 
