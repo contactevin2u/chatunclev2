@@ -225,7 +225,7 @@ export default function InboxPage() {
 
   // Socket event handlers - use refs for stable callbacks (no re-registration on state changes)
   const handleNewMessage = useCallback((data: any) => {
-    console.log('[UI] New message received:', data);
+    console.log('[UI] New message received:', data.conversationId, data.message?.id);
 
     // Use ref to avoid dependency on conversationsList state
     const currentConversations = conversationsListRef.current;
@@ -253,20 +253,30 @@ export default function InboxPage() {
     const effectiveId = activeConversationIdRef.current || selectedConversationRef.current?.id;
     const isCurrentConversation = effectiveId === data.conversationId;
 
+    console.log('[UI] Message check: effectiveId=', effectiveId, 'dataConvId=', data.conversationId, 'isCurrentConv=', isCurrentConversation);
+
     // Determine if this conversation is currently being viewed
     // For unified groups, check if the parent unified group is selected
     const isViewingUnifiedGroup = unifiedGroupConv &&
       selectedConversationRef.current?.id === unifiedGroupConv.id;
 
     if (isCurrentConversation) {
+      // Capture effectiveId for the closure
+      const currentEffectiveId = effectiveId;
       setMessagesList((prev) => {
-        // Check if message already exists by both database ID AND WhatsApp message ID
+        // STRICT duplicate check: by ID, wa_message_id, AND content+timestamp
         const isDuplicate = prev.some(m =>
           m.id === data.message.id ||
-          (data.message.wa_message_id && m.wa_message_id === data.message.wa_message_id)
+          (data.message.wa_message_id && m.wa_message_id === data.message.wa_message_id) ||
+          (m.content === data.message.content && m.created_at === data.message.created_at)
         );
         if (isDuplicate) {
           console.log('[UI] Duplicate message ignored:', data.message.id);
+          return prev;
+        }
+        // Also verify conversation_id matches to prevent cross-conversation pollution
+        if (data.message.conversation_id && data.message.conversation_id !== currentEffectiveId) {
+          console.log('[UI] Message for different conversation ignored:', data.message.conversation_id, 'vs', currentEffectiveId);
           return prev;
         }
         return [...prev, data.message];
