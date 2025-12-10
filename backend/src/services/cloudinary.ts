@@ -122,12 +122,19 @@ export async function uploadVideo(buffer: Buffer, messageId?: string): Promise<s
 
 /**
  * Upload document to Cloudinary
+ * For documents, we use the original filename to preserve it in the URL
  */
-export async function uploadDocument(buffer: Buffer, filename?: string): Promise<string | null> {
+export async function uploadDocument(buffer: Buffer, originalFilename?: string, messageId?: string): Promise<string | null> {
+  // Use original filename for the public_id so the download has the correct name
+  // Sanitize filename to remove special characters that might cause issues
+  const sanitizedName = originalFilename
+    ? originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    : `doc_${messageId || Date.now()}`;
+
   return uploadMedia(buffer, {
     folder: 'chatuncle/documents',
     resourceType: 'raw',
-    publicId: filename,
+    publicId: sanitizedName,
   });
 }
 

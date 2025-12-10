@@ -788,7 +788,8 @@ class SessionManager {
           const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (docBuffer) {
             if (isCloudinaryConfigured()) {
-              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              // Pass original filename so download preserves the name
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), content, msgKey.id || undefined);
               if (cloudUrl) {
                 mediaUrl = cloudUrl;
                 console.log(`[WA] Uploaded document to Cloudinary: ${cloudUrl}`);
@@ -1187,7 +1188,8 @@ class SessionManager {
           const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (docBuffer) {
             if (isCloudinaryConfigured()) {
-              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              // Pass original filename so download preserves the name
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), content, msgKey.id || undefined);
               if (cloudUrl) {
                 mediaUrl = cloudUrl;
                 console.log(`[WA][History] Uploaded document to Cloudinary: ${cloudUrl}`);
@@ -1896,7 +1898,8 @@ class SessionManager {
           const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (docBuffer) {
             if (isCloudinaryConfigured()) {
-              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              // Pass original filename so download preserves the name
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), content, msgKey.id || undefined);
               if (cloudUrl) {
                 mediaUrl = cloudUrl;
                 console.log(`[WA][Group] Uploaded document to Cloudinary: ${cloudUrl}`);
@@ -2236,7 +2239,8 @@ class SessionManager {
           const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
           if (docBuffer) {
             if (isCloudinaryConfigured()) {
-              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              // Pass original filename so download preserves the name
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), content, msgKey.id || undefined);
               if (cloudUrl) {
                 mediaUrl = cloudUrl;
                 console.log(`[WA][Group] Uploaded outgoing document to Cloudinary: ${cloudUrl}`);
