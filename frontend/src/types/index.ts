@@ -119,6 +119,11 @@ export interface Message {
   // Edited message tracking
   is_edited?: boolean;
   edited_at?: string | null;
+  // Quoted message (reply) fields
+  quoted_message_id?: string | null;
+  quoted_wa_message_id?: string | null;
+  quoted_content?: string | null;
+  quoted_sender_name?: string | null;
 }
 
 export interface Template {

@@ -366,6 +366,28 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 </p>
               )}
 
+              {/* Quoted message (reply preview) */}
+              {message.quoted_content && (
+                <div className={clsx(
+                  'mb-2 p-2 rounded-lg border-l-4 text-xs',
+                  isSent
+                    ? 'bg-emerald-50 border-emerald-400'
+                    : 'bg-gray-100 border-gray-400'
+                )}>
+                  {message.quoted_sender_name && (
+                    <p className={clsx(
+                      'font-medium mb-0.5',
+                      isSent ? 'text-emerald-700' : 'text-gray-700'
+                    )}>
+                      {message.quoted_sender_name}
+                    </p>
+                  )}
+                  <p className="text-gray-600 line-clamp-2">
+                    {message.quoted_content}
+                  </p>
+                </div>
+              )}
+
               {/* Media indicator */}
               {message.content_type !== 'text' && (
                 <div className="flex items-center space-x-1 text-gray-500 mb-1">
