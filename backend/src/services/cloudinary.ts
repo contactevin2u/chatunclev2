@@ -152,6 +152,9 @@ export async function uploadDocument(buffer: Buffer, originalFilename?: string, 
           // Don't let Cloudinary modify the filename
           use_filename: false,
           unique_filename: false,
+          // Ensure public access for downloads
+          access_mode: 'public',
+          type: 'upload', // Explicitly public upload type
         },
         (error, result) => {
           if (error) reject(error);
