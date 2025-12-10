@@ -176,6 +176,36 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
 
   // Handle paste event for images
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    console.log('[MessageInput] Paste event triggered');
+
+    // First, check clipboardData.files (for screenshots and direct file pastes)
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      for (const file of Array.from(files)) {
+        if (file.type.startsWith('image/')) {
+          e.preventDefault();
+          console.log('[MessageInput] Found image in files:', file.type, file.size);
+
+          try {
+            const jpegBlob = await convertToJpeg(file);
+            const jpegFile = new File([jpegBlob], `pasted-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            const preview = URL.createObjectURL(jpegFile);
+            setAttachedMedia({
+              file: jpegFile,
+              preview,
+              type: 'image',
+            });
+            console.log('[MessageInput] Image pasted and converted to JPEG:', jpegFile.size, 'bytes');
+          } catch (error) {
+            console.error('[MessageInput] Failed to process pasted image:', error);
+            alert('Failed to process pasted image');
+          }
+          return;
+        }
+      }
+    }
+
+    // Fallback: check clipboardData.items (for copied images from web pages)
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -184,26 +214,23 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         e.preventDefault();
         const blob = item.getAsFile();
         if (!blob) continue;
+        console.log('[MessageInput] Found image in items:', item.type);
 
         try {
-          // Convert to JPEG
           const jpegBlob = await convertToJpeg(blob);
           const file = new File([jpegBlob], `pasted-image-${Date.now()}.jpg`, { type: 'image/jpeg' });
-
-          // Create preview and set as attachment
           const preview = URL.createObjectURL(file);
           setAttachedMedia({
             file,
             preview,
             type: 'image',
           });
-
           console.log('[MessageInput] Image pasted and converted to JPEG:', file.size, 'bytes');
         } catch (error) {
           console.error('[MessageInput] Failed to process pasted image:', error);
           alert('Failed to process pasted image');
         }
-        return; // Only process first image
+        return;
       }
     }
   }, [convertToJpeg]);
