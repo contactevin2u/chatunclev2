@@ -145,6 +145,54 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Bulk update incognito mode for all user's accounts
+router.patch('/bulk/incognito', async (req: Request, res: Response) => {
+  try {
+    const { incognitoMode } = req.body;
+
+    if (typeof incognitoMode !== 'boolean') {
+      res.status(400).json({ error: 'incognitoMode must be a boolean' });
+      return;
+    }
+
+    // Update all accounts owned by this user
+    await execute(
+      `UPDATE whatsapp_accounts SET incognito_mode = $1, updated_at = NOW() WHERE user_id = $2`,
+      [incognitoMode, req.user!.userId]
+    );
+
+    // Get updated accounts
+    const accounts = await query<WhatsAppAccount>(
+      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
+       FROM whatsapp_accounts WHERE user_id = $1`,
+      [req.user!.userId]
+    );
+
+    console.log(`[Accounts] Bulk incognito mode set to ${incognitoMode} for user ${req.user!.userId} (${accounts.length} accounts)`);
+
+    res.json({ success: true, incognitoMode, accountsUpdated: accounts.length });
+  } catch (error) {
+    console.error('Bulk incognito update error:', error);
+    res.status(500).json({ error: 'Failed to update incognito mode' });
+  }
+});
+
+// Get incognito status for user's accounts
+router.get('/bulk/incognito', async (req: Request, res: Response) => {
+  try {
+    // Check if ANY account has incognito mode on
+    const result = await queryOne<{ any_incognito: boolean }>(
+      `SELECT bool_or(incognito_mode) as any_incognito FROM whatsapp_accounts WHERE user_id = $1`,
+      [req.user!.userId]
+    );
+
+    res.json({ incognitoMode: result?.any_incognito || false });
+  } catch (error) {
+    console.error('Get incognito status error:', error);
+    res.status(500).json({ error: 'Failed to get incognito status' });
+  }
+});
+
 // Disconnect and remove account
 router.delete('/:id', async (req: Request, res: Response) => {
   try {

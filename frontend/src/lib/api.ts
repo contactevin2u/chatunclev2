@@ -595,6 +595,17 @@ export const accountSettings = {
 
   getAntiBanStats: (token: string, id: string) =>
     request<{ stats: any; config: any; recommendations: string[] }>(`/api/accounts/${id}/anti-ban-stats`, { token }),
+
+  // Bulk incognito mode for all accounts
+  getIncognitoStatus: (token: string) =>
+    request<{ incognitoMode: boolean }>('/api/accounts/bulk/incognito', { token }),
+
+  setIncognitoMode: (token: string, incognitoMode: boolean) =>
+    request<{ success: boolean; incognitoMode: boolean; accountsUpdated: number }>('/api/accounts/bulk/incognito', {
+      method: 'PATCH',
+      body: { incognitoMode },
+      token,
+    }),
 };
 
 // Contacts (extended with import/export)

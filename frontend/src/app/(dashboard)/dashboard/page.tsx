@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
-import { conversations as conversationsApi, messages as messagesApi, labels as labelsApi, contacts as contactsApi } from '@/lib/api';
+import { conversations as conversationsApi, messages as messagesApi, labels as labelsApi, contacts as contactsApi, accountSettings } from '@/lib/api';
 import { Conversation, Message, Label, GroupAccount } from '@/types';
 import ConversationList from '@/components/chat/ConversationList';
 import MessageThread from '@/components/chat/MessageThread';
 import MessageInput from '@/components/chat/MessageInput';
 import ContextPanel from '@/components/chat/ContextPanel';
-import { MessageSquare, RefreshCw, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { MessageSquare, RefreshCw, Tag, Plus, X, Check, Edit2, User, Search, Filter, ArrowLeft, Users, ChevronDown, PanelRightOpen, PanelRightClose, EyeOff, Eye } from 'lucide-react';
 import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
 import OrderOpsToast from '@/components/ui/OrderOpsToast';
@@ -44,6 +44,8 @@ export default function InboxPage() {
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [showPenguinToast, setShowPenguinToast] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [incognitoMode, setIncognitoMode] = useState(false);
+  const [incognitoLoading, setIncognitoLoading] = useState(false);
   const messageCountRef = useRef(0);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
@@ -59,6 +61,28 @@ export default function InboxPage() {
     if (!token) return;
     labelsApi.list(token).then(res => setAllLabels(res.labels || [])).catch(console.error);
   }, [token]);
+
+  // Load incognito status on mount
+  useEffect(() => {
+    if (!token) return;
+    accountSettings.getIncognitoStatus(token)
+      .then(res => setIncognitoMode(res.incognitoMode))
+      .catch(console.error);
+  }, [token]);
+
+  // Toggle incognito mode
+  const toggleIncognitoMode = async () => {
+    if (!token || incognitoLoading) return;
+    setIncognitoLoading(true);
+    try {
+      const res = await accountSettings.setIncognitoMode(token, !incognitoMode);
+      setIncognitoMode(res.incognitoMode);
+    } catch (error) {
+      console.error('Failed to toggle incognito mode:', error);
+    } finally {
+      setIncognitoLoading(false);
+    }
+  };
 
   // Get contact labels for selected conversation
   const getContactLabels = (): Label[] => {
@@ -1096,6 +1120,27 @@ export default function InboxPage() {
       {showPenguinToast && (
         <PenguinToast onDismiss={() => setShowPenguinToast(false)} />
       )}
+
+      {/* Floating Incognito Toggle */}
+      <button
+        onClick={toggleIncognitoMode}
+        disabled={incognitoLoading}
+        className={`fixed bottom-20 md:bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2 rounded-full shadow-lg transition-all duration-200 ${
+          incognitoMode
+            ? 'bg-purple-600 text-white hover:bg-purple-700'
+            : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+        } ${incognitoLoading ? 'opacity-50 cursor-wait' : ''}`}
+        title={incognitoMode ? 'Incognito Mode ON - Read receipts hidden' : 'Incognito Mode OFF - Read receipts visible'}
+      >
+        {incognitoMode ? (
+          <EyeOff className="h-4 w-4" />
+        ) : (
+          <Eye className="h-4 w-4" />
+        )}
+        <span className="text-sm font-medium hidden sm:inline">
+          {incognitoMode ? 'Incognito' : 'Visible'}
+        </span>
+      </button>
     </div>
   );
 }
