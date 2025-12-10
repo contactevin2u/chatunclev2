@@ -2654,16 +2654,18 @@ class SessionManager {
       console.log('[WA] Waiting 3s before restoring sessions...');
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      const accounts = await query<{ id: string; user_id: string }>(
-        "SELECT id, user_id FROM whatsapp_accounts WHERE status = 'connected'"
+      // Restore ALL accounts that have session data (not just 'connected' ones)
+      // This handles cases where server restarted while accounts were temporarily disconnected
+      const accounts = await query<{ id: string; user_id: string; status: string }>(
+        "SELECT id, user_id, status FROM whatsapp_accounts WHERE session_data IS NOT NULL"
       );
 
-      console.log(`[WA] Restoring ${accounts.length} WhatsApp sessions...`);
+      console.log(`[WA] Found ${accounts.length} WhatsApp accounts with session data to restore...`);
 
       for (let i = 0; i < accounts.length; i++) {
         const account = accounts[i];
         try {
-          console.log(`[WA] Restoring session ${i + 1}/${accounts.length} for account ${account.id}`);
+          console.log(`[WA] Restoring session ${i + 1}/${accounts.length} for account ${account.id} (was: ${account.status})`);
           await this.createSession(account.id, account.user_id);
 
           // Add 2 second delay between session restorations to avoid rapid connections
