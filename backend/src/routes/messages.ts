@@ -163,6 +163,18 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       WHERE id = $1
     `, [req.params.conversationId, agentId]);
 
+    // Emit message:new to account room so ALL agents see the new message immediately
+    // This is critical for multi-agent sync - other agents won't see the message otherwise
+    const io = getIO();
+    io.to(`account:${conversation.whatsapp_account_id}`).emit('message:new', {
+      accountId: conversation.whatsapp_account_id,
+      conversationId: req.params.conversationId,
+      message: {
+        ...message,
+        agent_name: agent?.name,
+      },
+    });
+
     // Return immediately to frontend (optimistic response)
     res.status(201).json({
       message: {
