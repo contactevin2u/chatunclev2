@@ -1940,6 +1940,10 @@ class SessionManager {
           console.error('[WA][Group] Failed to download sticker:', e);
         }
         break;
+      case 'reactionMessage':
+        // Reactions are handled by messages.reaction event - skip saving as message
+        console.log(`[WA][Group] Skipping reactionMessage (handled by messages.reaction event)`);
+        return;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
         console.log(`[WA][Group] Skipping protocol message: ${msgType}`);
@@ -2281,6 +2285,10 @@ class SessionManager {
           console.error('[WA][Group] Failed to download outgoing sticker:', e);
         }
         break;
+      case 'reactionMessage':
+        // Reactions are handled by messages.reaction event - skip saving as message
+        console.log(`[WA][Group] Skipping outgoing reactionMessage (handled by messages.reaction event)`);
+        return;
       case 'protocolMessage':
       case 'senderKeyDistributionMessage':
         return;
