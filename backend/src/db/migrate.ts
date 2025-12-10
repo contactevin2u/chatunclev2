@@ -465,6 +465,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_group_unique
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_jid VARCHAR(100);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name VARCHAR(255);
 
+-- Add edited message tracking (for WhatsApp message edits)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
+
 -- Indexes for groups
 CREATE INDEX IF NOT EXISTS idx_groups_account ON groups(whatsapp_account_id);
 CREATE INDEX IF NOT EXISTS idx_groups_jid ON groups(group_jid);

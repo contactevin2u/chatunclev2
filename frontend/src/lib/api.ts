@@ -146,7 +146,7 @@ export const messages = {
       { token }
     ),
 
-  send: (token: string, conversationId: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) =>
+  send: (token: string, conversationId: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }, quotedMessageId?: string) =>
     request<{ message: any }>(`/api/messages/conversation/${conversationId}`, {
       method: 'POST',
       body: {
@@ -159,6 +159,7 @@ export const messages = {
           longitude: locationData.longitude,
           locationName: locationData.locationName,
         }),
+        ...(quotedMessageId && { quotedMessageId }),
       },
       token,
     }),

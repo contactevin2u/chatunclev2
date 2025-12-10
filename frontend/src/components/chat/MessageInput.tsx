@@ -1,22 +1,24 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Mic, Smile, FileText, Command, X, Image, Video, Clock, Square, Loader2, MapPin } from 'lucide-react';
+import { Send, Paperclip, Mic, Smile, FileText, Command, X, Image, Video, Clock, Square, Loader2, MapPin, Reply } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { templates as templatesApi, media as mediaApi, scheduledMessages as scheduledApi } from '@/lib/api';
-import { Template } from '@/types';
+import { Template, Message } from '@/types';
 import data from '@emoji-mart/data';
 import Picker from '@emoji-mart/react';
 
 interface MessageInputProps {
-  onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) => void;
+  onSend: (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }, quotedMessageId?: string) => void;
   disabled?: boolean;
   conversationId?: string;
   prefillMessage?: string;
   onPrefillConsumed?: () => void;
+  replyingTo?: Message | null;
+  onCancelReply?: () => void;
 }
 
-export default function MessageInput({ onSend, disabled, conversationId, prefillMessage, onPrefillConsumed }: MessageInputProps) {
+export default function MessageInput({ onSend, disabled, conversationId, prefillMessage, onPrefillConsumed, replyingTo, onCancelReply }: MessageInputProps) {
   const { token } = useAuth();
   const [message, setMessage] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -38,6 +40,12 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     type: 'image' | 'video' | 'audio';
   } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Template preview modal state (for templates with images)
+  const [templatePreview, setTemplatePreview] = useState<{
+    template: Template;
+    caption: string;
+  } | null>(null);
 
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
@@ -133,15 +141,34 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   }, []);
 
   const handleSelectTemplate = (template: Template) => {
-    // If template has media, send it directly
+    // If template has media, show preview modal first
     if (template.content_type && template.content_type !== 'text' && template.media_url) {
-      onSend(template.content || '', template.content_type, template.media_url, template.media_mime_type);
+      setTemplatePreview({
+        template,
+        caption: template.content || '',
+      });
       setShowTemplates(false);
       return;
     }
     // Text-only template - put in input for editing
     setMessage(template.content);
     setShowTemplates(false);
+    inputRef.current?.focus();
+  };
+
+  const handleSendTemplatePreview = () => {
+    if (!templatePreview) return;
+    const { template, caption } = templatePreview;
+    onSend(caption, template.content_type!, template.media_url!, template.media_mime_type);
+    setTemplatePreview(null);
+    // Refocus input after sending
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  };
+
+  const handleCancelTemplatePreview = () => {
+    setTemplatePreview(null);
     inputRef.current?.focus();
   };
 
@@ -291,6 +318,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     e?.preventDefault();
     if (disabled || isUploading) return;
 
+    // Get quoted message ID if replying
+    const quotedMessageId = replyingTo?.id;
+
     // If there's media attached, upload and send
     if (attachedMedia) {
       setIsUploading(true);
@@ -303,10 +333,11 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         }
 
         const contentType = attachedMedia.type === 'audio' ? 'audio' : attachedMedia.type;
-        onSend(message.trim() || '', contentType, uploadResult.url, uploadResult.mimeType);
+        onSend(message.trim() || '', contentType, uploadResult.url, uploadResult.mimeType, undefined, quotedMessageId);
 
         clearAttachment();
         setMessage('');
+        onCancelReply?.(); // Clear reply state after sending
         // Refocus input after sending media
         requestAnimationFrame(() => {
           inputRef.current?.focus();
@@ -322,8 +353,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
 
     // Regular text message
     if (message.trim()) {
-      onSend(message.trim());
+      onSend(message.trim(), undefined, undefined, undefined, undefined, quotedMessageId);
       setMessage('');
+      onCancelReply?.(); // Clear reply state after sending
       // Refocus input after sending
       requestAnimationFrame(() => {
         inputRef.current?.focus();
@@ -507,6 +539,39 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         </div>
       )}
 
+      {/* Reply preview bar */}
+      {replyingTo && (
+        <div className="mb-2 flex items-center bg-gray-100 rounded-lg border-l-4 border-emerald-500 overflow-hidden">
+          <div className="flex-1 px-3 py-2 min-w-0">
+            <div className="flex items-center gap-1 text-xs text-emerald-600 font-medium mb-0.5">
+              <Reply className="h-3 w-3" />
+              <span>Replying to {replyingTo.sender_type === 'agent' ? (replyingTo.agent_name || 'You') : (replyingTo.sender_name || 'Contact')}</span>
+            </div>
+            <p className="text-sm text-gray-600 truncate">
+              {replyingTo.content_type !== 'text' ? (
+                <span className="italic">
+                  {replyingTo.content_type === 'image' ? '📷 Photo' :
+                   replyingTo.content_type === 'video' ? '🎥 Video' :
+                   replyingTo.content_type === 'audio' ? '🎤 Voice message' :
+                   replyingTo.content_type === 'document' ? '📄 Document' :
+                   replyingTo.content_type === 'sticker' ? '🎨 Sticker' :
+                   replyingTo.content_type === 'location' ? '📍 Location' :
+                   replyingTo.content_type}
+                </span>
+              ) : (
+                replyingTo.content || 'Message'
+              )}
+            </p>
+          </div>
+          <button
+            onClick={onCancelReply}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+      )}
+
       {/* Recording indicator */}
       {isRecording && (
         <div className="mb-2 flex items-center space-x-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2">
@@ -518,6 +583,66 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
           >
             <Square className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {/* Template Preview Modal */}
+      {templatePreview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-900">Preview Template</h3>
+              <button
+                onClick={handleCancelTemplatePreview}
+                className="p-1 text-gray-400 hover:text-gray-600 rounded"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Media Preview */}
+              {templatePreview.template.content_type === 'image' && templatePreview.template.media_url && (
+                <img
+                  src={templatePreview.template.media_url}
+                  alt="Template preview"
+                  className="w-full max-h-64 object-contain rounded-lg bg-gray-100"
+                />
+              )}
+              {templatePreview.template.content_type === 'video' && templatePreview.template.media_url && (
+                <video
+                  src={templatePreview.template.media_url}
+                  controls
+                  className="w-full max-h-64 rounded-lg bg-gray-100"
+                />
+              )}
+              {/* Editable Caption */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Caption (optional)</label>
+                <textarea
+                  value={templatePreview.caption}
+                  onChange={(e) => setTemplatePreview({ ...templatePreview, caption: e.target.value })}
+                  placeholder="Add a caption..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"
+                  rows={2}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t bg-gray-50 rounded-b-lg">
+              <button
+                onClick={handleCancelTemplatePreview}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendTemplatePreview}
+                className="px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors flex items-center gap-2"
+              >
+                <Send className="h-4 w-4" />
+                Send
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

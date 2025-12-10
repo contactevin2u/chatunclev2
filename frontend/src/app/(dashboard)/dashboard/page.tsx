@@ -43,6 +43,7 @@ export default function InboxPage() {
   const [orderOpsResult, setOrderOpsResult] = useState<any>(null);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [showPenguinToast, setShowPenguinToast] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const messageCountRef = useRef(0);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
@@ -222,12 +223,14 @@ export default function InboxPage() {
 
     // Check if this conversation exists in our list (including unified group accounts)
     let existingConv = conversationsList.find(c => c.id === data.conversationId);
+    let unifiedGroupConv: Conversation | undefined;
 
     // Also check unified group accounts
     if (!existingConv) {
-      existingConv = conversationsList.find(c =>
+      unifiedGroupConv = conversationsList.find(c =>
         c.is_unified_group && c.accounts?.some(a => a.conversation_id === data.conversationId)
       );
+      existingConv = unifiedGroupConv;
     }
 
     if (!existingConv) {
@@ -239,29 +242,71 @@ export default function InboxPage() {
 
     // Add to messages if current conversation (check effective conversation ID)
     const effectiveId = activeConversationIdRef.current || selectedConversationRef.current?.id;
-    if (effectiveId === data.conversationId) {
+    const isCurrentConversation = effectiveId === data.conversationId;
+
+    // Determine if this conversation is currently being viewed
+    // For unified groups, check if the parent unified group is selected
+    const isViewingUnifiedGroup = unifiedGroupConv &&
+      selectedConversationRef.current?.id === unifiedGroupConv.id;
+
+    if (isCurrentConversation) {
       setMessagesList((prev) => {
-        // Check if message already exists
-        if (prev.some(m => m.id === data.message.id)) {
+        // Check if message already exists by both database ID AND WhatsApp message ID
+        const isDuplicate = prev.some(m =>
+          m.id === data.message.id ||
+          (data.message.wa_message_id && m.wa_message_id === data.message.wa_message_id)
+        );
+        if (isDuplicate) {
+          console.log('[UI] Duplicate message ignored:', data.message.id);
           return prev;
         }
         return [...prev, data.message];
       });
     }
 
-    // Update conversations list
+    // Update conversations list with proper unified group handling
     setConversationsList((prev) => {
       const updated = prev.map((conv) => {
+        // Direct match
         if (conv.id === data.conversationId) {
+          const shouldIncrementUnread = !isCurrentConversation;
           return {
             ...conv,
             last_message: data.message.content,
             last_message_at: data.message.created_at,
-            unread_count: selectedConversationRef.current?.id === data.conversationId
-              ? conv.unread_count
-              : conv.unread_count + 1,
+            unread_count: shouldIncrementUnread ? conv.unread_count + 1 : conv.unread_count,
           };
         }
+
+        // Handle unified groups - update the specific account's unread count
+        if (conv.is_unified_group && conv.accounts) {
+          const matchingAccount = conv.accounts.find(a => a.conversation_id === data.conversationId);
+          if (matchingAccount) {
+            const shouldIncrementUnread = !isViewingUnifiedGroup ||
+              activeConversationIdRef.current !== data.conversationId;
+
+            const updatedAccounts = conv.accounts.map(a =>
+              a.conversation_id === data.conversationId
+                ? {
+                    ...a,
+                    unread_count: shouldIncrementUnread ? a.unread_count + 1 : a.unread_count,
+                    last_message_at: data.message.created_at,
+                  }
+                : a
+            );
+            const newTotalUnread = updatedAccounts.reduce((sum, a) => sum + a.unread_count, 0);
+
+            return {
+              ...conv,
+              last_message: data.message.content,
+              last_message_at: data.message.created_at,
+              last_message_account: matchingAccount.account_name,
+              accounts: updatedAccounts,
+              total_unread: newTotalUnread,
+            };
+          }
+        }
+
         return conv;
       });
 
@@ -325,11 +370,24 @@ export default function InboxPage() {
     setOrderOpsResult(data);
   }, []);
 
-  const { joinAccount } = useSocket({
+  // Handle edited messages
+  const handleMessageEdited = useCallback((data: { messageId: string; newContent: string; editedAt: string }) => {
+    console.log('[UI] Message edited:', data);
+    setMessagesList((prev) =>
+      prev.map((msg) =>
+        msg.id === data.messageId
+          ? { ...msg, content: data.newContent, is_edited: true, edited_at: data.editedAt }
+          : msg
+      )
+    );
+  }, []);
+
+  const { joinAccounts, isConnected } = useSocket({
     onNewMessage: handleNewMessage,
     onSyncProgress: handleSyncProgress,
     onMessageStatus: handleMessageStatus,
     onMessageReaction: handleMessageReaction,
+    onMessageEdited: handleMessageEdited,
     onAchievement: handleAchievement,
     onOrderOpsResult: handleOrderOpsResult,
   });
@@ -340,24 +398,24 @@ export default function InboxPage() {
     if (!conversationsList.length) return;
 
     // Get unique account IDs from conversations
-    const accountIds = new Set<string>();
+    const accountIds: string[] = [];
     conversationsList.forEach(conv => {
-      if (conv.whatsapp_account_id) {
-        accountIds.add(conv.whatsapp_account_id);
+      if (conv.whatsapp_account_id && !accountIds.includes(conv.whatsapp_account_id)) {
+        accountIds.push(conv.whatsapp_account_id);
       }
       // Also handle unified groups with multiple accounts
       conv.accounts?.forEach(acc => {
-        if (acc.account_id) {
-          accountIds.add(acc.account_id);
+        if (acc.account_id && !accountIds.includes(acc.account_id)) {
+          accountIds.push(acc.account_id);
         }
       });
     });
 
-    // Join each account room
-    accountIds.forEach(accountId => {
-      joinAccount(accountId);
-    });
-  }, [conversationsList, joinAccount]);
+    // Bulk join all account rooms (more efficient and tracked for reconnection)
+    if (accountIds.length > 0) {
+      joinAccounts(accountIds);
+    }
+  }, [conversationsList, joinAccounts]);
 
   // Load conversations on mount
   useEffect(() => {
@@ -429,7 +487,7 @@ export default function InboxPage() {
     loadMessages();
   }, [token, selectedConversation, activeConversationId]);
 
-  const handleSendMessage = async (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }) => {
+  const handleSendMessage = async (content: string, contentType?: string, mediaUrl?: string, mediaMimeType?: string, locationData?: { latitude: number; longitude: number; locationName?: string }, quotedMessageId?: string) => {
     if (!token || !selectedConversation) return;
     if (!content.trim() && !mediaUrl && contentType !== 'location') return;
 
@@ -445,7 +503,7 @@ export default function InboxPage() {
 
     setIsSending(true);
     try {
-      const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType, locationData);
+      const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType, locationData, quotedMessageId);
       setMessagesList((prev) => [...prev, message]);
 
       // Update conversation list
@@ -486,9 +544,20 @@ export default function InboxPage() {
     );
   }
 
+  // Handle reply to a message
+  const handleReply = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
+
+  // Handle cancel reply
+  const handleCancelReply = useCallback(() => {
+    setReplyingTo(null);
+  }, []);
+
   // Handle selecting conversation (show chat on mobile)
   const handleSelectConversation = (conv: Conversation, selectedAccountConversationId?: string) => {
     setSelectedConversation(conv);
+    setReplyingTo(null); // Clear reply when switching conversations
     // For unified groups, set the active conversation ID
     if (conv.is_unified_group) {
       setActiveConversationId(selectedAccountConversationId || conv.default_conversation_id || null);
@@ -929,6 +998,7 @@ export default function InboxPage() {
                   messages={messagesList}
                   conversationId={getEffectiveConversationId() || undefined}
                   isGroup={selectedConversation?.is_group || false}
+                  onReply={handleReply}
                 />
               </div>
 
@@ -940,6 +1010,8 @@ export default function InboxPage() {
                   conversationId={getEffectiveConversationId() || undefined}
                   prefillMessage={prefillMessage || undefined}
                   onPrefillConsumed={() => setPrefillMessage(null)}
+                  replyingTo={replyingTo}
+                  onCancelReply={handleCancelReply}
                 />
               </div>
             </>

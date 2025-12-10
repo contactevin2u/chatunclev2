@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { Message } from '@/types';
 import { format } from 'date-fns';
 import clsx from 'clsx';
-import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package, Smile, MapPin } from 'lucide-react';
+import { Check, CheckCheck, Clock, Image, Video, FileText, Mic, AlertCircle, Send, Loader2, X, Package, Smile, MapPin, Download, ExternalLink, Reply, Forward } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { orderops, messages as messagesApi } from '@/lib/api';
 import { MessageReaction } from '@/types';
@@ -13,6 +13,7 @@ interface MessageThreadProps {
   messages: Message[];
   conversationId?: string;
   isGroup?: boolean;
+  onReply?: (message: Message) => void;
 }
 
 // Confirmation Modal Component
@@ -93,7 +94,7 @@ function ConfirmModal({
   );
 }
 
-export default function MessageThread({ messages, conversationId, isGroup = false }: MessageThreadProps) {
+export default function MessageThread({ messages, conversationId, isGroup = false, onReply }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { token } = useAuth();
   const [parsingId, setParsingId] = useState<string | null>(null);
@@ -300,29 +301,44 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
             key={message.id}
             className={clsx('flex group', isSent ? 'justify-end' : 'justify-start')}
           >
-            {/* Reaction button - left side for sent messages */}
-            {isSent && message.wa_message_id && (
-              <div className="relative self-center mr-1">
-                <button
-                  onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
-                  className="p-1 rounded-full hover:bg-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="React"
-                >
-                  <Smile className="h-4 w-4 text-gray-400" />
-                </button>
-                {/* Emoji picker popup */}
-                {emojiPickerMessageId === message.id && (
-                  <div className="absolute bottom-full right-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
-                    {QUICK_REACTIONS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => handleReaction(message.id, emoji)}
-                        disabled={reactingMessageId === message.id}
-                        className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
+            {/* Action buttons - left side for sent messages */}
+            {isSent && (
+              <div className="flex items-center self-center mr-1 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Reply button */}
+                {onReply && message.wa_message_id && (
+                  <button
+                    onClick={() => onReply(message)}
+                    className="p-1 rounded-full hover:bg-gray-200"
+                    title="Reply"
+                  >
+                    <Reply className="h-4 w-4 text-gray-400" />
+                  </button>
+                )}
+                {/* Reaction button */}
+                {message.wa_message_id && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
+                      className="p-1 rounded-full hover:bg-gray-200"
+                      title="React"
+                    >
+                      <Smile className="h-4 w-4 text-gray-400" />
+                    </button>
+                    {/* Emoji picker popup */}
+                    {emojiPickerMessageId === message.id && (
+                      <div className="absolute bottom-full right-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
+                        {QUICK_REACTIONS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => handleReaction(message.id, emoji)}
+                            disabled={reactingMessageId === message.id}
+                            className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -396,6 +412,32 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 />
               )}
 
+              {/* Document download */}
+              {message.media_url && message.content_type === 'document' && (
+                <a
+                  href={message.media_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 p-3 bg-gray-100 hover:bg-gray-200 rounded-lg mb-2 transition-colors group max-w-[240px]"
+                >
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">
+                      {message.content || 'Document'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {message.media_mime_type?.split('/')[1]?.toUpperCase() || 'FILE'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Download className="h-4 w-4 text-gray-400 group-hover:text-blue-600" />
+                    <ExternalLink className="h-3 w-3 text-gray-400 group-hover:text-blue-600" />
+                  </div>
+                </a>
+              )}
+
               {/* Location preview */}
               {message.content_type === 'location' && (() => {
                 const locationData = parseLocationData(message.content);
@@ -440,8 +482,11 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 </p>
               )}
 
-              {/* Time and status */}
+              {/* Time, edited indicator, and status */}
               <div className="flex items-center justify-end space-x-1 mt-1">
+                {message.is_edited && (
+                  <span className="text-[10px] sm:text-xs text-gray-400 italic">edited</span>
+                )}
                 <span className="text-[10px] sm:text-xs text-gray-500">
                   {format(new Date(message.created_at), 'HH:mm')}
                 </span>
@@ -531,31 +576,44 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                 </div>
               )}
             </div>
-            {/* Reaction button - right side for received messages */}
+            {/* Action buttons - right side for received messages */}
             {!isSent && message.wa_message_id && (
-              <div className="relative self-center ml-1">
-                <button
-                  onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
-                  className="p-1 rounded-full hover:bg-gray-200 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="React"
-                >
-                  <Smile className="h-4 w-4 text-gray-400" />
-                </button>
-                {/* Emoji picker popup */}
-                {emojiPickerMessageId === message.id && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
-                    {QUICK_REACTIONS.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => handleReaction(message.id, emoji)}
-                        disabled={reactingMessageId === message.id}
-                        className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                  </div>
+              <div className="flex items-center self-center ml-1 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Reply button */}
+                {onReply && (
+                  <button
+                    onClick={() => onReply(message)}
+                    className="p-1 rounded-full hover:bg-gray-200"
+                    title="Reply"
+                  >
+                    <Reply className="h-4 w-4 text-gray-400" />
+                  </button>
                 )}
+                {/* Reaction button */}
+                <div className="relative">
+                  <button
+                    onClick={() => setEmojiPickerMessageId(emojiPickerMessageId === message.id ? null : message.id)}
+                    className="p-1 rounded-full hover:bg-gray-200"
+                    title="React"
+                  >
+                    <Smile className="h-4 w-4 text-gray-400" />
+                  </button>
+                  {/* Emoji picker popup */}
+                  {emojiPickerMessageId === message.id && (
+                    <div className="absolute bottom-full left-0 mb-1 bg-white rounded-lg shadow-lg border p-1.5 flex gap-0.5 z-10">
+                      {QUICK_REACTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          onClick={() => handleReaction(message.id, emoji)}
+                          disabled={reactingMessageId === message.id}
+                          className="p-1.5 hover:bg-gray-100 rounded text-lg transition-colors"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

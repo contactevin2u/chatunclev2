@@ -116,6 +116,9 @@ export interface Message {
   sender_name: string | null;
   // Reactions
   reactions?: MessageReaction[];
+  // Edited message tracking
+  is_edited?: boolean;
+  edited_at?: string | null;
 }
 
 export interface Template {

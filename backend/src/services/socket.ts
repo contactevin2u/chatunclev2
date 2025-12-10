@@ -6,6 +6,9 @@ import { JwtPayload } from '../types';
 
 let io: Server;
 
+// Track connected users and their rooms for debugging
+const connectedUsers = new Map<string, { email: string; userId: string; rooms: Set<string> }>();
+
 export function initializeSocket(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
     cors: {
@@ -48,6 +51,9 @@ export function initializeSocket(httpServer: HttpServer): Server {
       methods: ['GET', 'POST'],
       credentials: true,
     },
+    // Ping timeout and interval for better connection stability
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   // Authentication middleware
@@ -69,39 +75,91 @@ export function initializeSocket(httpServer: HttpServer): Server {
 
   io.on('connection', (socket: Socket) => {
     const user = socket.data.user as JwtPayload;
-    console.log(`User ${user.email} connected via Socket.io`);
+    console.log(`[Socket] User ${user.email} connected (socket: ${socket.id})`);
+
+    // Track this connection
+    connectedUsers.set(socket.id, {
+      email: user.email,
+      userId: user.userId,
+      rooms: new Set([`user:${user.userId}`]),
+    });
 
     // Join user's personal room for notifications
     socket.join(`user:${user.userId}`);
 
-    // Join specific account rooms
+    // Join specific account rooms with acknowledgment
     socket.on('join:account', (accountId: string) => {
-      socket.join(`account:${accountId}`);
-      console.log(`User ${user.email} joined account room ${accountId}`);
+      const roomName = `account:${accountId}`;
+      socket.join(roomName);
+
+      // Track room join
+      const userData = connectedUsers.get(socket.id);
+      if (userData) {
+        userData.rooms.add(roomName);
+      }
+
+      console.log(`[Socket] User ${user.email} joined room ${roomName}`);
+
+      // Send acknowledgment back to client
+      socket.emit('room:joined', { room: roomName, accountId });
     });
 
     socket.on('leave:account', (accountId: string) => {
-      socket.leave(`account:${accountId}`);
-      console.log(`User ${user.email} left account room ${accountId}`);
+      const roomName = `account:${accountId}`;
+      socket.leave(roomName);
+
+      // Track room leave
+      const userData = connectedUsers.get(socket.id);
+      if (userData) {
+        userData.rooms.delete(roomName);
+      }
+
+      console.log(`[Socket] User ${user.email} left room ${roomName}`);
     });
 
-    // Typing indicators
-    socket.on('typing:start', (data: { conversationId: string }) => {
-      socket.to(`conversation:${data.conversationId}`).emit('typing:start', {
-        userId: user.userId,
-        conversationId: data.conversationId,
-      });
+    // Typing indicators - broadcast to account room for all agents to see
+    socket.on('typing:start', (data: { conversationId: string; accountId?: string }) => {
+      // If accountId provided, broadcast to account room
+      // Otherwise fall back to conversation room
+      if (data.accountId) {
+        socket.to(`account:${data.accountId}`).emit('typing:start', {
+          userId: user.userId,
+          userName: user.email,
+          conversationId: data.conversationId,
+        });
+      } else {
+        socket.to(`conversation:${data.conversationId}`).emit('typing:start', {
+          userId: user.userId,
+          conversationId: data.conversationId,
+        });
+      }
     });
 
-    socket.on('typing:stop', (data: { conversationId: string }) => {
-      socket.to(`conversation:${data.conversationId}`).emit('typing:stop', {
-        userId: user.userId,
-        conversationId: data.conversationId,
-      });
+    socket.on('typing:stop', (data: { conversationId: string; accountId?: string }) => {
+      if (data.accountId) {
+        socket.to(`account:${data.accountId}`).emit('typing:stop', {
+          userId: user.userId,
+          userName: user.email,
+          conversationId: data.conversationId,
+        });
+      } else {
+        socket.to(`conversation:${data.conversationId}`).emit('typing:stop', {
+          userId: user.userId,
+          conversationId: data.conversationId,
+        });
+      }
     });
 
-    socket.on('disconnect', () => {
-      console.log(`User ${user.email} disconnected`);
+    socket.on('disconnect', (reason) => {
+      const userData = connectedUsers.get(socket.id);
+      const roomCount = userData?.rooms.size || 0;
+      console.log(`[Socket] User ${user.email} disconnected (reason: ${reason}, was in ${roomCount} rooms)`);
+      connectedUsers.delete(socket.id);
+    });
+
+    // Handle reconnection - client will rejoin rooms automatically
+    socket.on('error', (error) => {
+      console.error(`[Socket] Error for user ${user.email}:`, error);
     });
   });
 
@@ -113,4 +171,19 @@ export function getIO(): Server {
     throw new Error('Socket.io not initialized');
   }
   return io;
+}
+
+// Utility: Get count of users in an account room
+export function getAccountRoomSize(accountId: string): number {
+  const room = io?.sockets.adapter.rooms.get(`account:${accountId}`);
+  return room?.size || 0;
+}
+
+// Utility: Get all connected users info (for debugging)
+export function getConnectedUsersInfo(): { socketId: string; email: string; rooms: string[] }[] {
+  return Array.from(connectedUsers.entries()).map(([socketId, data]) => ({
+    socketId,
+    email: data.email,
+    rooms: Array.from(data.rooms),
+  }));
 }

@@ -114,22 +114,42 @@ async function processMessagesUpsert(
   }
 
   // Filter and deduplicate messages
-  const validMessages = messages.filter(msg => {
+  // Step 1: Basic validation (sync)
+  const basicFiltered = messages.filter(msg => {
     if (!msg.key) return false;
     const messageId = msg.key.id;
     if (!messageId) return false;
-
-    // Check deduplication
-    if (messageDeduplicator.checkAndMark(accountId, messageId)) {
-      console.log(`[WA][Buffered] Skipping duplicate: ${messageId}`);
-      return false;
-    }
 
     // Skip broadcasts
     if (!msg.key.remoteJid || isJidBroadcast(msg.key.remoteJid)) {
       return false;
     }
 
+    return true;
+  });
+
+  // Step 2: Memory-based deduplication (sync, fast)
+  const memoryFiltered = basicFiltered.filter(msg => {
+    const messageId = msg.key!.id!;
+    // Use sync version for fast filtering
+    if (messageDeduplicator.checkAndMarkSync(accountId, messageId)) {
+      console.log(`[WA][Buffered] Skipping duplicate (memory): ${messageId}`);
+      return false;
+    }
+    return true;
+  });
+
+  // Step 3: DB-backed deduplication for remaining messages (async, catches server restart dupes)
+  const messageIds = memoryFiltered.map(msg => msg.key!.id!);
+  const newMessageIds = await messageDeduplicator.filterNewWithDbCheck(accountId, messageIds);
+  const newMessageIdSet = new Set(newMessageIds);
+
+  const validMessages = memoryFiltered.filter(msg => {
+    const messageId = msg.key!.id!;
+    if (!newMessageIdSet.has(messageId)) {
+      console.log(`[WA][Buffered] Skipping duplicate (DB): ${messageId}`);
+      return false;
+    }
     return true;
   });
 
@@ -210,7 +230,7 @@ async function processMessagesUpsert(
 }
 
 /**
- * Process messages.update (status changes) in batch
+ * Process messages.update (status changes AND edited messages) in batch
  */
 async function processMessagesUpdate(
   ctx: ProcessingContext,
@@ -220,45 +240,98 @@ async function processMessagesUpdate(
 
   // Batch status updates for efficiency
   const statusUpdates: Array<{ waMessageId: string; status: string }> = [];
+  // Batch edited message updates
+  const editedUpdates: Array<{ waMessageId: string; newContent: string; editedAt: Date }> = [];
 
   for (const update of updates) {
     const waMessageId = update.key.id;
     const newStatus = update.update.status;
 
+    // Handle status updates
     if (newStatus !== undefined && newStatus !== null && waMessageId) {
       const statusStr = mapMessageStatus(newStatus as number);
       statusUpdates.push({ waMessageId, status: statusStr });
     }
+
+    // Handle edited messages
+    // The editedMessage contains the new message content after editing
+    const editedMessage = (update.update as any).editedMessage;
+    if (editedMessage && waMessageId) {
+      // Extract the new text content from the edited message
+      const newContent = editedMessage.message?.conversation ||
+        editedMessage.message?.extendedTextMessage?.text ||
+        editedMessage.message?.editedMessage?.message?.conversation ||
+        editedMessage.message?.editedMessage?.message?.extendedTextMessage?.text ||
+        null;
+
+      if (newContent) {
+        const timestamp = editedMessage.messageTimestamp;
+        const editedAt = timestamp ? new Date(Number(timestamp) * 1000) : new Date();
+        editedUpdates.push({ waMessageId, newContent, editedAt });
+        console.log(`[WA][Buffered] Message ${waMessageId} was edited: "${newContent.substring(0, 50)}..."`);
+      }
+    }
   }
 
-  if (statusUpdates.length === 0) return;
+  const io = getIO();
 
-  // Process updates in parallel
-  const results = await Promise.allSettled(statusUpdates.map(async ({ waMessageId, status }) => {
-    const updatedMsg = await queryOne(
-      `UPDATE messages SET status = $1, updated_at = NOW()
-       WHERE wa_message_id = $2
-       RETURNING id, conversation_id`,
-      [status, waMessageId]
-    );
+  // Process status updates in parallel
+  if (statusUpdates.length > 0) {
+    const results = await Promise.allSettled(statusUpdates.map(async ({ waMessageId, status }) => {
+      const updatedMsg = await queryOne(
+        `UPDATE messages SET status = $1, updated_at = NOW()
+         WHERE wa_message_id = $2
+         RETURNING id, conversation_id`,
+        [status, waMessageId]
+      );
 
-    if (updatedMsg) {
-      // Emit to account room so ALL agents see status updates
-      const io = getIO();
-      io.to(`account:${accountId}`).emit('message:status', {
-        accountId,
-        messageId: updatedMsg.id,
-        waMessageId,
-        conversationId: updatedMsg.conversation_id,
-        status,
-      });
-    }
+      if (updatedMsg) {
+        // Emit to account room so ALL agents see status updates
+        io.to(`account:${accountId}`).emit('message:status', {
+          accountId,
+          messageId: updatedMsg.id,
+          waMessageId,
+          conversationId: updatedMsg.conversation_id,
+          status,
+        });
+      }
 
-    return updatedMsg;
-  }));
+      return updatedMsg;
+    }));
 
-  const successful = results.filter(r => r.status === 'fulfilled').length;
-  console.log(`[WA][Buffered] Updated ${successful}/${statusUpdates.length} message statuses`);
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    console.log(`[WA][Buffered] Updated ${successful}/${statusUpdates.length} message statuses`);
+  }
+
+  // Process edited messages
+  if (editedUpdates.length > 0) {
+    const editResults = await Promise.allSettled(editedUpdates.map(async ({ waMessageId, newContent, editedAt }) => {
+      const updatedMsg = await queryOne(
+        `UPDATE messages
+         SET content = $1, is_edited = TRUE, edited_at = $2, updated_at = NOW()
+         WHERE wa_message_id = $3
+         RETURNING id, conversation_id, content`,
+        [newContent, editedAt, waMessageId]
+      );
+
+      if (updatedMsg) {
+        // Emit to account room so ALL agents see edited messages
+        io.to(`account:${accountId}`).emit('message:edited', {
+          accountId,
+          messageId: updatedMsg.id,
+          waMessageId,
+          conversationId: updatedMsg.conversation_id,
+          newContent,
+          editedAt: editedAt.toISOString(),
+        });
+      }
+
+      return updatedMsg;
+    }));
+
+    const editSuccessful = editResults.filter(r => r.status === 'fulfilled').length;
+    console.log(`[WA][Buffered] Processed ${editSuccessful}/${editedUpdates.length} edited messages`);
+  }
 }
 
 /**

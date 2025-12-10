@@ -136,6 +136,7 @@ interface SessionState {
   isReady: boolean;
   readyPromise: Promise<void>;
   resolveReady: () => void;
+  incognitoMode?: boolean;  // Don't send read receipts when true
 }
 
 class SessionManager {
@@ -216,6 +217,16 @@ class SessionManager {
 
   async createSession(accountId: string, userId: string): Promise<void> {
     console.log(`[WA] Creating session for account ${accountId}, user ${userId}`);
+
+    // Fetch account settings for incognito mode
+    const accountSettings = await queryOne<{ incognito_mode: boolean }>(
+      `SELECT incognito_mode FROM whatsapp_accounts WHERE id = $1`,
+      [accountId]
+    );
+    const incognitoMode = accountSettings?.incognito_mode || false;
+    if (incognitoMode) {
+      console.log(`[WA] Incognito mode ENABLED for account ${accountId} - read receipts disabled`);
+    }
 
     // Fetch latest WhatsApp Web version
     const { version, isLatest } = await fetchLatestBaileysVersion();
@@ -337,6 +348,7 @@ class SessionManager {
       isReady: false,
       readyPromise,
       resolveReady,
+      incognitoMode,  // Store incognito mode flag for read receipt control
     };
 
     // Store session state
@@ -2409,10 +2421,17 @@ class SessionManager {
   /**
    * Mark messages as read (sends read receipt)
    * Helps maintain a natural conversation appearance
+   * Respects incognito mode - won't send read receipts if enabled
    */
   async markAsRead(accountId: string, keys: WAMessageKey[]): Promise<void> {
     const session = this.sessions.get(accountId);
     if (!session?.isReady) return;
+
+    // INCOGNITO MODE: Don't send read receipts (blue ticks) when enabled
+    if (session.incognitoMode) {
+      console.log(`[WA] Incognito mode enabled - skipping read receipts for ${keys.length} messages`);
+      return;
+    }
 
     try {
       await session.socket.readMessages(keys);

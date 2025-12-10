@@ -69,9 +69,10 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
 
 // Send a message (optimistic UI - returns immediately, sends in background)
 // Supports both 1:1 and group conversations
+// Supports reply (quote) by passing quotedMessageId
 router.post('/conversation/:conversationId', async (req: Request, res: Response) => {
   try {
-    const { content, contentType = 'text', mediaUrl, mediaMimeType, latitude, longitude, locationName } = req.body;
+    const { content, contentType = 'text', mediaUrl, mediaMimeType, latitude, longitude, locationName, quotedMessageId } = req.body;
     const agentId = req.user!.userId;
 
     // Verify ownership or shared access with send permission
@@ -173,6 +174,34 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       try {
         let waMessageId: string;
 
+        // Build quoted message key if replying
+        let quotedMessageKey: any = undefined;
+        if (quotedMessageId) {
+          const quotedMsg = await queryOne<{
+            wa_message_id: string;
+            sender_type: string;
+            sender_jid: string | null;
+          }>('SELECT wa_message_id, sender_type, sender_jid FROM messages WHERE id = $1', [quotedMessageId]);
+
+          if (quotedMsg && quotedMsg.wa_message_id) {
+            // Construct the JID for the remote JID in the key
+            const remoteJid = isGroup
+              ? conversation.group_jid
+              : `${conversation.wa_id}@${(conversation.jid_type || 'pn') === 'lid' ? 'lid' : 's.whatsapp.net'}`;
+
+            quotedMessageKey = {
+              remoteJid,
+              id: quotedMsg.wa_message_id,
+              fromMe: quotedMsg.sender_type === 'agent',
+              // For group messages from others, include participant
+              ...(isGroup && quotedMsg.sender_type === 'contact' && quotedMsg.sender_jid && {
+                participant: quotedMsg.sender_jid,
+              }),
+            };
+            console.log(`[Messages] Replying to message ${quotedMessageId}, key:`, quotedMessageKey);
+          }
+        }
+
         if (isGroup) {
           // Send to group using group-specific anti-ban
           waMessageId = await sessionManager.sendGroupMessage(
@@ -186,6 +215,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
               latitude,
               longitude,
               locationName,
+              quotedMessageKey,
             }
           );
         } else {
@@ -201,6 +231,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
               latitude,
               longitude,
               locationName,
+              quotedMessageKey,
             },
             {
               jidType: conversation.jid_type || 'pn',  // Use stored JID type for correct format
