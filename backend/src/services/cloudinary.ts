@@ -122,20 +122,51 @@ export async function uploadVideo(buffer: Buffer, messageId?: string): Promise<s
 
 /**
  * Upload document to Cloudinary
- * For documents, we use the original filename to preserve it in the URL
+ * For documents, we preserve the original filename WITH extension in the URL
  */
 export async function uploadDocument(buffer: Buffer, originalFilename?: string, messageId?: string): Promise<string | null> {
-  // Use original filename for the public_id so the download has the correct name
-  // Sanitize filename to remove special characters that might cause issues
-  const sanitizedName = originalFilename
-    ? originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_')
-    : `doc_${messageId || Date.now()}`;
+  if (!isCloudinaryConfigured()) {
+    return null;
+  }
 
-  return uploadMedia(buffer, {
-    folder: 'chatuncle/documents',
-    resourceType: 'raw',
-    publicId: sanitizedName,
-  });
+  // Extract extension from original filename
+  const extension = originalFilename?.split('.').pop()?.toLowerCase() || 'bin';
+
+  // Sanitize filename (keep alphanumeric, dots, dashes, underscores)
+  // Include a unique suffix to avoid conflicts
+  const baseName = originalFilename
+    ? originalFilename.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_')
+    : 'document';
+
+  const uniqueId = messageId || Date.now().toString();
+  // Include extension in public_id for raw resources
+  const publicId = `${baseName}_${uniqueId}.${extension}`;
+
+  try {
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'chatuncle/documents',
+          resource_type: 'raw',
+          public_id: publicId,
+          // Don't let Cloudinary modify the filename
+          use_filename: false,
+          unique_filename: false,
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      uploadStream.end(buffer);
+    });
+
+    console.log(`[Cloudinary] Uploaded document: ${result.secure_url}`);
+    return result.secure_url;
+  } catch (error) {
+    console.error('[Cloudinary] Document upload failed:', error);
+    return null;
+  }
 }
 
 export default cloudinary;

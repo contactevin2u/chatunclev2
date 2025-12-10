@@ -438,6 +438,7 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
               {message.media_url && message.content_type === 'document' && (
                 <a
                   href={message.media_url}
+                  download={message.content || 'document'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-2 p-3 bg-gray-100 hover:bg-gray-200 rounded-lg mb-2 transition-colors group max-w-[240px]"
