@@ -1384,9 +1384,11 @@ class SessionManager {
 
     // Build quoted message for replies if provided
     let quotedMsg: any = undefined;
+    console.log(`[WA] Quote check - payload.quotedMessageKey:`, payload.quotedMessageKey ? JSON.stringify(payload.quotedMessageKey) : 'undefined');
     if (payload.quotedMessageKey) {
       // Get the original message from MessageStore for proper quoting
       const originalMsg = messageStore.get(accountId, payload.quotedMessageKey as WAMessageKey);
+      console.log(`[WA] MessageStore.get result:`, originalMsg ? 'found' : 'NOT FOUND');
       if (originalMsg) {
         quotedMsg = {
           key: payload.quotedMessageKey,
