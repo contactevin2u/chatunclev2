@@ -861,7 +861,11 @@ class SessionManager {
     // Emit to account room so ALL agents viewing this account see the message
     if (isRealTime) {
       const io = getIO();
-      io.to(`account:${accountId}`).emit('message:new', {
+      const roomName = `account:${accountId}`;
+      const roomSize = io.sockets.adapter.rooms.get(roomName)?.size || 0;
+      console.log(`[WA] Emitting message:new to room ${roomName} (${roomSize} clients)`);
+
+      io.to(roomName).emit('message:new', {
         accountId,
         conversationId: conversation.id,
         message: savedMessage,
