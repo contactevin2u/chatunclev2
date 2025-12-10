@@ -214,9 +214,10 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
           WHERE id = $2
         `, [waMessageId, message!.id]);
 
-        // Notify frontend of successful send via Socket.io
+        // Notify frontend of successful send via Socket.io (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${agentId}`).emit('message:status', {
+        io.to(`account:${conversation.whatsapp_account_id}`).emit('message:status', {
+          accountId: conversation.whatsapp_account_id,
           messageId: message!.id,
           waMessageId,
           status: 'sent',
@@ -238,7 +239,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
             await gamificationService.recordFirstResponse(agentId, responseTimeMs);
           }
 
-          // Notify about new achievements
+          // Notify about new achievements (keep to user room - personal achievement)
           if (newAchievements.length > 0) {
             console.log(`[Gamification] New achievements for agent ${agentId}:`, newAchievements.map(a => a.name));
             const io = getIO();
@@ -261,9 +262,10 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
           WHERE id = $1
         `, [message!.id]);
 
-        // Notify frontend of failure
+        // Notify frontend of failure (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${agentId}`).emit('message:status', {
+        io.to(`account:${conversation.whatsapp_account_id}`).emit('message:status', {
+          accountId: conversation.whatsapp_account_id,
           messageId: message!.id,
           status: 'failed',
           error: error.message,
@@ -348,9 +350,10 @@ router.post('/:messageId/react', async (req: Request, res: Response) => {
       [JSON.stringify(reactions), message.id]
     );
 
-    // Emit to frontend
+    // Emit to account room for multi-agent sync
     const io = getIO();
-    io.to(`user:${req.user!.userId}`).emit('message:reaction', {
+    io.to(`account:${(message as any).whatsapp_account_id}`).emit('message:reaction', {
+      accountId: (message as any).whatsapp_account_id,
       messageId: message.id,
       waMessageId: message.wa_message_id,
       reactions,

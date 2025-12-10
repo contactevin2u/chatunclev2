@@ -243,8 +243,9 @@ async function processMessagesUpdate(
     );
 
     if (updatedMsg) {
+      // Emit to account room so ALL agents see status updates
       const io = getIO();
-      io.to(`user:${userId}`).emit('message:status', {
+      io.to(`account:${accountId}`).emit('message:status', {
         accountId,
         messageId: updatedMsg.id,
         waMessageId,
@@ -450,9 +451,9 @@ async function processHistorySync(
     console.log(`[WA][Buffered] Processed ${processedCount} history messages`);
   }
 
-  // Emit sync progress
+  // Emit sync progress to account room
   const io = getIO();
-  io.to(`user:${userId}`).emit('sync:progress', {
+  io.to(`account:${accountId}`).emit('sync:progress', {
     accountId,
     progress: progress || 100,
     isLatest,
@@ -552,7 +553,8 @@ export function setupBufferedEventProcessing(
       const io = getIO();
 
       if (qr) {
-        io.to(`user:${userId}`).emit('qr:update', { accountId, qr });
+        // QR code emit - can go to both user and account room for flexibility
+        io.to(`account:${accountId}`).emit('qr:update', { accountId, qr });
         await execute(
           "UPDATE whatsapp_accounts SET status = 'qr_pending', updated_at = NOW() WHERE id = $1",
           [accountId]
@@ -570,7 +572,8 @@ export function setupBufferedEventProcessing(
           "UPDATE whatsapp_accounts SET status = 'disconnected', updated_at = NOW() WHERE id = $1",
           [accountId]
         );
-        io.to(`user:${userId}`).emit('account:status', { accountId, status: 'disconnected' });
+        // Emit to account room so ALL agents see status change
+        io.to(`account:${accountId}`).emit('account:status', { accountId, status: 'disconnected' });
 
         if (shouldReconnect) {
           onReconnect();
@@ -590,7 +593,8 @@ export function setupBufferedEventProcessing(
           [phoneNumber, name, accountId]
         );
 
-        io.to(`user:${userId}`).emit('account:status', {
+        // Emit to account room so ALL agents see status change
+        io.to(`account:${accountId}`).emit('account:status', {
           accountId,
           status: 'connected',
           phoneNumber,

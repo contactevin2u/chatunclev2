@@ -325,7 +325,7 @@ export default function InboxPage() {
     setOrderOpsResult(data);
   }, []);
 
-  useSocket({
+  const { joinAccount } = useSocket({
     onNewMessage: handleNewMessage,
     onSyncProgress: handleSyncProgress,
     onMessageStatus: handleMessageStatus,
@@ -333,6 +333,31 @@ export default function InboxPage() {
     onAchievement: handleAchievement,
     onOrderOpsResult: handleOrderOpsResult,
   });
+
+  // Join account rooms when conversations are loaded
+  // This ensures ALL agents viewing the same WhatsApp account get real-time updates
+  useEffect(() => {
+    if (!conversationsList.length) return;
+
+    // Get unique account IDs from conversations
+    const accountIds = new Set<string>();
+    conversationsList.forEach(conv => {
+      if (conv.whatsapp_account_id) {
+        accountIds.add(conv.whatsapp_account_id);
+      }
+      // Also handle unified groups with multiple accounts
+      conv.accounts?.forEach(acc => {
+        if (acc.account_id) {
+          accountIds.add(acc.account_id);
+        }
+      });
+    });
+
+    // Join each account room
+    accountIds.forEach(accountId => {
+      joinAccount(accountId);
+    });
+  }, [conversationsList, joinAccount]);
 
   // Load conversations on mount
   useEffect(() => {

@@ -841,9 +841,10 @@ class SessionManager {
     }
 
     // Only emit to frontend for real-time messages
+    // Emit to account room so ALL agents viewing this account see the message
     if (isRealTime) {
       const io = getIO();
-      io.to(`user:${userId}`).emit('message:new', {
+      io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
         message: savedMessage,
@@ -1156,10 +1157,10 @@ class SessionManager {
       messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
     }
 
-    // Emit to frontend
+    // Emit to account room so ALL agents viewing this account see the message
     if (isRealTime) {
       const io = getIO();
-      io.to(`user:${userId}`).emit('message:new', {
+      io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
         message: savedMessage,
@@ -1801,10 +1802,10 @@ class SessionManager {
       messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
     }
 
-    // Emit to frontend for real-time messages
+    // Emit to account room so ALL agents viewing this account see the message
     if (isRealTime) {
       const io = getIO();
-      io.to(`user:${userId}`).emit('message:new', {
+      io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
         isGroup: true,
@@ -2070,10 +2071,10 @@ class SessionManager {
       messageStore.store(accountId, msgKey as WAMessageKey, msg.message);
     }
 
-    // Emit to frontend
+    // Emit to account room so ALL agents viewing this account see the message
     if (isRealTime) {
       const io = getIO();
-      io.to(`user:${userId}`).emit('message:new', {
+      io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
         isGroup: true,
@@ -2128,8 +2129,9 @@ class SessionManager {
       [JSON.stringify(reactions), message.id]
     );
 
+    // Emit to account room so ALL agents see reaction updates
     const io = getIO();
-    io.to(`user:${userId}`).emit('message:reaction', {
+    io.to(`account:${accountId}`).emit('message:reaction', {
       accountId,
       messageId: message.id,
       waMessageId: targetMsgId,
@@ -2241,8 +2243,9 @@ class SessionManager {
       restrict: update.restrict,
     });
 
+    // Emit to account room so ALL agents see group updates
     const io = getIO();
-    io.to(`user:${userId}`).emit('group:update', {
+    io.to(`account:${accountId}`).emit('group:update', {
       accountId,
       groupJid,
       updates: {
@@ -2336,8 +2339,9 @@ class SessionManager {
     groupMetadataCache.handleParticipantUpdate(accountId, groupJid, participants, action);
     console.log(`[WA][Group] Processed ${action} for ${participants.length} participants in ${extractGroupId(groupJid)}`);
 
+    // Emit to account room so ALL agents see participant updates
     const io = getIO();
-    io.to(`user:${userId}`).emit('group:participants', {
+    io.to(`account:${accountId}`).emit('group:participants', {
       accountId,
       groupJid,
       action,

@@ -50,10 +50,18 @@ export default function AccountsPage() {
     }
   }, [pendingAccountId]);
 
-  useSocket({
+  const { joinAccount } = useSocket({
     onQrUpdate: handleQrUpdate,
     onAccountStatus: handleAccountStatus,
   });
+
+  // Join account rooms for real-time updates across all agents
+  useEffect(() => {
+    if (!accountsList.length) return;
+    accountsList.forEach(account => {
+      joinAccount(account.id);
+    });
+  }, [accountsList, joinAccount]);
 
   // Load accounts
   useEffect(() => {

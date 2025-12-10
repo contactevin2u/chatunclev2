@@ -120,8 +120,10 @@ router.post('/', async (req: Request, res: Response) => {
           `UPDATE messages SET wa_message_id = $1, status = 'sent', updated_at = NOW() WHERE id = $2`,
           [waMessageId, message!.id]
         );
+        // Emit to account room for multi-agent sync
         const io = getIO();
-        io.to(`user:${agentId}`).emit('message:status', {
+        io.to(`account:${accountId}`).emit('message:status', {
+          accountId,
           messageId: message!.id,
           waMessageId,
           status: 'sent',
@@ -137,8 +139,10 @@ router.post('/', async (req: Request, res: Response) => {
           `UPDATE messages SET status = 'failed', updated_at = NOW() WHERE id = $1`,
           [message!.id]
         );
+        // Emit to account room for multi-agent sync
         const io = getIO();
-        io.to(`user:${agentId}`).emit('message:status', {
+        io.to(`account:${accountId}`).emit('message:status', {
+          accountId,
           messageId: message!.id,
           status: 'failed',
           error: error.message,

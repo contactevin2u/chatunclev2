@@ -98,9 +98,10 @@ async function sendSequenceItem(
       WHERE id = $1
     `, [context.conversationId, context.agentId]);
 
-    // Emit new message to frontend immediately (optimistic UI)
+    // Emit new message to frontend immediately (emit to account room for multi-agent sync)
     const io = getIO();
-    io.to(`user:${context.agentId}`).emit('message:new', {
+    io.to(`account:${context.waAccountId}`).emit('message:new', {
+      accountId: context.waAccountId,
       conversationId: context.conversationId,
       message: {
         ...message,
@@ -129,8 +130,9 @@ async function sendSequenceItem(
       WHERE id = $2
     `, [waMessageId, message.id]);
 
-    // Notify frontend of successful send
-    io.to(`user:${context.agentId}`).emit('message:status', {
+    // Notify frontend of successful send (emit to account room for multi-agent sync)
+    io.to(`account:${context.waAccountId}`).emit('message:status', {
+      accountId: context.waAccountId,
       messageId: message.id,
       waMessageId,
       status: 'sent',

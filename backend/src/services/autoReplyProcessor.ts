@@ -143,9 +143,9 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
           WHERE id = $1
         `, [conversationId]);
 
-        // Notify frontend
+        // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${userId}`).emit('message:new', {
+        io.to(`account:${accountId}`).emit('message:new', {
           accountId,
           conversationId,
           message: savedMessage,
@@ -227,9 +227,9 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
           UPDATE conversations SET first_response_at = COALESCE(first_response_at, NOW()) WHERE id = $1
         `, [conversationId]);
 
-        // Notify frontend
+        // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${userId}`).emit('message:new', {
+        io.to(`account:${accountId}`).emit('message:new', {
           accountId,
           conversationId,
           message: savedMessage,

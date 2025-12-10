@@ -72,16 +72,17 @@ async function processScheduledMessages() {
           UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1
         `, [msg.conversation_id]);
 
-        // Notify frontend
+        // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${msg.user_id}`).emit('message:new', {
+        io.to(`account:${msg.whatsapp_account_id}`).emit('message:new', {
           accountId: msg.whatsapp_account_id,
           conversationId: msg.conversation_id,
           message: savedMessage,
           isScheduled: true,
         });
 
-        io.to(`user:${msg.user_id}`).emit('scheduled:sent', {
+        io.to(`account:${msg.whatsapp_account_id}`).emit('scheduled:sent', {
+          accountId: msg.whatsapp_account_id,
           scheduledMessageId: msg.id,
           messageId: savedMessage.id,
         });
@@ -95,9 +96,10 @@ async function processScheduledMessages() {
           UPDATE scheduled_messages SET status = 'failed', error_message = $1 WHERE id = $2
         `, [error.message, msg.id]);
 
-        // Notify frontend
+        // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`user:${msg.user_id}`).emit('scheduled:failed', {
+        io.to(`account:${msg.whatsapp_account_id}`).emit('scheduled:failed', {
+          accountId: msg.whatsapp_account_id,
           scheduledMessageId: msg.id,
           error: error.message,
         });
