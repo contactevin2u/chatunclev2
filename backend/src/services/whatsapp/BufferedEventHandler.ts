@@ -209,10 +209,12 @@ async function processMessagesUpsert(
   };
 
   // Process user messages in parallel batches
+  // For real-time messages (notify), skip delays for instant multi-agent sync
   for (let i = 0; i < userMessages.length; i += BATCH_CONFIG.MESSAGE_BATCH_SIZE) {
     const batch = userMessages.slice(i, i + BATCH_CONFIG.MESSAGE_BATCH_SIZE);
     await processBatch(batch, false);
-    if (i + BATCH_CONFIG.MESSAGE_BATCH_SIZE < userMessages.length) {
+    // Only delay for history sync, not real-time messages
+    if (!isRealTime && i + BATCH_CONFIG.MESSAGE_BATCH_SIZE < userMessages.length) {
       await sleep(BATCH_CONFIG.BATCH_DELAY_MS);
     }
   }
@@ -221,7 +223,8 @@ async function processMessagesUpsert(
   for (let i = 0; i < groupMessages.length; i += BATCH_CONFIG.MESSAGE_BATCH_SIZE) {
     const batch = groupMessages.slice(i, i + BATCH_CONFIG.MESSAGE_BATCH_SIZE);
     await processBatch(batch, true);
-    if (i + BATCH_CONFIG.MESSAGE_BATCH_SIZE < groupMessages.length) {
+    // Only delay for history sync, not real-time messages
+    if (!isRealTime && i + BATCH_CONFIG.MESSAGE_BATCH_SIZE < groupMessages.length) {
       await sleep(BATCH_CONFIG.BATCH_DELAY_MS);
     }
   }

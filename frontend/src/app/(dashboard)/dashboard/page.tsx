@@ -47,6 +47,12 @@ export default function InboxPage() {
   const messageCountRef = useRef(0);
   const selectedConversationRef = useRef<Conversation | null>(null);
   const activeConversationIdRef = useRef<string | null>(null);
+  const conversationsListRef = useRef<Conversation[]>([]);
+
+  // Keep refs in sync with state for stable callbacks
+  useEffect(() => {
+    conversationsListRef.current = conversationsList;
+  }, [conversationsList]);
 
   // Load labels on mount
   useEffect(() => {
@@ -217,17 +223,20 @@ export default function InboxPage() {
     }
   }, [token]);
 
-  // Socket event handlers
+  // Socket event handlers - use refs for stable callbacks (no re-registration on state changes)
   const handleNewMessage = useCallback((data: any) => {
     console.log('[UI] New message received:', data);
 
+    // Use ref to avoid dependency on conversationsList state
+    const currentConversations = conversationsListRef.current;
+
     // Check if this conversation exists in our list (including unified group accounts)
-    let existingConv = conversationsList.find(c => c.id === data.conversationId);
+    let existingConv = currentConversations.find(c => c.id === data.conversationId);
     let unifiedGroupConv: Conversation | undefined;
 
     // Also check unified group accounts
     if (!existingConv) {
-      unifiedGroupConv = conversationsList.find(c =>
+      unifiedGroupConv = currentConversations.find(c =>
         c.is_unified_group && c.accounts?.some(a => a.conversation_id === data.conversationId)
       );
       existingConv = unifiedGroupConv;
@@ -317,7 +326,7 @@ export default function InboxPage() {
         return bTime - aTime;
       });
     });
-  }, [conversationsList, loadConversations]);
+  }, [loadConversations]); // Removed conversationsList - using ref instead
 
   // Handle sync progress
   const handleSyncProgress = useCallback((data: any) => {

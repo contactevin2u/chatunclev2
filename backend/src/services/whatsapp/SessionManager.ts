@@ -1218,29 +1218,33 @@ class SessionManager {
     console.log(`[WA] Sending ${payload.type} message to ${jid}`);
     console.log(`[WA] Connected as: ${sock.user?.id}`);
 
-    // === ANTI-BAN MEASURES (OPTIMIZED FOR SPEED) ===
+    // === ANTI-BAN MEASURES (OPTIMIZED FOR SPEED - NON-BLOCKING) ===
     if (!options.skipAntiBan) {
-      // 1. Pre-send check (rate limiting, daily limits)
+      // 1. Pre-send check (rate limiting, daily limits) - still blocking
       const preCheck = await preSendCheck(accountId, waId);
       if (!preCheck.canSend) {
         console.warn(`[WA] Anti-ban blocked send: ${preCheck.reason}`);
         throw new Error(`Message blocked: ${preCheck.reason}`);
       }
 
-      // 2. Quick typing indicator (0.5-2 seconds total)
-      // Skip the "available" presence for conversational replies - not needed
+      // 2. Typing indicator - RUN IN PARALLEL (don't block message send)
+      // This allows instant multi-agent sync while still showing typing to contacts
       const messageLength = payload.content?.length || 50;
       const typingDuration = getTypingDuration(messageLength);
-      console.log(`[AntiBan] Typing for ${typingDuration}ms`);
 
-      try {
-        await sock.sendPresenceUpdate('composing', jid);
-        await sleep(typingDuration);
-        await sock.sendPresenceUpdate('paused', jid);
-        // No additional delay after paused - send immediately
-      } catch (e) {
-        console.log(`[WA] Typing indicator skipped:`, e);
-      }
+      // Fire typing indicator in background (non-blocking)
+      void (async () => {
+        try {
+          await sock.sendPresenceUpdate('composing', jid);
+          await sleep(typingDuration);
+          await sock.sendPresenceUpdate('paused', jid);
+        } catch (e) {
+          // Typing indicator is optional, don't fail the message
+        }
+      })();
+
+      // Small delay to let typing start before message (50ms max)
+      await sleep(50);
     }
 
     let result;
@@ -1401,27 +1405,32 @@ class SessionManager {
 
     console.log(`[WA][Group] Sending ${payload.type} message to ${groupJid}`);
 
-    // === ANTI-BAN MEASURES FOR GROUPS ===
+    // === ANTI-BAN MEASURES FOR GROUPS (NON-BLOCKING) ===
     if (!options.skipAntiBan) {
-      // Group pre-send check (rate limiting only, no new contact check)
+      // Group pre-send check (rate limiting only, no new contact check) - still blocking
       const preCheck = await preSendCheckGroup(accountId);
       if (!preCheck.canSend) {
         console.warn(`[WA][Group] Anti-ban blocked send: ${preCheck.reason}`);
         throw new Error(`Message blocked: ${preCheck.reason}`);
       }
 
-      // Typing indicator for groups (shorter duration)
+      // Typing indicator - RUN IN PARALLEL for instant multi-agent sync
       const messageLength = payload.content?.length || 50;
-      const typingDuration = Math.min(getTypingDuration(messageLength), 1500); // Max 1.5s for groups
-      console.log(`[AntiBan][Group] Typing for ${typingDuration}ms`);
+      const typingDuration = Math.min(getTypingDuration(messageLength), 1500);
 
-      try {
-        await sock.sendPresenceUpdate('composing', groupJid);
-        await sleep(typingDuration);
-        await sock.sendPresenceUpdate('paused', groupJid);
-      } catch (e) {
-        console.log(`[WA][Group] Typing indicator skipped:`, e);
-      }
+      // Fire typing indicator in background (non-blocking)
+      void (async () => {
+        try {
+          await sock.sendPresenceUpdate('composing', groupJid);
+          await sleep(typingDuration);
+          await sock.sendPresenceUpdate('paused', groupJid);
+        } catch (e) {
+          // Typing indicator is optional, don't fail the message
+        }
+      })();
+
+      // Small delay to let typing start before message (50ms max)
+      await sleep(50);
     }
 
     let result;
