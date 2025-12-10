@@ -259,8 +259,9 @@ class SessionManager {
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
-      // Use Browsers helper for proper browser identification (recommended by Baileys docs)
-      browser: Browsers.ubuntu('ChatUncle'),
+      // Use Desktop browser to get full history sync (per Baileys docs)
+      // "If you want to emulate a desktop to get full chat history events, use Browsers.macOS('Desktop')"
+      browser: Browsers.macOS('Desktop'),
       // Enable full history sync - runs in background (non-blocking) so doesn't affect real-time
       syncFullHistory: true,
       // Don't mark as online on connect - allows user to receive notifications on phone
@@ -305,19 +306,10 @@ class SessionManager {
         delayBetweenTriesMs: 100,     // Minimal delay
       },
 
-      // Filter which history chunks to sync during download
-      // CRITICAL: Return false for no-timestamp checks to skip 20-second AwaitingInitialSync wait
-      // Baileys tests this with a fake RECENT notification (no timestamp) to decide if it should wait
-      // Return false = events flow immediately (no buffering)
-      // Return true = 20 second buffer wait before events are delivered
-      shouldSyncHistoryMessage: (historyNotification) => {
-        const oldestTimestamp = historyNotification.oldestMsgInChunkTimestampSec;
-        // IMPORTANT: Return FALSE when no timestamp - this is Baileys' initial check
-        // Returning false here skips the 20-second AwaitingInitialSync wait
-        if (!oldestTimestamp) return false;
-        // Accept ALL history chunks - sync runs in background (non-blocking)
-        return true;
-      },
+      // Accept ALL history sync messages - required for full history to work
+      // Returning true means Baileys will buffer events for ~20 seconds on connect
+      // but this ensures we receive all history chunks
+      shouldSyncHistoryMessage: () => true,
 
       // Filter JIDs to ignore - skip status broadcasts and newsletters
       // Reduces event processing overhead significantly
