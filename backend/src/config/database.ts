@@ -41,19 +41,23 @@ const poolConfig: PoolConfig = {
   connectionString: config.databaseUrl,
   ssl: getSSLConfig(),
 
-  // Connection pool settings
-  max: 50, // OPTIMIZED: Increased for parallel processing // Maximum number of clients in the pool (Render free tier allows 97)
-  min: 5, // OPTIMIZED: Higher minimum for faster cold starts // Minimum number of idle clients
-  idleTimeoutMillis: 60000, // OPTIMIZED: Keep connections warm longer // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 10000, // Return error after 10 seconds if no connection available
+  // ============ MAXIMUM SPEED POOL SETTINGS (2GB RAM) ============
+  // Connection pool settings - aggressive for parallel processing
+  max: 75,                          // 75 connections (1GB DB can handle ~100)
+  min: 10,                          // 10 warm connections ready
+  idleTimeoutMillis: 120000,        // 2 min idle timeout (keep connections warm)
+  connectionTimeoutMillis: 5000,    // 5 second connection timeout (fail fast)
 
-  // Query settings
-  statement_timeout: 30000, // Cancel queries running longer than 30 seconds
-  query_timeout: 30000, // Query timeout (alias for some drivers)
+  // Query settings - fast timeouts
+  statement_timeout: 15000,         // 15 second query timeout (fail fast)
+  query_timeout: 15000,
 
-  // Keep connections alive
+  // Keep connections alive and responsive
   keepAlive: true,
-  keepAliveInitialDelayMillis: 5000, // OPTIMIZED: Faster keepalive
+  keepAliveInitialDelayMillis: 1000, // 1 second keepalive start
+
+  // Allow queue when pool is full
+  allowExitOnIdle: false,
 };
 
 export const pool = new Pool(poolConfig);

@@ -58,13 +58,14 @@ class HealthMonitorService {
 
     // Memory thresholds - use absolute MB instead of percentage
     // Node.js heap grows dynamically, so percentage is misleading
-    memoryWarningMB: 400, // Warn at 400MB
-    memoryCriticalMB: 450, // Critical at 450MB (Render free tier has 512MB)
+    // OPTIMIZED FOR 2GB RAM (Render paid tier)
+    memoryWarningMB: 1400, // Warn at 1.4GB
+    memoryCriticalMB: 1700, // Critical at 1.7GB (leave 300MB headroom)
   };
 
   // Track last memory alert to avoid spam
   private lastMemoryAlert: number = 0;
-  private memoryAlertCooldownMs: number = 300000; // 5 minutes between alerts
+  private memoryAlertCooldownMs: number = 600000; // 10 minutes between alerts (less spam)
 
   constructor() {
     // Start memory monitoring

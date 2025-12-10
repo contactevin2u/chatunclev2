@@ -13,20 +13,21 @@ class MessageDeduplicatorService {
   // Map of messageId -> timestamp (when it was processed)
   private processed: Map<string, number> = new Map();
 
+  // OPTIMIZED FOR 2GB RAM
   // Maximum entries before forced cleanup
-  private maxEntries = 50000;
+  private maxEntries = 150000;
 
-  // TTL for processed entries (1 hour)
-  private ttlMs = 3600000;
+  // TTL for processed entries (2 hours - matches MessageStore TTL)
+  private ttlMs = 7200000;
 
   // Cleanup interval
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Start periodic cleanup
+    // Start periodic cleanup (every 3 minutes for faster cleanup)
     this.cleanupInterval = setInterval(() => {
       this.cleanup();
-    }, 300000); // Every 5 minutes
+    }, 180000); // Every 3 minutes
   }
 
   /**

@@ -68,14 +68,19 @@ interface ProcessingContext {
 
 /**
  * Message processing batch configuration
+ * OPTIMIZED FOR 2GB RAM + SPEED
  */
 const BATCH_CONFIG = {
-  // Number of messages to process in parallel
-  MESSAGE_BATCH_SIZE: 10,
-  // Number of contacts to batch insert
-  CONTACT_BATCH_SIZE: 50,
-  // Delay between batches (ms) for anti-ban
-  BATCH_DELAY_MS: 100,
+  // Number of messages to process in parallel (increased for 2GB RAM)
+  MESSAGE_BATCH_SIZE: 25,
+  // Number of contacts to batch insert (increased for speed)
+  CONTACT_BATCH_SIZE: 100,
+  // Number of groups to process in parallel
+  GROUP_BATCH_SIZE: 10,
+  // Delay between batches (ms) - minimal for speed, still anti-ban safe
+  BATCH_DELAY_MS: 50,
+  // Delay between history sync chunks
+  HISTORY_DELAY_MS: 25,
 };
 
 /**

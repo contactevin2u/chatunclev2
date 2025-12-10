@@ -27,14 +27,15 @@ class MessageStoreService {
   private cache: NodeCache;
 
   // Maximum messages to keep in memory per account
-  private maxMessagesPerAccount = 2000;
+  // OPTIMIZED FOR 2GB RAM
+  private maxMessagesPerAccount = 5000;
 
   constructor() {
     this.cache = new NodeCache({
-      stdTTL: 3600,        // 1 hour TTL (increased from 30 min for better hit rate)
-      checkperiod: 600,    // Check for expired keys every 10 minutes
+      stdTTL: 7200,        // 2 hour TTL (increased for better hit rate with 2GB RAM)
+      checkperiod: 300,    // Check for expired keys every 5 minutes
       useClones: false,    // Don't clone for performance - critical for speed
-      maxKeys: 100000,     // Max 100k messages across all accounts (increased for multi-account)
+      maxKeys: 250000,     // 250k messages across all accounts (2GB RAM can handle this)
     });
 
     // Log cache stats periodically

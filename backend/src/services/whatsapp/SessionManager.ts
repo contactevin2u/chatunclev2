@@ -248,24 +248,33 @@ class SessionManager {
       // Reduces API calls to WhatsApp servers and improves performance
       cachedGroupMetadata: groupMetadataCache.createCacheFunction(accountId),
 
-      // ============ PERFORMANCE OPTIMIZATIONS ============
+      // ============ MAXIMUM PERFORMANCE OPTIMIZATIONS ============
+      // Reference: https://baileys.wiki/docs/socket/configuration/
       // Reference: https://www.builderbot.app/en/providers/baileys
 
-      // Emit own events to batch multiple updates into single emissions
-      // Reduces socket.io traffic and improves multi-account performance
+      // Emit own events for batch processing with sock.ev.process()
       emitOwnEvents: true,
 
-      // Connection timeouts - optimized for reliability
-      connectTimeoutMs: 60000,        // 60 seconds for initial connection
-      defaultQueryTimeoutMs: 60000,   // 60 seconds for queries
-      keepAliveIntervalMs: 25000,     // 25 second ping-pong interval
-      retryRequestDelayMs: 250,       // 250ms between retry requests (fast retries)
+      // SPEED: Aggressive connection timeouts for fast reconnects
+      connectTimeoutMs: 30000,        // 30 seconds (reduced from 60)
+      defaultQueryTimeoutMs: 30000,   // 30 seconds for queries
+      keepAliveIntervalMs: 20000,     // 20 second ping-pong (faster detection of dead connections)
+      retryRequestDelayMs: 100,       // 100ms between retries (FAST)
 
-      // QR code timeout - give users enough time to scan
-      qrTimeout: 60000,               // 60 seconds per QR code
+      // QR code timeout
+      qrTimeout: 45000,               // 45 seconds per QR code
 
-      // Max retry count for failed messages
-      maxMsgRetryCount: 5,
+      // SPEED: Fast message retries
+      maxMsgRetryCount: 3,            // Reduced retries for speed (was 5)
+
+      // SPEED: Fire init queries immediately for faster connection
+      fireInitQueries: true,
+
+      // SPEED: Transaction optimization for batch commits
+      transactionOpts: {
+        maxCommitRetries: 2,          // Fast fail
+        delayBetweenTriesMs: 100,     // Minimal delay
+      },
 
       // Filter which history chunks to sync during download
       // Only sync recent history (last 3 days) for FASTER initial connection
