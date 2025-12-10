@@ -469,6 +469,13 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_name VARCHAR(255);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_edited BOOLEAN DEFAULT FALSE;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
 
+-- Add quoted message support (for replies)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS quoted_message_id UUID REFERENCES messages(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS quoted_wa_message_id VARCHAR(255);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS quoted_content TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS quoted_sender_name VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_messages_quoted ON messages(quoted_message_id) WHERE quoted_message_id IS NOT NULL;
+
 -- Indexes for groups
 CREATE INDEX IF NOT EXISTS idx_groups_account ON groups(whatsapp_account_id);
 CREATE INDEX IF NOT EXISTS idx_groups_jid ON groups(group_jid);

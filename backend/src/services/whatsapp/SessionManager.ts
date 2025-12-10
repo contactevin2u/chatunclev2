@@ -840,14 +840,67 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
+    // Extract quoted message info from contextInfo (for replies)
+    let quotedWaMessageId: string | null = null;
+    let quotedContent: string | null = null;
+    let quotedSenderName: string | null = null;
+    let quotedMessageDbId: string | null = null;
+
+    // contextInfo can be in different message types
+    const contextInfo = messageContent?.extendedTextMessage?.contextInfo ||
+                        messageContent?.imageMessage?.contextInfo ||
+                        messageContent?.videoMessage?.contextInfo ||
+                        messageContent?.audioMessage?.contextInfo ||
+                        messageContent?.documentMessage?.contextInfo ||
+                        messageContent?.stickerMessage?.contextInfo ||
+                        messageContent?.locationMessage?.contextInfo;
+
+    if (contextInfo?.stanzaId) {
+      quotedWaMessageId = contextInfo.stanzaId;
+      quotedSenderName = contextInfo.participant ?
+        contextInfo.participant.split('@')[0] : // Extract phone number from JID
+        (contextInfo.quotedMessage ? 'You' : null);
+
+      // Try to get quoted message content
+      const quotedMsg = contextInfo.quotedMessage;
+      if (quotedMsg) {
+        const quotedMsgType = getContentType(quotedMsg);
+        quotedContent = quotedMsg?.conversation ||
+                        quotedMsg?.extendedTextMessage?.text ||
+                        quotedMsg?.imageMessage?.caption ||
+                        quotedMsg?.videoMessage?.caption ||
+                        (quotedMsgType === 'imageMessage' ? '[Image]' : null) ||
+                        (quotedMsgType === 'videoMessage' ? '[Video]' : null) ||
+                        (quotedMsgType === 'audioMessage' ? '[Audio]' : null) ||
+                        (quotedMsgType === 'stickerMessage' ? '[Sticker]' : null) ||
+                        (quotedMsgType === 'documentMessage' ? '[Document]' : null) ||
+                        '[Message]';
+      }
+
+      // Try to find the quoted message in our database
+      const quotedDbMsg = await queryOne<{ id: string; sender_name: string }>(
+        'SELECT id, sender_name FROM messages WHERE wa_message_id = $1',
+        [quotedWaMessageId]
+      );
+      if (quotedDbMsg) {
+        quotedMessageDbId = quotedDbMsg.id;
+        // Use DB sender name if available
+        if (quotedDbMsg.sender_name) {
+          quotedSenderName = quotedDbMsg.sender_name;
+        }
+      }
+
+      console.log(`[WA] Message is reply to ${quotedWaMessageId}: "${quotedContent?.substring(0, 30)}..."`);
+    }
+
     // Save message (ON CONFLICT handles duplicate syncs)
     const savedMessage = await queryOne(
-      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at)
-       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7)
+      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, created_at, quoted_message_id, quoted_wa_message_id, quoted_content, quoted_sender_name)
+       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7, $8, $9, $10, $11)
        ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
        DO UPDATE SET updated_at = NOW()
        RETURNING *`,
-      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp]
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, messageTimestamp, quotedMessageDbId, quotedWaMessageId, quotedContent, quotedSenderName]
     );
 
     console.log(`[WA] Saved message ${savedMessage.id} (${contentType}): ${content?.substring(0, 50) || '[media]'}...`);
@@ -1815,14 +1868,63 @@ class SessionManager {
       ? new Date(Number(msg.messageTimestamp) * 1000)
       : new Date();
 
+    // Extract quoted message info from contextInfo (for replies)
+    let quotedWaMessageId: string | null = null;
+    let quotedContent: string | null = null;
+    let quotedSenderName: string | null = null;
+    let quotedMessageDbId: string | null = null;
+
+    const contextInfo = messageContent?.extendedTextMessage?.contextInfo ||
+                        messageContent?.imageMessage?.contextInfo ||
+                        messageContent?.videoMessage?.contextInfo ||
+                        messageContent?.audioMessage?.contextInfo ||
+                        messageContent?.documentMessage?.contextInfo ||
+                        messageContent?.stickerMessage?.contextInfo ||
+                        messageContent?.locationMessage?.contextInfo;
+
+    if (contextInfo?.stanzaId) {
+      quotedWaMessageId = contextInfo.stanzaId;
+      quotedSenderName = contextInfo.participant ?
+        contextInfo.participant.split('@')[0] :
+        (contextInfo.quotedMessage ? 'You' : null);
+
+      const quotedMsg = contextInfo.quotedMessage;
+      if (quotedMsg) {
+        const quotedMsgType = getContentType(quotedMsg);
+        quotedContent = quotedMsg?.conversation ||
+                        quotedMsg?.extendedTextMessage?.text ||
+                        quotedMsg?.imageMessage?.caption ||
+                        quotedMsg?.videoMessage?.caption ||
+                        (quotedMsgType === 'imageMessage' ? '[Image]' : null) ||
+                        (quotedMsgType === 'videoMessage' ? '[Video]' : null) ||
+                        (quotedMsgType === 'audioMessage' ? '[Audio]' : null) ||
+                        (quotedMsgType === 'stickerMessage' ? '[Sticker]' : null) ||
+                        (quotedMsgType === 'documentMessage' ? '[Document]' : null) ||
+                        '[Message]';
+      }
+
+      const quotedDbMsg = await queryOne<{ id: string; sender_name: string }>(
+        'SELECT id, sender_name FROM messages WHERE wa_message_id = $1',
+        [quotedWaMessageId]
+      );
+      if (quotedDbMsg) {
+        quotedMessageDbId = quotedDbMsg.id;
+        if (quotedDbMsg.sender_name) {
+          quotedSenderName = quotedDbMsg.sender_name;
+        }
+      }
+
+      console.log(`[WA][Group] Message is reply to ${quotedWaMessageId}: "${quotedContent?.substring(0, 30)}..."`);
+    }
+
     // Save message with sender info (sender_jid and sender_name for groups) - ON CONFLICT handles duplicate syncs
     const savedMessage = await queryOne(
-      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, sender_jid, sender_name, created_at)
-       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7, $8, $9)
+      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, media_mime_type, status, sender_jid, sender_name, created_at, quoted_message_id, quoted_wa_message_id, quoted_content, quoted_sender_name)
+       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'delivered', $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (conversation_id, wa_message_id) WHERE wa_message_id IS NOT NULL
        DO UPDATE SET updated_at = NOW()
        RETURNING *`,
-      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, senderJid, pushName, messageTimestamp]
+      [conversation.id, msgKey.id, contentType, content, mediaUrl, mediaMimeType, senderJid, pushName, messageTimestamp, quotedMessageDbId, quotedWaMessageId, quotedContent, quotedSenderName]
     );
 
     console.log(`[WA][Group] Saved message ${savedMessage.id} from ${pushName || senderWaId}: ${content?.substring(0, 50) || '[media]'}...`);

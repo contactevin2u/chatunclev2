@@ -34,12 +34,14 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
       return;
     }
 
-    // Include sender_jid, sender_name, and reactions for messages
+    // Include sender_jid, sender_name, reactions, and quoted message info
     let sql = `
       SELECT m.id, m.wa_message_id, m.sender_type, m.content_type, m.content,
              m.media_url, m.media_mime_type, m.status, m.created_at,
              m.agent_id, m.is_auto_reply, m.response_time_ms,
              m.sender_jid, m.sender_name, m.reactions,
+             m.is_edited, m.edited_at,
+             m.quoted_message_id, m.quoted_wa_message_id, m.quoted_content, m.quoted_sender_name,
              u.name as agent_name
       FROM messages m
       LEFT JOIN users u ON m.agent_id = u.id
