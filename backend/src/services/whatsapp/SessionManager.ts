@@ -37,6 +37,7 @@ import {
   uploadSticker,
   uploadAudio,
   uploadVideo,
+  uploadDocument,
 } from '../cloudinary';
 import pino from 'pino';
 import NodeCache from 'node-cache';
@@ -782,6 +783,31 @@ class SessionManager {
         mediaMimeType = messageContent?.documentMessage?.mimetype ||
                         messageContent?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
                         'application/octet-stream';
+        // Download and upload document media
+        try {
+          const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (docBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA] Uploaded document to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl) {
+              // Base64 fallback for small documents (< 5MB)
+              if (docBuffer.length < 5 * 1024 * 1024) {
+                const base64 = Buffer.from(docBuffer).toString('base64');
+                mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+                console.log(`[WA] Stored document as Base64: ${base64.length} chars`);
+              } else {
+                console.log(`[WA] Document too large for Base64: ${docBuffer.length} bytes`);
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`[WA] Failed to download document:`, e);
+        }
         break;
       case 'stickerMessage':
         contentType = 'sticker';
@@ -1156,6 +1182,26 @@ class SessionManager {
         mediaMimeType = messageContent?.documentMessage?.mimetype ||
                         messageContent?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
                         'application/octet-stream';
+        // Download and upload document media
+        try {
+          const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (docBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][History] Uploaded document to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl && docBuffer.length < 5 * 1024 * 1024) {
+              const base64 = Buffer.from(docBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][History] Stored document as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error(`[WA][History] Failed to download document:`, e);
+        }
         break;
       case 'stickerMessage':
         contentType = 'sticker';
@@ -1845,6 +1891,26 @@ class SessionManager {
         contentType = 'document';
         content = messageContent?.documentMessage?.fileName || '[Document]';
         mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+        // Download and upload document media
+        try {
+          const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (docBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded document to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl && docBuffer.length < 5 * 1024 * 1024) {
+              const base64 = Buffer.from(docBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored document as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download document:', e);
+        }
         break;
       case 'stickerMessage':
         contentType = 'sticker';
@@ -2165,6 +2231,26 @@ class SessionManager {
         contentType = 'document';
         content = messageContent?.documentMessage?.fileName || '[Document]';
         mediaMimeType = messageContent?.documentMessage?.mimetype || 'application/octet-stream';
+        // Download and upload document
+        try {
+          const docBuffer = await downloadMediaMessage(msg as any, 'buffer', {});
+          if (docBuffer) {
+            if (isCloudinaryConfigured()) {
+              const cloudUrl = await uploadDocument(Buffer.from(docBuffer), msgKey.id || undefined);
+              if (cloudUrl) {
+                mediaUrl = cloudUrl;
+                console.log(`[WA][Group] Uploaded outgoing document to Cloudinary: ${cloudUrl}`);
+              }
+            }
+            if (!mediaUrl && docBuffer.length < 5 * 1024 * 1024) {
+              const base64 = Buffer.from(docBuffer).toString('base64');
+              mediaUrl = `data:${mediaMimeType};base64,${base64}`;
+              console.log(`[WA][Group] Stored outgoing document as Base64: ${base64.length} chars`);
+            }
+          }
+        } catch (e) {
+          console.error('[WA][Group] Failed to download outgoing document:', e);
+        }
         break;
       case 'stickerMessage':
         contentType = 'sticker';
