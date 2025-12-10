@@ -56,10 +56,15 @@ class HealthMonitorService {
     // Number of consecutive failures before triggering reconnect
     maxConsecutiveFailures: 3,
 
-    // Memory thresholds
-    memoryWarningPercent: 0.75,
-    memoryCriticalPercent: 0.85,
+    // Memory thresholds - use absolute MB instead of percentage
+    // Node.js heap grows dynamically, so percentage is misleading
+    memoryWarningMB: 400, // Warn at 400MB
+    memoryCriticalMB: 450, // Critical at 450MB (Render free tier has 512MB)
   };
+
+  // Track last memory alert to avoid spam
+  private lastMemoryAlert: number = 0;
+  private memoryAlertCooldownMs: number = 300000; // 5 minutes between alerts
 
   constructor() {
     // Start memory monitoring
@@ -218,29 +223,42 @@ class HealthMonitorService {
 
   /**
    * Check memory pressure and take action if needed
+   * Uses absolute MB thresholds instead of percentage (Node.js heap grows dynamically)
    */
   private checkMemoryPressure(): void {
     const used = process.memoryUsage();
-    const heapPercent = used.heapUsed / used.heapTotal;
     const heapMB = Math.round(used.heapUsed / 1024 / 1024);
     const totalMB = Math.round(used.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(used.rss / 1024 / 1024);
+    const now = Date.now();
 
-    if (heapPercent > this.config.memoryCriticalPercent) {
-      console.error(`[HealthMonitor] CRITICAL MEMORY: ${Math.round(heapPercent * 100)}% (${heapMB}/${totalMB}MB)`);
+    // Use RSS (Resident Set Size) which is actual memory used by the process
+    // This is more accurate than heap for determining real memory pressure
 
-      // Aggressive cleanup
-      this.triggerMemoryCleanup('critical');
+    if (rssMB > this.config.memoryCriticalMB) {
+      // Only log if cooldown has passed (avoid spam)
+      if (now - this.lastMemoryAlert > this.memoryAlertCooldownMs) {
+        console.error(`[HealthMonitor] CRITICAL MEMORY: RSS ${rssMB}MB, Heap ${heapMB}/${totalMB}MB`);
+        this.lastMemoryAlert = now;
 
-      // Force garbage collection if available
-      if (global.gc) {
-        console.log('[HealthMonitor] Forcing garbage collection');
-        global.gc();
+        // Aggressive cleanup
+        this.triggerMemoryCleanup('critical');
+
+        // Force garbage collection if available
+        if (global.gc) {
+          console.log('[HealthMonitor] Forcing garbage collection');
+          global.gc();
+        }
       }
-    } else if (heapPercent > this.config.memoryWarningPercent) {
-      console.warn(`[HealthMonitor] HIGH MEMORY: ${Math.round(heapPercent * 100)}% (${heapMB}/${totalMB}MB)`);
+    } else if (rssMB > this.config.memoryWarningMB) {
+      // Only log if cooldown has passed
+      if (now - this.lastMemoryAlert > this.memoryAlertCooldownMs) {
+        console.warn(`[HealthMonitor] HIGH MEMORY: RSS ${rssMB}MB, Heap ${heapMB}/${totalMB}MB`);
+        this.lastMemoryAlert = now;
 
-      // Light cleanup
-      this.triggerMemoryCleanup('warning');
+        // Light cleanup
+        this.triggerMemoryCleanup('warning');
+      }
     }
   }
 
@@ -284,7 +302,7 @@ class HealthMonitorService {
     degraded: number;
     unhealthy: number;
     dead: number;
-    memoryUsage: { heapUsed: number; heapTotal: number; percent: number };
+    memoryUsage: { heapUsed: number; heapTotal: number; rss: number; warningMB: number; criticalMB: number };
   } {
     const statuses = Array.from(this.healthStatus.values());
     const memory = process.memoryUsage();
@@ -298,7 +316,9 @@ class HealthMonitorService {
       memoryUsage: {
         heapUsed: Math.round(memory.heapUsed / 1024 / 1024),
         heapTotal: Math.round(memory.heapTotal / 1024 / 1024),
-        percent: Math.round((memory.heapUsed / memory.heapTotal) * 100),
+        rss: Math.round(memory.rss / 1024 / 1024),
+        warningMB: this.config.memoryWarningMB,
+        criticalMB: this.config.memoryCriticalMB,
       },
     };
   }
