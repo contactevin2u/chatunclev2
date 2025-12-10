@@ -171,6 +171,13 @@ export const messages = {
       token,
     }),
 
+  forward: (token: string, messageId: string, targetConversationId: string) =>
+    request<{ success: boolean; forwardedMessageId: string; targetConversationId: string }>(`/api/messages/${messageId}/forward`, {
+      method: 'POST',
+      body: { targetConversationId },
+      token,
+    }),
+
   sendToPhone: (token: string, accountId: string, phoneNumber: string, content: string, contentType = 'text', mediaUrl?: string, mediaMimeType?: string) =>
     request<{ message: any; conversation: { id: string; contact_id: string } }>('/api/send-to-phone', {
       method: 'POST',

@@ -14,6 +14,7 @@ interface MessageThreadProps {
   conversationId?: string;
   isGroup?: boolean;
   onReply?: (message: Message) => void;
+  onForward?: (message: Message) => void;
 }
 
 // Confirmation Modal Component
@@ -94,7 +95,7 @@ function ConfirmModal({
   );
 }
 
-export default function MessageThread({ messages, conversationId, isGroup = false, onReply }: MessageThreadProps) {
+export default function MessageThread({ messages, conversationId, isGroup = false, onReply, onForward }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const { token } = useAuth();
   const [parsingId, setParsingId] = useState<string | null>(null);
@@ -304,6 +305,16 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
             {/* Action buttons - left side for sent messages */}
             {isSent && (
               <div className="flex items-center self-center mr-1 gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                {/* Forward button */}
+                {onForward && message.wa_message_id && (
+                  <button
+                    onClick={() => onForward(message)}
+                    className="p-1 rounded-full hover:bg-gray-200"
+                    title="Forward"
+                  >
+                    <Forward className="h-4 w-4 text-gray-400" />
+                  </button>
+                )}
                 {/* Reply button */}
                 {onReply && message.wa_message_id && (
                   <button
@@ -610,6 +621,16 @@ export default function MessageThread({ messages, conversationId, isGroup = fals
                     title="Reply"
                   >
                     <Reply className="h-4 w-4 text-gray-400" />
+                  </button>
+                )}
+                {/* Forward button */}
+                {onForward && (
+                  <button
+                    onClick={() => onForward(message)}
+                    className="p-1 rounded-full hover:bg-gray-200"
+                    title="Forward"
+                  >
+                    <Forward className="h-4 w-4 text-gray-400" />
                   </button>
                 )}
                 {/* Reaction button */}

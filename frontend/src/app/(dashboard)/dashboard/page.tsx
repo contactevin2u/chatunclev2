@@ -14,6 +14,7 @@ import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import AchievementToast from '@/components/ui/AchievementToast';
 import OrderOpsToast from '@/components/ui/OrderOpsToast';
 import NewChatModal from '@/components/chat/NewChatModal';
+import ForwardModal from '@/components/chat/ForwardModal';
 import PenguinToast from '@/components/ui/PenguinToast';
 
 export default function InboxPage() {
@@ -44,6 +45,7 @@ export default function InboxPage() {
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [showPenguinToast, setShowPenguinToast] = useState(false);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
   const [incognitoMode, setIncognitoMode] = useState(false);
   const [incognitoLoading, setIncognitoLoading] = useState(false);
   const messageCountRef = useRef(0);
@@ -631,6 +633,23 @@ export default function InboxPage() {
     setReplyingTo(null);
   }, []);
 
+  // Handle forward message
+  const handleForward = useCallback((message: Message) => {
+    setForwardingMessage(message);
+  }, []);
+
+  // Handle forward success
+  const handleForwardSuccess = useCallback((targetConversationId: string) => {
+    setForwardingMessage(null);
+    // Optionally navigate to the target conversation
+    const targetConv = conversationsListRef.current.find(c => c.id === targetConversationId);
+    if (targetConv) {
+      setSelectedConversation(targetConv);
+      setActiveConversationId(null);
+      setMobileShowChat(true);
+    }
+  }, []);
+
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -1084,6 +1103,7 @@ export default function InboxPage() {
                   conversationId={getEffectiveConversationId() || undefined}
                   isGroup={selectedConversation?.is_group || false}
                   onReply={handleReply}
+                  onForward={handleForward}
                 />
               </div>
 
@@ -1148,6 +1168,15 @@ export default function InboxPage() {
         isOpen={showNewChatModal}
         onClose={() => setShowNewChatModal(false)}
         onSuccess={handleNewChatSuccess}
+      />
+
+      {/* Forward Message Modal */}
+      <ForwardModal
+        isOpen={!!forwardingMessage}
+        message={forwardingMessage}
+        currentConversationId={getEffectiveConversationId() || ''}
+        onClose={() => setForwardingMessage(null)}
+        onSuccess={handleForwardSuccess}
       />
 
       {/* Penguin Motivation Toast 🐧 */}

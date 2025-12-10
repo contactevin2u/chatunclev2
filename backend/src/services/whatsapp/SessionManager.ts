@@ -2782,11 +2782,13 @@ class SessionManager {
    * @param accountId - WhatsApp account ID
    * @param targetJid - The JID to forward to (contact or group)
    * @param messageKey - The key of the message to forward
+   * @param rawMessageFallback - Optional raw message JSON from DB for fallback
    */
   async forwardMessage(
     accountId: string,
     targetJid: string,
-    messageKey: { remoteJid: string; id: string; fromMe?: boolean; participant?: string }
+    messageKey: { remoteJid: string; id: string; fromMe?: boolean; participant?: string },
+    rawMessageFallback?: any
   ): Promise<string> {
     const session = this.sessions.get(accountId);
     if (!session) {
@@ -2802,15 +2804,63 @@ class SessionManager {
 
     console.log(`[WA] Forwarding message ${messageKey.id} to ${targetJid}`);
 
-    // Get the original message from MessageStore
-    const originalMsg = messageStore.get(accountId, messageKey as WAMessageKey);
-    if (!originalMsg) {
-      throw new Error('Original message not found in cache - cannot forward');
+    // Try to get the original message from MessageStore (cache first, then DB)
+    let originalMsg = await messageStore.getMessage(accountId, messageKey as WAMessageKey);
+
+    // Fallback: try parsing raw_message from DB if provided
+    if (!originalMsg && rawMessageFallback) {
+      try {
+        const parsed = typeof rawMessageFallback === 'string'
+          ? JSON.parse(rawMessageFallback)
+          : rawMessageFallback;
+        if (parsed && typeof parsed === 'object') {
+          originalMsg = parsed;
+          console.log(`[WA] Using raw_message fallback for forward`);
+        }
+      } catch (e) {
+        console.warn(`[WA] Failed to parse raw_message fallback:`, e);
+      }
     }
 
-    // Anti-ban: small delay before forwarding
-    const forwardDelay = 500 + Math.floor(Math.random() * 500);
+    if (!originalMsg) {
+      throw new Error('Original message not found - cannot forward. Message may be too old or not cached.');
+    }
+
+    // === ANTI-BAN MEASURES FOR FORWARDING ===
+    // Forwards are more suspicious than regular messages, use longer delays
+
+    // 1. Anti-ban pre-check (rate limiting, daily limits)
+    const isGroup = targetJid.endsWith('@g.us');
+    if (isGroup) {
+      const check = await preSendCheckGroup(accountId);
+      if (!check.canSend) {
+        throw new Error(`Forward blocked: ${check.reason}`);
+      }
+    } else {
+      const waId = targetJid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
+      const check = await preSendCheck(accountId, waId);
+      if (!check.canSend) {
+        throw new Error(`Forward blocked: ${check.reason}`);
+      }
+    }
+
+    // 2. Typing indicator (makes forwarding look like regular typing)
+    try {
+      await sock.sendPresenceUpdate('composing', targetJid);
+    } catch (e) {
+      // Typing indicator is optional
+    }
+
+    // 3. Longer delay for forwards (800-2000ms - more suspicious action)
+    const forwardDelay = 800 + Math.floor(Math.random() * 1200);
     await sleep(forwardDelay);
+
+    // 4. Stop typing
+    try {
+      await sock.sendPresenceUpdate('paused', targetJid);
+    } catch (e) {
+      // Optional
+    }
 
     try {
       // Use Baileys forward functionality
@@ -2823,6 +2873,14 @@ class SessionManager {
 
       if (!result?.key?.id) {
         throw new Error('Forward sent but no ID returned');
+      }
+
+      // 5. Post-send recording for rate limiting
+      if (isGroup) {
+        postSendRecordGroup(accountId);
+      } else {
+        const waId = targetJid.replace(/@s\.whatsapp\.net$/, '').replace(/@lid$/, '');
+        await postSendRecord(accountId, waId);
       }
 
       console.log(`[WA] Message forwarded successfully: ${result.key.id}`);
