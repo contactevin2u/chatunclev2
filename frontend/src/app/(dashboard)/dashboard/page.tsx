@@ -503,24 +503,28 @@ export default function InboxPage() {
           : selectedConversation.unread_count;
 
         if (unreadCount > 0) {
-          await conversationsApi.markRead(token, effectiveId);
-          // Update conversation list (handle both regular and unified groups)
-          setConversationsList((prev) =>
-            prev.map((conv) => {
-              if (conv.id === selectedConversation.id) {
-                if (conv.is_unified_group && conv.accounts) {
-                  // Update the specific account's unread count
-                  const updatedAccounts = conv.accounts.map(a =>
-                    a.conversation_id === effectiveId ? { ...a, unread_count: 0 } : a
-                  );
-                  const newTotalUnread = updatedAccounts.reduce((sum, a) => sum + a.unread_count, 0);
-                  return { ...conv, accounts: updatedAccounts, total_unread: newTotalUnread };
+          const result = await conversationsApi.markRead(token, effectiveId);
+          console.log('[Dashboard] markRead result:', result);
+          // Only clear unread count locally if NOT in incognito mode
+          // In incognito mode, keep unread badges visible for all agents
+          if (!result.incognito) {
+            setConversationsList((prev) =>
+              prev.map((conv) => {
+                if (conv.id === selectedConversation.id) {
+                  if (conv.is_unified_group && conv.accounts) {
+                    // Update the specific account's unread count
+                    const updatedAccounts = conv.accounts.map(a =>
+                      a.conversation_id === effectiveId ? { ...a, unread_count: 0 } : a
+                    );
+                    const newTotalUnread = updatedAccounts.reduce((sum, a) => sum + a.unread_count, 0);
+                    return { ...conv, accounts: updatedAccounts, total_unread: newTotalUnread };
+                  }
+                  return { ...conv, unread_count: 0 };
                 }
-                return { ...conv, unread_count: 0 };
-              }
-              return conv;
-            })
-          );
+                return conv;
+              })
+            );
+          }
         }
       } catch (error) {
         console.error('Failed to load messages:', error);

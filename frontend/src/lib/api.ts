@@ -132,7 +132,7 @@ export const conversations = {
     request<{ conversation: any }>(`/api/conversations/${id}`, { token }),
 
   markRead: (token: string, id: string) =>
-    request<{ message: string }>(`/api/conversations/${id}/read`, {
+    request<{ message: string; incognito?: boolean }>(`/api/conversations/${id}/read`, {
       method: 'PATCH',
       token,
     }),

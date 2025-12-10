@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { getConversationProfilePic } from '../services/profilePicService';
+import { sessionManager } from '../services/whatsapp/SessionManager';
 
 const router = Router();
 
@@ -284,14 +285,26 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // Mark conversation as read
+// Respects incognito mode - won't clear unread count or send read receipts when enabled
 router.patch('/:id/read', async (req: Request, res: Response) => {
   try {
-    // Verify ownership or shared access
-    const conversation = await queryOne(`
-      SELECT c.id
+    // Get conversation with account incognito status and recent messages
+    const conversation = await queryOne<{
+      id: string;
+      whatsapp_account_id: string;
+      incognito_mode: boolean;
+      is_group: boolean;
+      group_jid: string | null;
+      wa_id: string | null;
+      jid_type: string | null;
+    }>(`
+      SELECT c.id, c.whatsapp_account_id, wa.incognito_mode, c.is_group,
+             g.group_jid, ct.wa_id, ct.jid_type
       FROM conversations c
       JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
       LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      LEFT JOIN groups g ON c.group_id = g.id
+      LEFT JOIN contacts ct ON c.contact_id = ct.id
       WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
@@ -300,10 +313,53 @@ router.patch('/:id/read', async (req: Request, res: Response) => {
       return;
     }
 
+    // INCOGNITO MODE: Don't clear unread count or send read receipts
+    console.log(`[Conversations] Mark read - incognito_mode value:`, conversation.incognito_mode, typeof conversation.incognito_mode);
+    if (conversation.incognito_mode) {
+      console.log(`[Conversations] Incognito mode ENABLED - not marking ${req.params.id} as read`);
+      res.json({ message: 'Incognito mode - not marked as read', incognito: true });
+      return;
+    }
+
+    // Clear unread count in database
     await execute(
       'UPDATE conversations SET unread_count = 0, updated_at = NOW() WHERE id = $1',
       [req.params.id]
     );
+
+    // Send read receipts via WhatsApp (blue ticks)
+    // Get recent unread messages to mark as read
+    const unreadMessages = await query<{ wa_message_id: string; sender_jid: string | null }>(`
+      SELECT wa_message_id, sender_jid
+      FROM messages
+      WHERE conversation_id = $1
+        AND sender_type = 'contact'
+        AND wa_message_id IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 20
+    `, [req.params.id]);
+
+    if (unreadMessages.length > 0) {
+      // Construct JID for read receipts
+      const remoteJid = conversation.is_group && conversation.group_jid
+        ? conversation.group_jid
+        : conversation.wa_id
+          ? `${conversation.wa_id}@${conversation.jid_type === 'lid' ? 'lid' : 's.whatsapp.net'}`
+          : null;
+
+      if (remoteJid) {
+        const keys = unreadMessages.map(msg => ({
+          remoteJid,
+          id: msg.wa_message_id,
+          fromMe: false,
+          ...(conversation.is_group && msg.sender_jid ? { participant: msg.sender_jid } : {}),
+        }));
+
+        // Send read receipts in background (don't block response)
+        sessionManager.markAsRead(conversation.whatsapp_account_id, keys)
+          .catch(err => console.error('[Conversations] Failed to send read receipts:', err));
+      }
+    }
 
     res.json({ message: 'Marked as read' });
   } catch (error) {

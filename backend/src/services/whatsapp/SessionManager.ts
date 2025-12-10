@@ -2678,6 +2678,18 @@ class SessionManager {
   }
 
   /**
+   * Update incognito mode for an active session
+   * Called when user toggles incognito mode from frontend
+   */
+  updateIncognitoMode(accountId: string, incognitoMode: boolean): void {
+    const session = this.sessions.get(accountId);
+    if (session) {
+      session.incognitoMode = incognitoMode;
+      console.log(`[WA] Updated incognito mode for account ${accountId}: ${incognitoMode}`);
+    }
+  }
+
+  /**
    * Send presence update (online, offline, typing)
    */
   async sendPresence(

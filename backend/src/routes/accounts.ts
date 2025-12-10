@@ -168,6 +168,11 @@ router.patch('/bulk/incognito', async (req: Request, res: Response) => {
       [req.user!.userId]
     );
 
+    // Update incognito mode for all active sessions
+    for (const account of accounts) {
+      sessionManager.updateIncognitoMode(account.id, incognitoMode);
+    }
+
     console.log(`[Accounts] Bulk incognito mode set to ${incognitoMode} for user ${req.user!.userId} (${accounts.length} accounts)`);
 
     res.json({ success: true, incognitoMode, accountsUpdated: accounts.length });
