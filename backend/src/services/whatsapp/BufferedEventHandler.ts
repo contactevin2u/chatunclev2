@@ -622,7 +622,16 @@ export function setupBufferedEventProcessing(
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+        // Determine if we should reconnect based on disconnect reason
+        // Don't reconnect for: loggedOut (401), connectionReplaced (440), badSession (500)
+        // Reconnect for: timedOut (408), restartRequired (515), connectionClosed (428), undefined
+        const noReconnectCodes = [
+          DisconnectReason.loggedOut,        // 401 - logged out, need new QR
+          DisconnectReason.connectionReplaced, // 440 - another device connected
+          DisconnectReason.badSession,       // 500 - bad session, need new QR
+        ];
+        const shouldReconnect = statusCode === undefined || !noReconnectCodes.includes(statusCode);
 
         console.log(`[WA][Buffered] Connection closed. Code: ${statusCode}, reconnect: ${shouldReconnect}`);
 

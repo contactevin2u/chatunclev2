@@ -385,6 +385,13 @@ class SessionManager {
         sock,
         saveCreds,
         onReconnect: () => {
+          // Skip reconnect if account is being intentionally destroyed
+          // This prevents double-reconnect loops when destroySession closes the socket
+          if (this.deletingAccounts.has(accountId)) {
+            console.log(`[WA] Skipping reconnect for ${accountId} (account is being destroyed)`);
+            return;
+          }
+
           const canReconnect = reconnectManager.canReconnect(accountId);
           if (canReconnect.allowed) {
             const delay = reconnectManager.scheduleReconnect(accountId, async () => {
