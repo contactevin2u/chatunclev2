@@ -513,7 +513,15 @@ export default function InboxPage() {
     setIsSending(true);
     try {
       const { message } = await messagesApi.send(token, effectiveId, content, contentType || 'text', mediaUrl, mediaMimeType, locationData, quotedMessageId);
-      setMessagesList((prev) => [...prev, message]);
+      // Add message with duplicate check - socket event may have already added it
+      setMessagesList((prev) => {
+        const isDuplicate = prev.some(m => m.id === message.id);
+        if (isDuplicate) {
+          console.log('[UI] Message already added via socket:', message.id);
+          return prev;
+        }
+        return [...prev, message];
+      });
 
       // Update conversation list
       let displayContent = content;

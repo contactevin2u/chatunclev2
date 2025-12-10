@@ -39,6 +39,15 @@ import {
   uploadVideo,
 } from '../cloudinary';
 import pino from 'pino';
+import NodeCache from 'node-cache';
+
+// Message retry counter cache - prevents decryption/encryption loops across socket restarts
+// MUST be kept outside the socket instance (per Baileys docs)
+const msgRetryCounterCache = new NodeCache({
+  stdTTL: 300,      // 5 minute TTL
+  checkperiod: 60,  // Check for expired keys every minute
+  useClones: false, // No cloning for performance
+});
 
 // Performance services
 import { messageStore } from './MessageStore';
@@ -263,6 +272,9 @@ class SessionManager {
       // cachedGroupMetadata for faster group operations (5-min TTL cache)
       // Reduces API calls to WhatsApp servers and improves performance
       cachedGroupMetadata: groupMetadataCache.createCacheFunction(accountId),
+      // Message retry counter - prevents decryption/encryption loops (per Baileys docs)
+      // MUST be external to socket to persist across reconnects
+      msgRetryCounterCache,
 
       // ============ MAXIMUM PERFORMANCE OPTIMIZATIONS ============
       // Reference: https://baileys.wiki/docs/socket/configuration/
