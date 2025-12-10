@@ -900,6 +900,39 @@ INSERT INTO achievements (code, name, description, icon, color, points, criteria
   ('ten_conversations', 'Conversation Starter', 'Handle 10 conversations', 'users', 'teal', 100, 'conversations_handled', 10),
   ('fifty_conversations', 'Chat Champion', 'Handle 50 conversations', 'star', 'gold', 500, 'conversations_handled', 50)
 ON CONFLICT (code) DO NOTHING;
+
+-- ============================================================
+-- SHARED TEMPLATES (Account-level instead of User-level)
+-- ============================================================
+-- Add whatsapp_account_id to templates so they can be shared across all agents
+-- with access to that account. user_id becomes optional (for backwards compatibility).
+
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE;
+ALTER TABLE templates ALTER COLUMN user_id DROP NOT NULL;
+
+-- Add index for account-based template queries
+CREATE INDEX IF NOT EXISTS idx_templates_account ON templates(whatsapp_account_id);
+
+-- Add whatsapp_account_id to template_sequences for shared sequences
+ALTER TABLE template_sequences ADD COLUMN IF NOT EXISTS whatsapp_account_id UUID REFERENCES whatsapp_accounts(id) ON DELETE CASCADE;
+ALTER TABLE template_sequences ALTER COLUMN user_id DROP NOT NULL;
+
+-- Add index for account-based sequence queries
+CREATE INDEX IF NOT EXISTS idx_template_sequences_account ON template_sequences(whatsapp_account_id);
+
+-- Migrate existing templates: assign to user's first account (if they have one)
+-- This is a one-time migration for existing data
+UPDATE templates t
+SET whatsapp_account_id = (
+  SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = t.user_id LIMIT 1
+)
+WHERE t.whatsapp_account_id IS NULL AND t.user_id IS NOT NULL;
+
+UPDATE template_sequences ts
+SET whatsapp_account_id = (
+  SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = ts.user_id LIMIT 1
+)
+WHERE ts.whatsapp_account_id IS NULL AND ts.user_id IS NOT NULL;
 `;
 
 async function runMigrations() {
