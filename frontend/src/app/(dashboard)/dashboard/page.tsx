@@ -51,6 +51,7 @@ export default function InboxPage() {
   const activeConversationIdRef = useRef<string | null>(null);
   const conversationsListRef = useRef<Conversation[]>([]);
   const incognitoModeRef = useRef(false);
+  const tokenRef = useRef<string | null>(null);
 
   // Keep refs in sync with state for stable callbacks
   useEffect(() => {
@@ -60,6 +61,10 @@ export default function InboxPage() {
   useEffect(() => {
     incognitoModeRef.current = incognitoMode;
   }, [incognitoMode]);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   // Load labels on mount
   useEffect(() => {
@@ -315,6 +320,14 @@ export default function InboxPage() {
     // Update conversations list with proper unified group handling
     // In incognito mode, ALWAYS increment unread count (even if viewing the conversation)
     const isIncognito = incognitoModeRef.current;
+    const currentToken = tokenRef.current;
+
+    // NORMAL MODE FIX: If viewing conversation and NOT incognito, call markRead to sync DB
+    // This prevents DB unread_count from drifting (backend always increments on new message)
+    if (isCurrentConversation && !isIncognito && currentToken) {
+      // Fire and forget - don't block UI update
+      conversationsApi.markRead(currentToken, data.conversationId).catch(() => {});
+    }
 
     setConversationsList((prev) => {
       const updated = prev.map((conv) => {
@@ -335,9 +348,14 @@ export default function InboxPage() {
           const matchingAccount = conv.accounts.find(a => a.conversation_id === data.conversationId);
           if (matchingAccount) {
             // Increment unread if not viewing OR if in incognito mode
-            const shouldIncrementUnread = !isViewingUnifiedGroup ||
-              activeConversationIdRef.current !== data.conversationId ||
-              isIncognito;
+            const isViewingThisAccount = isViewingUnifiedGroup &&
+              activeConversationIdRef.current === data.conversationId;
+            const shouldIncrementUnread = !isViewingThisAccount || isIncognito;
+
+            // NORMAL MODE FIX: If viewing this specific account in unified group
+            if (isViewingThisAccount && !isIncognito && currentToken) {
+              conversationsApi.markRead(currentToken, data.conversationId).catch(() => {});
+            }
 
             const updatedAccounts = conv.accounts.map(a =>
               a.conversation_id === data.conversationId
