@@ -1384,11 +1384,9 @@ class SessionManager {
 
     // Build quoted message for replies if provided
     let quotedMsg: any = undefined;
-    console.log(`[WA] Quote check - payload.quotedMessageKey:`, payload.quotedMessageKey ? JSON.stringify(payload.quotedMessageKey) : 'undefined');
     if (payload.quotedMessageKey) {
-      // Get the original message from MessageStore for proper quoting
-      const originalMsg = messageStore.get(accountId, payload.quotedMessageKey as WAMessageKey);
-      console.log(`[WA] MessageStore.get result:`, originalMsg ? 'found' : 'NOT FOUND');
+      // Get the original message from MessageStore (checks cache first, then DB)
+      const originalMsg = await messageStore.getMessage(accountId, payload.quotedMessageKey as WAMessageKey);
       if (originalMsg) {
         quotedMsg = {
           key: payload.quotedMessageKey,
@@ -1398,7 +1396,7 @@ class SessionManager {
       } else {
         // Cannot quote without message content - Baileys crashes with key-only quote
         // Skip quoting, message will still send without the reply preview
-        console.log(`[WA] Cannot quote message (no content in cache): ${payload.quotedMessageKey.id} - sending without quote`);
+        console.log(`[WA] Cannot quote message (not in cache or DB): ${payload.quotedMessageKey.id} - sending without quote`);
         quotedMsg = undefined;
       }
     }
@@ -1572,7 +1570,8 @@ class SessionManager {
     // Build quoted message for replies if provided
     let quotedMsg: any = undefined;
     if (payload.quotedMessageKey) {
-      const originalMsg = messageStore.get(accountId, payload.quotedMessageKey as WAMessageKey);
+      // Get the original message from MessageStore (checks cache first, then DB)
+      const originalMsg = await messageStore.getMessage(accountId, payload.quotedMessageKey as WAMessageKey);
       if (originalMsg) {
         quotedMsg = {
           key: payload.quotedMessageKey,
@@ -1582,7 +1581,7 @@ class SessionManager {
       } else {
         // Cannot quote without message content - Baileys crashes with key-only quote
         // Skip quoting, message will still send without the reply preview
-        console.log(`[WA][Group] Cannot quote message (no content in cache): ${payload.quotedMessageKey.id} - sending without quote`);
+        console.log(`[WA][Group] Cannot quote message (not in cache or DB): ${payload.quotedMessageKey.id} - sending without quote`);
         quotedMsg = undefined;
       }
     }
