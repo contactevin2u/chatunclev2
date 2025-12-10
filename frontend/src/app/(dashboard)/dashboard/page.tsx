@@ -545,15 +545,7 @@ export default function InboxPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="animate-pulse text-gray-500">Loading conversations...</div>
-      </div>
-    );
-  }
-
-  // Handle reply to a message
+  // Handle reply to a message - MUST be before any early returns!
   const handleReply = useCallback((message: Message) => {
     setReplyingTo(message);
   }, []);
@@ -562,6 +554,14 @@ export default function InboxPage() {
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
+
+  if (isLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="animate-pulse text-gray-500">Loading conversations...</div>
+      </div>
+    );
+  }
 
   // Handle selecting conversation (show chat on mobile)
   const handleSelectConversation = (conv: Conversation, selectedAccountConversationId?: string) => {
