@@ -259,10 +259,11 @@ export default function InboxPage() {
 
   // Socket event handlers - use refs for stable callbacks (no re-registration on state changes)
   const handleNewMessage = useCallback((data: any) => {
-    console.log('[UI] New message received:', data.conversationId, data.message?.id);
+    console.log('[UI] New message received:', data.conversationId, data.message?.id, 'sender:', data.message?.sender_type);
 
     // Use ref to avoid dependency on conversationsList state
     const currentConversations = conversationsListRef.current;
+    console.log('[UI] Current conversations count:', currentConversations.length);
 
     // Check if this conversation exists in our list (including unified group accounts)
     let existingConv = currentConversations.find(c => c.id === data.conversationId);
