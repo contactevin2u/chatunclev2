@@ -1387,11 +1387,10 @@ class SessionManager {
         };
         console.log(`[WA] Replying to message: ${payload.quotedMessageKey.id}`);
       } else {
-        // Fallback: quote without message content (will show "this message")
-        quotedMsg = {
-          key: payload.quotedMessageKey,
-        };
-        console.log(`[WA] Replying to message (no content cache): ${payload.quotedMessageKey.id}`);
+        // Cannot quote without message content - Baileys crashes with key-only quote
+        // Skip quoting, message will still send without the reply preview
+        console.log(`[WA] Cannot quote message (no content in cache): ${payload.quotedMessageKey.id} - sending without quote`);
+        quotedMsg = undefined;
       }
     }
 
@@ -1572,10 +1571,10 @@ class SessionManager {
         };
         console.log(`[WA][Group] Replying to message: ${payload.quotedMessageKey.id}`);
       } else {
-        quotedMsg = {
-          key: payload.quotedMessageKey,
-        };
-        console.log(`[WA][Group] Replying to message (no content cache): ${payload.quotedMessageKey.id}`);
+        // Cannot quote without message content - Baileys crashes with key-only quote
+        // Skip quoting, message will still send without the reply preview
+        console.log(`[WA][Group] Cannot quote message (no content in cache): ${payload.quotedMessageKey.id} - sending without quote`);
+        quotedMsg = undefined;
       }
     }
 
