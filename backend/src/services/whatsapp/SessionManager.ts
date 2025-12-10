@@ -12,6 +12,7 @@ import makeWASocket, {
   isLidUser,
   isPnUser,
   getContentType,
+  jidNormalizedUser,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import { usePostgresAuthState, clearPostgresAuthState } from './PostgresAuthState';
@@ -61,9 +62,13 @@ function isUserJid(jid: string | null | undefined): boolean {
 
 /**
  * Extract the user ID from a JID (works with both @s.whatsapp.net and @lid)
+ * Uses Baileys jidNormalizedUser to strip device suffix (e.g., :0, :1)
  */
 function extractUserIdFromJid(jid: string): string {
-  return jid.replace('@s.whatsapp.net', '').replace('@lid', '');
+  // First normalize the JID to strip device suffix (e.g., 60182320607:0@s.whatsapp.net -> 60182320607@s.whatsapp.net)
+  const normalized = jidNormalizedUser(jid);
+  // Then extract just the user ID part
+  return normalized.replace('@s.whatsapp.net', '').replace('@lid', '');
 }
 
 /**
