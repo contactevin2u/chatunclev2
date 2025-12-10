@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { templates as templatesApi, templateSequences, media } from '@/lib/api';
+import { templates as templatesApi, templateSequences, media, accounts as accountsApi } from '@/lib/api';
 import { Plus, Edit2, Trash2, FileText, Command, Image, Video, Mic, Clock, X, Upload, StopCircle, Loader2, File as FileIcon } from 'lucide-react';
 
-interface Template { id: string; name: string; content: string; shortcut?: string; content_type: string; media_url?: string; media_mime_type?: string; }
+interface Account { id: string; name: string; phone_number: string; status: string; }
+interface Template { id: string; name: string; content: string; shortcut?: string; content_type: string; media_url?: string; media_mime_type?: string; whatsapp_account_id?: string; }
 interface SequenceItem { id?: string; content_type: string; content?: string; media_url?: string; media_mime_type?: string; delay_min_seconds: number; delay_max_seconds: number; localFile?: globalThis.File; localPreviewUrl?: string; }
-interface Sequence { id: string; name: string; description?: string; shortcut?: string; is_active: boolean; items: SequenceItem[]; }
+interface Sequence { id: string; name: string; description?: string; shortcut?: string; is_active: boolean; items: SequenceItem[]; whatsapp_account_id?: string; }
 type ContentType = 'text' | 'image' | 'video' | 'audio' | 'document';
 const CONTENT_TYPES: { value: ContentType; label: string; icon: any }[] = [{ value: 'text', label: 'Text', icon: FileText }, { value: 'image', label: 'Image', icon: Image }, { value: 'video', label: 'Video', icon: Video }, { value: 'audio', label: 'Voice', icon: Mic }, { value: 'document', label: 'Document', icon: FileIcon }];
 
@@ -69,6 +70,8 @@ function FileUpload({ accept, onFileSelect, isUploading }: { accept: string; onF
 
 export default function TemplatesPage() {
   const { token } = useAuth();
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'quick' | 'sequences'>('quick');
   const [templatesList, setTemplatesList] = useState<Template[]>([]);
   const [sequencesList, setSequencesList] = useState<Sequence[]>([]);
@@ -84,9 +87,41 @@ export default function TemplatesPage() {
   const [editingSequence, setEditingSequence] = useState<Sequence | null>(null);
   const [sequenceForm, setSequenceForm] = useState({ name: '', description: '', shortcut: '', items: [] as SequenceItem[] });
 
-  useEffect(() => { if (token) loadData(); }, [token]);
+  // Load accounts first, then templates for selected account
+  useEffect(() => { if (token) loadAccounts(); }, [token]);
+  useEffect(() => { if (token && selectedAccountId) loadTemplates(); }, [token, selectedAccountId]);
 
-  const loadData = async () => { if (!token) return; setIsLoading(true); try { const [t, s] = await Promise.all([templatesApi.list(token), templateSequences.list(token).catch(() => ({ sequences: [] }))]); setTemplatesList(t.templates); setSequencesList(s.sequences || []); } finally { setIsLoading(false); } };
+  const loadAccounts = async () => {
+    if (!token) return;
+    setIsLoading(true);
+    try {
+      const res = await accountsApi.list(token);
+      setAccounts(res.accounts || []);
+      // Auto-select first account
+      if (res.accounts?.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(res.accounts[0].id);
+      }
+    } catch (e) {
+      console.error('Failed to load accounts:', e);
+    } finally {
+      if (!selectedAccountId) setIsLoading(false);
+    }
+  };
+
+  const loadTemplates = async () => {
+    if (!token || !selectedAccountId) return;
+    setIsLoading(true);
+    try {
+      const [t, s] = await Promise.all([
+        templatesApi.list(token, selectedAccountId),
+        templateSequences.list(token, selectedAccountId).catch(() => ({ sequences: [] }))
+      ]);
+      setTemplatesList(t.templates);
+      setSequencesList(s.sequences || []);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const uploadFile = async (file: File) => { if (!token) return null; setIsUploading(true); try { const r = await media.upload(token, file); return { url: r.url, mimeType: r.mimeType }; } catch { alert('Upload failed'); return null; } finally { setIsUploading(false); } };
   const uploadVoice = async (blob: Blob, dur: number) => { if (!token) return null; setIsUploading(true); try { const r = await media.uploadVoice(token, blob, dur); return { url: r.url, mimeType: r.mimeType }; } catch { alert('Upload failed'); return null; } finally { setIsUploading(false); } };
@@ -96,7 +131,7 @@ export default function TemplatesPage() {
   const handleQuickRecordComplete = (b: Blob) => { setQuickRecordingBlob(b); setQuickForm(p => ({ ...p, media_mime_type: b.type })); };
   const handleClearQuickMedia = () => { if (quickPreviewUrl && quickLocalFile) URL.revokeObjectURL(quickPreviewUrl); setQuickLocalFile(null); setQuickPreviewUrl(null); setQuickRecordingBlob(null); setQuickForm(p => ({ ...p, media_url: '', media_mime_type: '' })); };
 
-  const handleSaveQuick = async () => { if (!token || !quickForm.name) return; let mUrl = quickForm.media_url, mType = quickForm.media_mime_type; if (quickLocalFile) { const r = await uploadFile(quickLocalFile); if (r) { mUrl = r.url; mType = r.mimeType; } else return; } if (quickRecordingBlob) { const r = await uploadVoice(quickRecordingBlob, 0); if (r) { mUrl = r.url; mType = r.mimeType; } else return; } try { if (editingTemplate) { const { template } = await templatesApi.update(token, editingTemplate.id, { name: quickForm.name, content: quickForm.content, shortcut: quickForm.shortcut || undefined, content_type: quickForm.content_type, media_url: mUrl || undefined, media_mime_type: mType || undefined }); setTemplatesList(p => p.map(x => x.id === template.id ? template : x)); } else { const { template } = await templatesApi.create(token, quickForm.name, quickForm.content, quickForm.shortcut || undefined, { content_type: quickForm.content_type, media_url: mUrl || undefined, media_mime_type: mType || undefined }); setTemplatesList(p => [template, ...p]); } setShowQuickModal(false); } catch (e) { console.error(e); } };
+  const handleSaveQuick = async () => { if (!token || !quickForm.name || !selectedAccountId) return; let mUrl = quickForm.media_url, mType = quickForm.media_mime_type; if (quickLocalFile) { const r = await uploadFile(quickLocalFile); if (r) { mUrl = r.url; mType = r.mimeType; } else return; } if (quickRecordingBlob) { const r = await uploadVoice(quickRecordingBlob, 0); if (r) { mUrl = r.url; mType = r.mimeType; } else return; } try { if (editingTemplate) { const { template } = await templatesApi.update(token, editingTemplate.id, { name: quickForm.name, content: quickForm.content, shortcut: quickForm.shortcut || undefined, content_type: quickForm.content_type, media_url: mUrl || undefined, media_mime_type: mType || undefined }); setTemplatesList(p => p.map(x => x.id === template.id ? template : x)); } else { const { template } = await templatesApi.create(token, selectedAccountId, quickForm.name, quickForm.content, quickForm.shortcut || undefined, { content_type: quickForm.content_type, media_url: mUrl || undefined, media_mime_type: mType || undefined }); setTemplatesList(p => [template, ...p]); } setShowQuickModal(false); } catch (e) { console.error(e); } };
   const handleDeleteQuick = async (id: string) => { if (!token || !confirm('Delete?')) return; try { await templatesApi.delete(token, id); setTemplatesList(p => p.filter(x => x.id !== id)); } catch {} };
 
   const handleOpenSequenceModal = (s?: Sequence) => { if (s) { setEditingSequence(s); setSequenceForm({ name: s.name, description: s.description || '', shortcut: s.shortcut || '', items: s.items?.map(i => ({ ...i })) || [] }); } else { setEditingSequence(null); setSequenceForm({ name: '', description: '', shortcut: '', items: [{ content_type: 'text', content: '', delay_min_seconds: 0, delay_max_seconds: 0 }] }); } setShowSequenceModal(true); };
@@ -107,7 +142,7 @@ export default function TemplatesPage() {
   const handleSeqRecordComplete = (i: number, b: Blob) => { handleUpdateSequenceItem(i, { localFile: new File([b], 'voice.webm', { type: b.type }), localPreviewUrl: URL.createObjectURL(b), media_mime_type: b.type }); };
   const handleClearSeqMedia = (i: number) => { const item = sequenceForm.items[i]; if (item.localPreviewUrl) URL.revokeObjectURL(item.localPreviewUrl); handleUpdateSequenceItem(i, { localFile: undefined, localPreviewUrl: undefined, media_url: '', media_mime_type: '' }); };
 
-  const handleSaveSequence = async () => { if (!token || !sequenceForm.name || !sequenceForm.items.length) return; const items = await Promise.all(sequenceForm.items.map(async (x) => { let mUrl = x.media_url, mType = x.media_mime_type; if (x.localFile) { const r = await uploadFile(x.localFile); if (r) { mUrl = r.url; mType = r.mimeType; } } return { content_type: x.content_type, content: x.content, media_url: mUrl, media_mime_type: mType, delay_min_seconds: x.delay_min_seconds, delay_max_seconds: x.delay_max_seconds }; })); try { if (editingSequence) { const { sequence } = await templateSequences.update(token, editingSequence.id, { name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => p.map(x => x.id === sequence.id ? sequence : x)); } else { const { sequence } = await templateSequences.create(token, { name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => [sequence, ...p]); } setShowSequenceModal(false); } catch (e) { console.error(e); } };
+  const handleSaveSequence = async () => { if (!token || !sequenceForm.name || !sequenceForm.items.length || !selectedAccountId) return; const items = await Promise.all(sequenceForm.items.map(async (x) => { let mUrl = x.media_url, mType = x.media_mime_type; if (x.localFile) { const r = await uploadFile(x.localFile); if (r) { mUrl = r.url; mType = r.mimeType; } } return { content_type: x.content_type, content: x.content, media_url: mUrl, media_mime_type: mType, delay_min_seconds: x.delay_min_seconds, delay_max_seconds: x.delay_max_seconds }; })); try { if (editingSequence) { const { sequence } = await templateSequences.update(token, editingSequence.id, { name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => p.map(x => x.id === sequence.id ? sequence : x)); } else { const { sequence } = await templateSequences.create(token, { accountId: selectedAccountId, name: sequenceForm.name, description: sequenceForm.description || undefined, shortcut: sequenceForm.shortcut || undefined, items }); setSequencesList(p => [sequence, ...p]); } setShowSequenceModal(false); } catch (e) { console.error(e); } };
   const handleDeleteSequence = async (id: string) => { if (!token || !confirm('Delete?')) return; try { await templateSequences.delete(token, id); setSequencesList(p => p.filter(x => x.id !== id)); } catch {} };
 
   const getIcon = (t: string) => { switch (t) { case 'image': return <Image className="h-4 w-4" />; case 'video': return <Video className="h-4 w-4" />; case 'audio': return <Mic className="h-4 w-4" />; case 'document': return <FileIcon className="h-4 w-4" />; default: return <FileText className="h-4 w-4" />; } };
@@ -115,10 +150,19 @@ export default function TemplatesPage() {
 
   if (isLoading) return <div className="h-full flex items-center justify-center"><div className="animate-pulse text-gray-500">Loading...</div></div>;
 
+  if (accounts.length === 0) return <div className="h-full flex items-center justify-center"><div className="text-gray-500">No WhatsApp accounts found. Please add an account first.</div></div>;
+
   return (
     <div className="h-screen overflow-y-auto bg-gray-50">
       <div className="max-w-4xl mx-auto p-4 md:p-6">
-        <div className="mb-6"><h1 className="text-2xl font-bold text-gray-900">Templates</h1><p className="text-gray-500">Create templates and sequences with media</p></div>
+        <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 className="text-2xl font-bold text-gray-900">Templates</h1><p className="text-gray-500">Shared templates for all agents</p></div>
+          {accounts.length > 1 && (
+            <select value={selectedAccountId} onChange={(e) => setSelectedAccountId(e.target.value)} className="px-3 py-2 border rounded-lg bg-white text-sm">
+              {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.name || acc.phone_number}</option>)}
+            </select>
+          )}
+        </div>
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg mb-6">
           <button onClick={() => setActiveTab('quick')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium ${activeTab === 'quick' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}>Quick Replies ({templatesList.length})</button>
           <button onClick={() => setActiveTab('sequences')} className={`flex-1 py-2 px-4 rounded-md text-sm font-medium ${activeTab === 'sequences' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}>Sequences ({sequencesList.length})</button>

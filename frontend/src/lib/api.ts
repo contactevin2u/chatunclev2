@@ -240,19 +240,24 @@ export const labels = {
     }),
 };
 
-// Templates
+// Templates (shared per WhatsApp account)
 export const templates = {
-  list: (token: string) =>
-    request<{ templates: any[] }>('/api/templates', { token }),
+  // List templates for a specific account (or all accessible if no accountId)
+  list: (token: string, accountId?: string) =>
+    request<{ templates: any[] }>(
+      accountId ? `/api/templates?accountId=${accountId}` : '/api/templates',
+      { token }
+    ),
 
-  create: (token: string, name: string, content: string, shortcut?: string, options?: {
+  // Create template for an account (accountId required)
+  create: (token: string, accountId: string, name: string, content: string, shortcut?: string, options?: {
     content_type?: string;
     media_url?: string;
     media_mime_type?: string;
   }) =>
     request<{ template: any }>('/api/templates', {
       method: 'POST',
-      body: { name, content, shortcut, ...options },
+      body: { accountId, name, content, shortcut, ...options },
       token,
     }),
 
@@ -277,15 +282,21 @@ export const templates = {
     }),
 };
 
-// Template Sequences (multi-part with delays)
+// Template Sequences (shared per WhatsApp account)
 export const templateSequences = {
-  list: (token: string) =>
-    request<{ sequences: any[] }>('/api/templates/sequences', { token }),
+  // List sequences for a specific account (or all accessible if no accountId)
+  list: (token: string, accountId?: string) =>
+    request<{ sequences: any[] }>(
+      accountId ? `/api/templates/sequences?accountId=${accountId}` : '/api/templates/sequences',
+      { token }
+    ),
 
   get: (token: string, id: string) =>
     request<{ sequence: any }>(`/api/templates/sequences/${id}`, { token }),
 
+  // Create sequence for an account (accountId required)
   create: (token: string, data: {
+    accountId: string;
     name: string;
     description?: string;
     shortcut?: string;
