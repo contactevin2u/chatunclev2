@@ -446,8 +446,10 @@ async function processOrderAsync(
 
     // Notify result (success or failure from OrderOps)
     const isSuccess = data.status === 'success';
-    console.log(`[OrderOps] Emitting result to user:${userId} - success: ${isSuccess}, orderCode: ${orderCode}, data.status: ${data.status}`);
-    io.to(`user:${userId}`).emit('orderops:result', {
+    const userRoom = `user:${userId}`;
+    const roomSize = io.sockets.adapter.rooms.get(userRoom)?.size || 0;
+    console.log(`[OrderOps] Emitting result to ${userRoom} (${roomSize} clients) - success: ${isSuccess}, orderCode: ${orderCode}, data.status: ${data.status}`);
+    io.to(userRoom).emit('orderops:result', {
       success: isSuccess,
       messageId,
       conversationId,

@@ -65,6 +65,7 @@ export function useSocket(events: SocketEvents = {}) {
     }
 
     if (events.onOrderOpsResult) {
+      console.log('[useSocket] Registering orderops:result handler');
       socket.on('orderops:result', events.onOrderOpsResult);
     }
 
