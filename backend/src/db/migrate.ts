@@ -743,10 +743,28 @@ BEGIN
     IF lid_contact_id IS NOT NULL AND pn_contact_id IS NOT NULL AND lid_contact_id != pn_contact_id THEN
       RAISE NOTICE 'Merging duplicate contacts: LID % -> PN % (keeping %)', mapping.lid, mapping.pn, pn_contact_id;
 
-      -- Move LID contact's conversations to PN contact
-      UPDATE conversations
-      SET contact_id = pn_contact_id, updated_at = NOW()
-      WHERE contact_id = lid_contact_id;
+      -- Move LID contact's messages to PN contact's conversation (if PN conversation exists)
+      -- First, check if PN contact already has a conversation
+      DECLARE
+        lid_conv_id UUID;
+        pn_conv_id UUID;
+      BEGIN
+        SELECT id INTO lid_conv_id FROM conversations
+        WHERE whatsapp_account_id = mapping.whatsapp_account_id AND contact_id = lid_contact_id;
+
+        SELECT id INTO pn_conv_id FROM conversations
+        WHERE whatsapp_account_id = mapping.whatsapp_account_id AND contact_id = pn_contact_id;
+
+        IF lid_conv_id IS NOT NULL AND pn_conv_id IS NOT NULL THEN
+          -- Both have conversations - move messages and delete LID conversation
+          UPDATE messages SET conversation_id = pn_conv_id WHERE conversation_id = lid_conv_id;
+          DELETE FROM conversations WHERE id = lid_conv_id;
+          RAISE NOTICE 'Merged conversations: % -> %', lid_conv_id, pn_conv_id;
+        ELSIF lid_conv_id IS NOT NULL THEN
+          -- Only LID has conversation - reassign to PN contact
+          UPDATE conversations SET contact_id = pn_contact_id, updated_at = NOW() WHERE id = lid_conv_id;
+        END IF;
+      END;
 
       -- Move LID contact's labels to PN contact (ignore conflicts)
       INSERT INTO contact_labels (contact_id, label_id)

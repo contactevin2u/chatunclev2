@@ -152,40 +152,10 @@ async function processMessagesUpsert(
   // Mark all messages we're about to process (prevents race conditions with concurrent events)
   messageDeduplicator.markProcessedBatch(accountId, Array.from(newMessageIdSet));
 
-  // For real-time messages (notify), emit existing DB messages to frontend even if duplicate
-  // This ensures UI updates when messages arrive that were saved during history sync
+  // Log duplicates but don't do additional DB queries - refresh will load from DB
   if (isRealTime && newMessageIdSet.size < memoryFiltered.length) {
-    const duplicateMessages = memoryFiltered.filter(msg => !newMessageIdSet.has(msg.key!.id!));
-    if (duplicateMessages.length > 0) {
-      console.log(`[WA][Buffered] Emitting ${duplicateMessages.length} existing messages to frontend for real-time update`);
-      const io = getIO();
-
-      // Emit each duplicate message to frontend (they're already in DB, just need UI update)
-      for (const msg of duplicateMessages) {
-        const messageId = msg.key!.id!;
-        const remoteJid = msg.key!.remoteJid!;
-
-        try {
-          // Fetch the existing message from DB to emit
-          const existingMsg = await queryOne<{ id: string; conversation_id: string; content: string; content_type: string; created_at: string; status: string; sender_type: string }>(
-            `SELECT m.id, m.conversation_id, m.content, m.content_type, m.created_at, m.status, m.sender_type
-             FROM messages m WHERE m.wa_message_id = $1`,
-            [messageId]
-          );
-
-          if (existingMsg) {
-            io.to(`account:${accountId}`).emit('message:new', {
-              accountId,
-              conversationId: existingMsg.conversation_id,
-              message: existingMsg,
-            });
-            console.log(`[WA][Buffered] Emitted existing message ${messageId} to frontend`);
-          }
-        } catch (err) {
-          console.error(`[WA][Buffered] Error emitting existing message ${messageId}:`, err);
-        }
-      }
-    }
+    const duplicateCount = memoryFiltered.length - newMessageIdSet.size;
+    console.log(`[WA][Buffered] ${duplicateCount} real-time messages already in DB (user can refresh to see)`);
   }
 
   const validMessages = memoryFiltered.filter(msg => {
