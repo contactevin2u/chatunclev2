@@ -76,15 +76,16 @@ interface ProcessingContext {
  */
 const BATCH_CONFIG = {
   // Number of messages to process in parallel (increased for 2GB RAM)
-  MESSAGE_BATCH_SIZE: 25,
+  MESSAGE_BATCH_SIZE: 50,
   // Number of contacts to batch insert (increased for speed)
-  CONTACT_BATCH_SIZE: 100,
+  CONTACT_BATCH_SIZE: 200,
   // Number of groups to process in parallel
-  GROUP_BATCH_SIZE: 10,
+  GROUP_BATCH_SIZE: 20,
   // Delay between batches (ms) - minimal for speed, still anti-ban safe
-  BATCH_DELAY_MS: 50,
-  // Delay between history sync chunks
-  HISTORY_DELAY_MS: 25,
+  BATCH_DELAY_MS: 10,
+  // History sync processes ALL in parallel (no delays needed - it's background)
+  HISTORY_MESSAGE_BATCH_SIZE: 100,
+  HISTORY_GROUP_BATCH_SIZE: 50,
 };
 
 /**
@@ -352,7 +353,8 @@ async function processMessagesUpdate(
 }
 
 /**
- * Process messaging-history.set with batch operations
+ * Process messaging-history.set with FULLY PARALLEL batch operations
+ * Runs in background - does NOT block real-time messages
  */
 async function processHistorySync(
   ctx: ProcessingContext,
@@ -365,181 +367,147 @@ async function processHistorySync(
   }
 ): Promise<void> {
   const { chats, contacts, messages, isLatest, progress, syncType } = historyData as any;
-  const { accountId, userId, sock } = ctx;
+  const { accountId, userId } = ctx;
 
-  console.log(`[WA][Buffered] messaging-history.set:`);
-  console.log(`  - chats: ${chats?.length || 0}`);
-  console.log(`  - contacts: ${contacts?.length || 0}`);
-  console.log(`  - messages: ${messages?.length || 0}`);
-  console.log(`  - syncType: ${syncType}`);
+  const startTime = Date.now();
+  console.log(`[WA][History] Starting background sync for ${accountId}:`);
+  console.log(`  - chats: ${chats?.length || 0}, contacts: ${contacts?.length || 0}, messages: ${messages?.length || 0}`);
 
-  // BATCH PROCESS CONTACTS
-  if (contacts && contacts.length > 0) {
-    const contactBatch: Array<{
-      whatsapp_account_id: string;
-      wa_id: string;
-      phone_number: string | null;
-      name: string | null;
-      jid_type: 'lid' | 'pn';
-    }> = [];
+  // ============ PARALLEL PROCESSING: All three run simultaneously ============
+  const results = await Promise.allSettled([
+    // 1. CONTACTS - bulk insert all at once
+    (async () => {
+      if (!contacts || contacts.length === 0) return 0;
 
-    for (const contact of contacts) {
-      if (!contact.id || !isUserJid(contact.id)) continue;
+      const contactBatch: Array<{
+        whatsapp_account_id: string;
+        wa_id: string;
+        phone_number: string | null;
+        name: string | null;
+        jid_type: 'lid' | 'pn';
+      }> = [];
 
-      const waId = extractUserIdFromJid(contact.id);
-      const jidType = getJidType(contact.id);
-      const phoneNumber = jidType === 'pn' ? waId : null;
+      for (const contact of contacts) {
+        if (!contact.id || !isUserJid(contact.id)) continue;
+        const waId = extractUserIdFromJid(contact.id);
+        const jidType = getJidType(contact.id);
+        contactBatch.push({
+          whatsapp_account_id: accountId,
+          wa_id: waId,
+          phone_number: jidType === 'pn' ? waId : null,
+          name: contact.name || contact.notify || null,
+          jid_type: jidType,
+        });
+      }
 
-      contactBatch.push({
-        whatsapp_account_id: accountId,
-        wa_id: waId,
-        phone_number: phoneNumber,
-        name: contact.name || contact.notify || null,
-        jid_type: jidType,
-      });
-
-      // Batch insert every N contacts
-      if (contactBatch.length >= BATCH_CONFIG.CONTACT_BATCH_SIZE) {
+      // Single bulk insert for all contacts
+      if (contactBatch.length > 0) {
         await batchInsertContacts(contactBatch);
-        contactBatch.length = 0;
       }
-    }
+      return contactBatch.length;
+    })(),
 
-    // Insert remaining contacts
-    if (contactBatch.length > 0) {
-      await batchInsertContacts(contactBatch);
-    }
+    // 2. GROUPS - parallel batches, NO metadata API calls (use chat data only)
+    (async () => {
+      if (!chats || chats.length === 0) return 0;
 
-    console.log(`[WA][Buffered] Batch processed ${contacts.length} contacts`);
-  }
+      const groupChats = chats.filter((chat: any) => chat.id && isJidGroup(chat.id));
+      if (groupChats.length === 0) return 0;
 
-  // PROCESS GROUPS FROM CHATS (parallel with rate limiting)
-  if (chats && chats.length > 0) {
-    const groupChats = chats.filter((chat: any) => chat.id && isJidGroup(chat.id));
-    const GROUP_PARALLEL_LIMIT = 3;
+      // Process ALL groups in parallel batches (no delays - it's background)
+      const batchSize = BATCH_CONFIG.HISTORY_GROUP_BATCH_SIZE;
+      let processed = 0;
 
-    for (let i = 0; i < groupChats.length; i += GROUP_PARALLEL_LIMIT) {
-      const batch = groupChats.slice(i, i + GROUP_PARALLEL_LIMIT);
+      for (let i = 0; i < groupChats.length; i += batchSize) {
+        const batch = groupChats.slice(i, i + batchSize);
 
-      await Promise.allSettled(batch.map(async (chat: any) => {
-        try {
-          const chatJid = chat.id;
-
-          // Try to fetch metadata
-          let metadata: any = null;
+        await Promise.allSettled(batch.map(async (chat: any) => {
           try {
-            metadata = await sock.groupMetadata(chatJid);
-          } catch {
-            // Metadata fetch failed, use minimal data
-          }
+            // Use chat data directly - NO slow groupMetadata API calls
+            // Metadata will be fetched lazily when user opens the group
+            const group = await queryOne(
+              `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
+               VALUES ($1, $2, $3, 0)
+               ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+                 name = COALESCE(NULLIF(EXCLUDED.name, ''), groups.name),
+                 updated_at = NOW()
+               RETURNING id`,
+              [accountId, chat.id, chat.name || chat.subject || extractGroupId(chat.id)]
+            );
 
-          // Upsert group
-          const group = await queryOne(
-            `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
-               name = COALESCE(EXCLUDED.name, groups.name),
-               updated_at = NOW()
-             RETURNING *`,
-            [
-              accountId,
-              chatJid,
-              metadata?.subject || chat.name || extractGroupId(chatJid),
-              metadata?.desc || null,
-              metadata?.owner || null,
-              metadata?.participants?.length || 0,
-              metadata?.announce || false,
-              metadata?.restrict || false,
-            ]
-          );
-
-          // Create conversation
-          await queryOne(
-            `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
-             VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
-             ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
-             RETURNING *`,
-            [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
-          );
-
-          // Batch insert participants
-          if (metadata?.participants && metadata.participants.length > 0) {
-            const participantBatch = metadata.participants.map((p: any) => ({
-              participant_jid: typeof p === 'string' ? p : p.id,
-              is_admin: typeof p === 'object' && (p.admin === 'admin' || p.admin === 'superadmin'),
-              is_superadmin: typeof p === 'object' && p.admin === 'superadmin',
-            }));
-            await batchInsertGroupParticipants(group.id, participantBatch);
-          }
-
-          // Cache metadata
-          if (metadata) {
-            groupMetadataCache.set(accountId, chatJid, metadata);
-          }
-        } catch (error) {
-          console.error(`[WA][Buffered] Error processing group:`, error);
-        }
-      }));
-
-      // Rate limit between batches
-      if (i + GROUP_PARALLEL_LIMIT < groupChats.length) {
-        await sleep(500);
-      }
-    }
-
-    console.log(`[WA][Buffered] Processed ${groupChats.length} groups`);
-  }
-
-  // PROCESS MESSAGES (parallel batches)
-  if (messages && messages.length > 0) {
-    let processedCount = 0;
-
-    for (let i = 0; i < messages.length; i += BATCH_CONFIG.MESSAGE_BATCH_SIZE) {
-      const batch = messages.slice(i, i + BATCH_CONFIG.MESSAGE_BATCH_SIZE);
-
-      await Promise.allSettled(batch.map(async (msg: proto.IWebMessageInfo) => {
-        if (!msg.key) return;
-        const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || isJidBroadcast(remoteJid)) return;
-
-        try {
-          // Check if already exists
-          const existing = await queryOne(
-            'SELECT id FROM messages WHERE wa_message_id = $1',
-            [msg.key.id]
-          );
-          if (existing) return;
-
-          if (isJidGroup(remoteJid)) {
-            if (msg.key.fromMe) {
-              await handlers.handleGroupOutgoingMessage(accountId, userId, msg, false);
-            } else {
-              await handlers.handleGroupIncomingMessage(accountId, userId, msg, false);
+            if (group) {
+              await execute(
+                `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+                 VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
+                 ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING`,
+                [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
+              );
+              processed++;
             }
-          } else if (isUserJid(remoteJid)) {
-            if (msg.key.fromMe) {
-              await handlers.handleOutgoingMessage(accountId, userId, msg, false);
-            } else {
-              await handlers.handleIncomingMessage(accountId, userId, msg, false);
-            }
+          } catch (error) {
+            // Ignore duplicate errors
           }
-          processedCount++;
-        } catch (error) {
-          // Silently ignore duplicates
-          if (!(error as any)?.message?.includes('duplicate')) {
-            console.error(`[WA][Buffered] History message error:`, error);
-          }
-        }
-      }));
-
-      // Small delay between batches
-      if (i + BATCH_CONFIG.MESSAGE_BATCH_SIZE < messages.length) {
-        await sleep(50);
+        }));
       }
-    }
+      return processed;
+    })(),
 
-    console.log(`[WA][Buffered] Processed ${processedCount} history messages`);
-  }
+    // 3. MESSAGES - large parallel batches (no delays - it's background)
+    (async () => {
+      if (!messages || messages.length === 0) return 0;
+
+      const batchSize = BATCH_CONFIG.HISTORY_MESSAGE_BATCH_SIZE;
+      let processed = 0;
+
+      for (let i = 0; i < messages.length; i += batchSize) {
+        const batch = messages.slice(i, i + batchSize);
+
+        const results = await Promise.allSettled(batch.map(async (msg: proto.IWebMessageInfo) => {
+          if (!msg.key) return false;
+          const remoteJid = msg.key.remoteJid;
+          if (!remoteJid || isJidBroadcast(remoteJid)) return false;
+
+          try {
+            // Check if already exists (fast index lookup)
+            const existing = await queryOne(
+              'SELECT 1 FROM messages WHERE wa_message_id = $1 LIMIT 1',
+              [msg.key.id]
+            );
+            if (existing) return false;
+
+            if (isJidGroup(remoteJid)) {
+              if (msg.key.fromMe) {
+                await handlers.handleGroupOutgoingMessage(accountId, userId, msg, false);
+              } else {
+                await handlers.handleGroupIncomingMessage(accountId, userId, msg, false);
+              }
+            } else if (isUserJid(remoteJid)) {
+              if (msg.key.fromMe) {
+                await handlers.handleOutgoingMessage(accountId, userId, msg, false);
+              } else {
+                await handlers.handleIncomingMessage(accountId, userId, msg, false);
+              }
+            }
+            return true;
+          } catch (error) {
+            // Silently ignore duplicates
+            return false;
+          }
+        }));
+
+        processed += results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+      }
+      return processed;
+    })(),
+  ]);
+
+  const elapsed = Date.now() - startTime;
+  const [contactsResult, groupsResult, messagesResult] = results;
+
+  console.log(`[WA][History] Sync complete in ${elapsed}ms:`);
+  console.log(`  - contacts: ${contactsResult.status === 'fulfilled' ? contactsResult.value : 'error'}`);
+  console.log(`  - groups: ${groupsResult.status === 'fulfilled' ? groupsResult.value : 'error'}`);
+  console.log(`  - messages: ${messagesResult.status === 'fulfilled' ? messagesResult.value : 'error'}`);
 
   // Emit sync progress to account room
   const io = getIO();
@@ -549,6 +517,7 @@ async function processHistorySync(
     isLatest,
     chatsCount: chats?.length || 0,
     messagesCount: messages?.length || 0,
+    elapsed,
   });
 }
 
@@ -716,9 +685,11 @@ export function setupBufferedEventProcessing(
       }
     }
 
-    // ============ HISTORY SYNC ============
+    // ============ HISTORY SYNC (NON-BLOCKING) ============
+    // Fire and forget - runs in background, does NOT block real-time messages
     if (events['messaging-history.set']) {
-      await processHistorySync(ctx, events['messaging-history.set'], handlers);
+      processHistorySync(ctx, events['messaging-history.set'], handlers)
+        .catch(err => console.error(`[WA][History] Background sync error:`, err));
     }
 
     // ============ CONTACTS ============
