@@ -132,11 +132,11 @@ async function processMessagesUpsert(
     return true;
   });
 
-  // Step 2: Memory-based deduplication (sync, fast)
+  // Step 2: Memory-based deduplication (sync, fast) - CHECK ONLY, don't mark yet
   const memoryFiltered = basicFiltered.filter(msg => {
     const messageId = msg.key!.id!;
-    // Use sync version for fast filtering
-    if (messageDeduplicator.checkAndMarkSync(accountId, messageId)) {
+    // Use isProcessedSync to CHECK without marking
+    if (messageDeduplicator.isProcessedSync(accountId, messageId)) {
       console.log(`[WA][Buffered] Skipping duplicate (memory): ${messageId}`);
       return false;
     }
@@ -144,9 +144,13 @@ async function processMessagesUpsert(
   });
 
   // Step 3: DB-backed deduplication for remaining messages (async, catches server restart dupes)
+  // This also doesn't mark - we only mark after successful save
   const messageIds = memoryFiltered.map(msg => msg.key!.id!);
   const newMessageIds = await messageDeduplicator.filterNewWithDbCheck(accountId, messageIds);
   const newMessageIdSet = new Set(newMessageIds);
+
+  // Mark all messages we're about to process (prevents race conditions with concurrent events)
+  messageDeduplicator.markProcessedBatch(accountId, Array.from(newMessageIdSet));
 
   // For real-time messages (notify), emit existing DB messages to frontend even if duplicate
   // This ensures UI updates when messages arrive that were saved during history sync

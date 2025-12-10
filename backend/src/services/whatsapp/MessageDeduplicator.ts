@@ -177,33 +177,35 @@ class MessageDeduplicatorService {
    * Returns array of messageIds that are NEW (not in memory or DB)
    */
   async filterNewWithDbCheck(accountId: string, messageIds: string[]): Promise<string[]> {
-    // First filter by memory
-    const memoryFiltered = messageIds.filter(id => !this.isProcessedSync(accountId, id));
-
-    if (memoryFiltered.length === 0) {
+    if (messageIds.length === 0) {
       return [];
     }
 
-    // Then check DB for remaining ones (batch query)
+    console.log(`[MessageDedup] Checking ${messageIds.length} messages against DB`);
+
+    // Check DB for messages (memory check should be done separately before calling this)
     try {
-      const placeholders = memoryFiltered.map((_, i) => `$${i + 1}`).join(',');
+      const placeholders = messageIds.map((_, i) => `$${i + 1}`).join(',');
       const { query } = await import('../../config/database');
       const existing = await query<{ wa_message_id: string }>(
         `SELECT wa_message_id FROM messages WHERE wa_message_id IN (${placeholders})`,
-        memoryFiltered
+        messageIds
       );
 
       const existingIds = new Set(existing.map(e => e.wa_message_id));
+      console.log(`[MessageDedup] Found ${existing.length} messages in DB out of ${messageIds.length} checked`);
 
-      // Mark found ones as processed
+      // Mark found ones as processed in memory (for future fast checks)
       existing.forEach(e => {
         this.markProcessed(accountId, e.wa_message_id);
       });
 
-      return memoryFiltered.filter(id => !existingIds.has(id));
+      const newMessages = messageIds.filter(id => !existingIds.has(id));
+      console.log(`[MessageDedup] Returning ${newMessages.length} NEW messages to process`);
+      return newMessages;
     } catch (error) {
       console.error('[MessageDedup] Bulk DB check error:', error);
-      return memoryFiltered; // On error, return all to avoid data loss
+      return messageIds; // On error, return all to avoid data loss
     }
   }
 
