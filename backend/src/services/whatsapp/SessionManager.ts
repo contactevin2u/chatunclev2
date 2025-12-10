@@ -251,8 +251,8 @@ class SessionManager {
       logger,
       // Use Browsers helper for proper browser identification (recommended by Baileys docs)
       browser: Browsers.ubuntu('ChatUncle'),
-      // Disable full history sync for faster connection (only recent messages)
-      syncFullHistory: false,
+      // Enable full history sync - runs in background (non-blocking) so doesn't affect real-time
+      syncFullHistory: true,
       // Don't mark as online on connect - allows user to receive notifications on phone
       markOnlineOnConnect: false,
       // Disable link preview generation (reduces processing overhead)
@@ -302,10 +302,8 @@ class SessionManager {
         // IMPORTANT: Return FALSE when no timestamp - this is Baileys' initial check
         // Returning false here skips the 20-second AwaitingInitialSync wait
         if (!oldestTimestamp) return false;
-        // For actual history chunks with timestamps, sync last 3 days only
-        const timestamp = typeof oldestTimestamp === 'number' ? oldestTimestamp : (oldestTimestamp as any).low || 0;
-        const threeDaysAgo = Math.floor(Date.now() / 1000) - (3 * 24 * 60 * 60);
-        return timestamp >= threeDaysAgo;
+        // Accept ALL history chunks - sync runs in background (non-blocking)
+        return true;
       },
 
       // Filter JIDs to ignore - skip status broadcasts and newsletters
