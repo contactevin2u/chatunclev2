@@ -18,6 +18,7 @@ import { authenticate } from '../middleware/auth';
 import { tiktokAdapter, ChannelAdapterFactory } from '../services/channel';
 import { getIO } from '../services/socket';
 import { hasAccountAccess, canSendMessages } from '../helpers/accountAccess';
+import { processIncomingMessage } from '../services/IncomingMessageProcessor';
 
 const router = Router();
 
@@ -28,106 +29,11 @@ const rawBodyParser = express.raw({ type: 'application/json' });
 // Register TikTok adapter with the factory
 ChannelAdapterFactory.register(tiktokAdapter);
 
-// Set up global message handler for TikTok
+// Set up global message handler for TikTok (using centralized processor)
 tiktokAdapter.onMessage(async (message) => {
-  try {
-    console.log(`[TikTokRoute] Incoming message from ${message.senderId} in conversation ${message.chatId}`);
-
-    // === DEDUPLICATION: Check if message already exists ===
-    const existingMsg = await queryOne<any>(
-      `SELECT id FROM messages WHERE wa_message_id = $1 AND channel_type = 'tiktok'`,
-      [message.channelMessageId]
-    );
-    if (existingMsg) {
-      console.log(`[TikTokRoute] Duplicate message ${message.channelMessageId}, skipping`);
-      return;
-    }
-
-    // Get the account (using unified accounts table)
-    const account = await queryOne<any>(
-      `SELECT a.*, u.id as owner_id FROM accounts a
-       JOIN users u ON a.user_id = u.id
-       WHERE a.id = $1 AND a.channel_type = 'tiktok'`,
-      [message.channelAccountId]
-    );
-
-    if (!account) {
-      console.error(`[TikTokRoute] Account not found: ${message.channelAccountId}`);
-      return;
-    }
-
-    // Find or create contact (using account_id)
-    let contact = await queryOne<any>(
-      `SELECT * FROM contacts WHERE tiktok_user_id = $1 AND account_id = $2`,
-      [message.senderId, account.id]
-    );
-
-    if (!contact) {
-      // Create new contact linked to account
-      contact = await queryOne<any>(
-        `INSERT INTO contacts (account_id, wa_id, name, channel_type, tiktok_user_id)
-         VALUES ($1, $2, $3, 'tiktok', $4)
-         ON CONFLICT (account_id, tiktok_user_id) WHERE account_id IS NOT NULL AND tiktok_user_id IS NOT NULL
-         DO UPDATE SET updated_at = NOW(), name = COALESCE(NULLIF(EXCLUDED.name, ''), contacts.name)
-         RETURNING *`,
-        [account.id, `tt:${message.senderId}`, message.senderName || `TikTok Buyer ${message.senderId.slice(-6)}`, message.senderId]
-      );
-      console.log(`[TikTokRoute] Created/updated contact: ${contact?.id}`);
-    }
-
-    // Find or create conversation (using account_id)
-    let conversation = await queryOne<any>(
-      `SELECT * FROM conversations WHERE account_id = $1 AND tiktok_conversation_id = $2`,
-      [account.id, message.chatId]
-    );
-
-    if (!conversation) {
-      // Create new conversation linked to account
-      conversation = await queryOne<any>(
-        `INSERT INTO conversations (account_id, contact_id, is_group, channel_type, tiktok_conversation_id)
-         VALUES ($1, $2, FALSE, 'tiktok', $3)
-         ON CONFLICT (account_id, tiktok_conversation_id) WHERE account_id IS NOT NULL AND tiktok_conversation_id IS NOT NULL
-         DO UPDATE SET updated_at = NOW(), contact_id = COALESCE(conversations.contact_id, EXCLUDED.contact_id)
-         RETURNING *`,
-        [account.id, contact.id, message.chatId]
-      );
-      console.log(`[TikTokRoute] Created/updated conversation: ${conversation?.id}`);
-    }
-
-    // Save message to database
-    const savedMessage = await queryOne<any>(
-      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, raw_message, channel_type)
-       VALUES ($1, $2, 'contact', $3, $4, $5, $6, 'tiktok')
-       RETURNING *`,
-      [
-        conversation.id,
-        message.channelMessageId,
-        message.contentType,
-        message.content || '',
-        message.mediaUrl || null,
-        JSON.stringify(message.rawMessage),
-      ]
-    );
-
-    // Update conversation last_message_at
-    await execute(
-      `UPDATE conversations SET last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $1`,
-      [conversation.id]
-    );
-
-    // Emit to frontend via Socket.io (same room pattern as WhatsApp/Telegram)
-    const io = getIO();
-    io.to(`account:${account.id}`).emit('message:new', {
-      accountId: account.id,
-      conversationId: conversation.id,
-      channelType: 'tiktok',
-      message: savedMessage,
-      contact,
-    });
-
-    console.log(`[TikTokRoute] Message saved and emitted: ${savedMessage.id}`);
-  } catch (error) {
-    console.error('[TikTokRoute] Error processing incoming message:', error);
+  const result = await processIncomingMessage(message);
+  if (!result.success && !result.isDuplicate) {
+    console.error(`[TikTokRoute] Failed to process message: ${result.error}`);
   }
 });
 

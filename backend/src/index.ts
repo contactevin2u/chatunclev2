@@ -9,6 +9,7 @@ import { restoreTelegramSessions } from './services/channel/telegramStartup';
 import { restoreTikTokSessions } from './services/channel/tiktokStartup';
 import { restoreMetaSessions } from './services/channel/metaStartup';
 import { securityHeaders, apiRateLimiter, sanitizeRequest, secureErrorHandler } from './middleware/security';
+import { errorHandler } from './middleware/errorHandler';
 
 // Routes
 import authRoutes from './routes/auth';
@@ -128,7 +129,10 @@ app.use('/api/tiktok', tiktokRoutes);
 app.use('/api/meta', metaRoutes);
 app.use('/api/send-to-phone', sendToPhoneRoutes);
 
-// Secure error handler - doesn't expose internal details in production
+// Error handlers - standardized error responses
+// errorHandler provides consistent API error responses with error codes
+// secureErrorHandler provides production safety (doesn't expose internal details)
+app.use(errorHandler);
 app.use(secureErrorHandler);
 
 // Start server
@@ -136,19 +140,29 @@ httpServer.listen(config.port, async () => {
   console.log(`Server running on port ${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
 
-  // Restore sessions on startup
+  // Restore sessions on startup (parallelized for faster startup)
   if (config.nodeEnv !== 'test') {
-    // Restore WhatsApp sessions
-    await sessionManager.restoreAllSessions();
+    console.log('[Startup] Restoring all channel sessions in parallel...');
+    const startTime = Date.now();
 
-    // Restore Telegram bot sessions
-    await restoreTelegramSessions();
+    // Run all session restores in parallel for faster startup
+    const results = await Promise.allSettled([
+      sessionManager.restoreAllSessions().then(() => console.log('[Startup] WhatsApp sessions restored')),
+      restoreTelegramSessions().then(() => console.log('[Startup] Telegram sessions restored')),
+      restoreTikTokSessions().then(() => console.log('[Startup] TikTok sessions restored')),
+      restoreMetaSessions().then(() => console.log('[Startup] Meta sessions restored')),
+    ]);
 
-    // Restore TikTok Shop sessions
-    await restoreTikTokSessions();
+    // Log any failures
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const channels = ['WhatsApp', 'Telegram', 'TikTok', 'Meta'];
+        console.error(`[Startup] Failed to restore ${channels[index]} sessions:`, result.reason);
+      }
+    });
 
-    // Restore Instagram and Messenger sessions
-    await restoreMetaSessions();
+    const elapsed = Date.now() - startTime;
+    console.log(`[Startup] All sessions restored in ${elapsed}ms`);
 
     // Start scheduled message processor
     startScheduledMessageProcessor();

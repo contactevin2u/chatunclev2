@@ -20,6 +20,7 @@ import { authenticate } from '../middleware/auth';
 import { instagramAdapter, messengerAdapter } from '../services/channel/adapters/MetaAdapter';
 import { ChannelAdapterFactory } from '../services/channel';
 import { getIO } from '../services/socket';
+import { processIncomingMessage } from '../services/IncomingMessageProcessor';
 
 const router = Router();
 
@@ -37,120 +38,15 @@ function getAdapter(channelType: 'instagram' | 'messenger') {
 
 // ============================================================
 // MESSAGE HANDLER (shared by both Instagram and Messenger)
+// Using centralized IncomingMessageProcessor
 // ============================================================
 
-// Set up global message handlers
+// Set up global message handlers using centralized processor
 const setupMessageHandler = (adapter: typeof instagramAdapter | typeof messengerAdapter, channelType: 'instagram' | 'messenger') => {
   adapter.onMessage(async (message) => {
-    try {
-      console.log(`[MetaRoute] ${channelType} message from ${message.senderId}`);
-
-      // Check for duplicate
-      const existingMsg = await queryOne<any>(
-        `SELECT id FROM messages WHERE wa_message_id = $1 AND channel_type = $2`,
-        [message.channelMessageId, channelType]
-      );
-      if (existingMsg) {
-        console.log(`[MetaRoute] Duplicate message ${message.channelMessageId}, skipping`);
-        return;
-      }
-
-      // Get account (using unified accounts table)
-      const channelAccount = await queryOne<any>(
-        `SELECT a.*, u.id as owner_id FROM accounts a
-         JOIN users u ON a.user_id = u.id
-         WHERE a.id = $1 AND a.channel_type = $2`,
-        [message.channelAccountId, channelType]
-      );
-
-      if (!channelAccount) {
-        console.error(`[MetaRoute] Channel account not found: ${message.channelAccountId}`);
-        return;
-      }
-
-      // Find or create contact
-      const metaUserIdColumn = channelType === 'instagram' ? 'instagram_user_id' : 'messenger_user_id';
-      let contact = await queryOne<any>(
-        `SELECT * FROM contacts WHERE ${metaUserIdColumn} = $1 AND account_id = $2`,
-        [message.senderId, channelAccount.id]
-      );
-
-      if (!contact) {
-        // Fetch profile info
-        const profile = await adapter.getContactProfile(channelAccount.id, message.senderId);
-        const displayName = profile?.displayName || `${channelType === 'instagram' ? 'Instagram' : 'Messenger'} User ${message.senderId.slice(-6)}`;
-
-        contact = await queryOne<any>(
-          `INSERT INTO contacts (account_id, wa_id, name, channel_type, ${metaUserIdColumn})
-           VALUES ($1, $2, $3, $4, $5)
-           ON CONFLICT (account_id, ${metaUserIdColumn}) WHERE account_id IS NOT NULL AND ${metaUserIdColumn} IS NOT NULL
-           DO UPDATE SET updated_at = NOW(), name = COALESCE(NULLIF(EXCLUDED.name, ''), contacts.name)
-           RETURNING *`,
-          [channelAccount.id, `${channelType}:${message.senderId}`, displayName, channelType, message.senderId]
-        );
-        console.log(`[MetaRoute] Created contact: ${contact?.id}`);
-      }
-
-      // Find or create conversation
-      const metaConvIdColumn = channelType === 'instagram' ? 'instagram_conversation_id' : 'messenger_conversation_id';
-      let conversation = await queryOne<any>(
-        `SELECT * FROM conversations WHERE account_id = $1 AND ${metaConvIdColumn} = $2`,
-        [channelAccount.id, message.chatId]
-      );
-
-      if (!conversation) {
-        conversation = await queryOne<any>(
-          `INSERT INTO conversations (account_id, contact_id, is_group, channel_type, ${metaConvIdColumn})
-           VALUES ($1, $2, FALSE, $3, $4)
-           ON CONFLICT (account_id, ${metaConvIdColumn}) WHERE account_id IS NOT NULL AND ${metaConvIdColumn} IS NOT NULL
-           DO UPDATE SET updated_at = NOW()
-           RETURNING *`,
-          [channelAccount.id, contact.id, channelType, message.chatId]
-        );
-        console.log(`[MetaRoute] Created conversation: ${conversation?.id}`);
-      }
-
-      // Save message
-      const savedMessage = await queryOne<any>(
-        `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, media_url, raw_message, channel_type)
-         VALUES ($1, $2, 'contact', $3, $4, $5, $6, $7)
-         RETURNING *`,
-        [
-          conversation.id,
-          message.channelMessageId,
-          message.contentType,
-          message.content || '',
-          message.mediaUrl || null,
-          JSON.stringify(message.rawMessage),
-          channelType
-        ]
-      );
-
-      // Update conversation
-      await execute(
-        `UPDATE conversations SET last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $1`,
-        [conversation.id]
-      );
-
-      // Emit to socket
-      const io = getIO();
-      io.to(`account:${channelAccount.id}`).emit('new_message', {
-        message: {
-          ...savedMessage,
-          sender_name: contact.name,
-        },
-        conversation: {
-          id: conversation.id,
-          contact_name: contact.name,
-          unread_count: (conversation.unread_count || 0) + 1,
-        },
-        channelType,
-      });
-
-      console.log(`[MetaRoute] ${channelType} message saved: ${savedMessage.id}`);
-
-    } catch (error) {
-      console.error(`[MetaRoute] Error processing ${channelType} message:`, error);
+    const result = await processIncomingMessage(message);
+    if (!result.success && !result.isDuplicate) {
+      console.error(`[MetaRoute] Failed to process ${channelType} message: ${result.error}`);
     }
   });
 };

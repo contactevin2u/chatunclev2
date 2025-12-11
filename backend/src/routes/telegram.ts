@@ -15,121 +15,18 @@ import { authenticate } from '../middleware/auth';
 import { telegramAdapter, ChannelAdapterFactory } from '../services/channel';
 import { getIO } from '../services/socket';
 import { hasAccountAccess, canSendMessages } from '../helpers/accountAccess';
+import { processIncomingMessage } from '../services/IncomingMessageProcessor';
 
 const router = Router();
 
 // Register Telegram adapter with the factory
 ChannelAdapterFactory.register(telegramAdapter);
 
-// Set up global message handler for Telegram
+// Set up global message handler for Telegram (using centralized processor)
 telegramAdapter.onMessage(async (message) => {
-  try {
-    console.log(`[TelegramRoute] Incoming message from ${message.senderId} in chat ${message.chatId}`);
-
-    // === DEDUPLICATION: Check if message already exists ===
-    const existingMsg = await queryOne<any>(
-      `SELECT id FROM messages WHERE wa_message_id = $1 AND channel_type = 'telegram'`,
-      [message.channelMessageId]
-    );
-    if (existingMsg) {
-      console.log(`[TelegramRoute] Duplicate message ${message.channelMessageId}, skipping`);
-      return;
-    }
-
-    // Get the account (using unified accounts table)
-    const account = await queryOne<any>(
-      `SELECT a.*, u.id as owner_id FROM accounts a
-       JOIN users u ON a.user_id = u.id
-       WHERE a.id = $1 AND a.channel_type = 'telegram'`,
-      [message.channelAccountId]
-    );
-
-    if (!account) {
-      console.error(`[TelegramRoute] Account not found: ${message.channelAccountId}`);
-      return;
-    }
-
-    // Find or create contact (using account_id)
-    let contact = await queryOne<any>(
-      `SELECT * FROM contacts WHERE telegram_user_id = $1 AND account_id = $2`,
-      [message.senderId, account.id]
-    );
-
-    if (!contact) {
-      // Create new contact linked to account
-      contact = await queryOne<any>(
-        `INSERT INTO contacts (account_id, wa_id, name, channel_type, telegram_user_id)
-         VALUES ($1, $2, $3, 'telegram', $4)
-         RETURNING *`,
-        [account.id, `tg:${message.senderId}`, message.senderName || 'Telegram User', message.senderId]
-      );
-      console.log(`[TelegramRoute] Created new contact: ${contact?.id}`);
-    }
-
-    // Find or create conversation (using account_id)
-    let conversation = await queryOne<any>(
-      `SELECT * FROM conversations WHERE account_id = $1 AND telegram_chat_id = $2`,
-      [account.id, message.chatId]
-    );
-
-    if (!conversation) {
-      // Create new conversation linked to account
-      conversation = await queryOne<any>(
-        `INSERT INTO conversations (account_id, contact_id, is_group, channel_type, telegram_chat_id)
-         VALUES ($1, $2, $3, 'telegram', $4)
-         RETURNING *`,
-        [account.id, contact.id, message.isGroup, message.chatId]
-      );
-      console.log(`[TelegramRoute] Created new conversation: ${conversation?.id}`);
-    }
-
-    // Look up quoted message ID if this is a reply
-    let quotedMessageId: string | null = null;
-    if (message.replyToMessageId) {
-      const quotedMsg = await queryOne<any>(
-        `SELECT id FROM messages WHERE wa_message_id = $1 AND channel_type = 'telegram'`,
-        [message.replyToMessageId]
-      );
-      quotedMessageId = quotedMsg?.id || null;
-    }
-
-    // Save message to database (including reply context)
-    const savedMessage = await queryOne<any>(
-      `INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, raw_message, channel_type, quoted_message_id, quoted_wa_message_id, quoted_content, quoted_sender_name)
-       VALUES ($1, $2, 'contact', $3, $4, $5, 'telegram', $6, $7, $8, $9)
-       RETURNING *`,
-      [
-        conversation.id,
-        message.channelMessageId,
-        message.contentType,
-        message.content || message.caption || '',
-        JSON.stringify(message.rawMessage),
-        quotedMessageId,
-        message.replyToMessageId || null,
-        message.replyToContent || null,
-        message.replyToSenderName || null,
-      ]
-    );
-
-    // Update conversation last_message_at
-    await execute(
-      `UPDATE conversations SET last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $1`,
-      [conversation.id]
-    );
-
-    // Emit to frontend via Socket.io (same room pattern as WhatsApp)
-    const io = getIO();
-    io.to(`account:${account.id}`).emit('message:new', {
-      accountId: account.id,
-      conversationId: conversation.id,
-      channelType: 'telegram',
-      message: savedMessage,
-      contact,
-    });
-
-    console.log(`[TelegramRoute] Message saved and emitted: ${savedMessage.id}`);
-  } catch (error) {
-    console.error('[TelegramRoute] Error processing incoming message:', error);
+  const result = await processIncomingMessage(message);
+  if (!result.success && !result.isDuplicate) {
+    console.error(`[TelegramRoute] Failed to process message: ${result.error}`);
   }
 });
 
