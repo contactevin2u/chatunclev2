@@ -162,12 +162,26 @@ router.get('/:id/participants', async (req: Request, res: Response) => {
       return;
     }
 
-    const participants = await query(`
-      SELECT participant_jid, is_admin, is_superadmin, created_at
-      FROM group_participants
-      WHERE group_id = $1
-      ORDER BY is_superadmin DESC, is_admin DESC, participant_jid
+    // Get group's account_id for contact name lookup
+    const groupInfo = await queryOne(`
+      SELECT COALESCE(account_id, whatsapp_account_id) as account_id FROM groups WHERE id = $1
     `, [req.params.id]);
+
+    // Get participants with contact names (if available)
+    const participants = await query(`
+      SELECT
+        gp.participant_jid,
+        gp.is_admin,
+        gp.is_superadmin,
+        gp.created_at,
+        c.name as contact_name,
+        c.id as contact_id
+      FROM group_participants gp
+      LEFT JOIN contacts c ON c.wa_id = SPLIT_PART(gp.participant_jid, '@', 1)
+        AND COALESCE(c.account_id, c.whatsapp_account_id) = $2
+      WHERE gp.group_id = $1
+      ORDER BY gp.is_superadmin DESC, gp.is_admin DESC, c.name NULLS LAST, gp.participant_jid
+    `, [req.params.id, groupInfo?.account_id]);
 
     res.json({ participants });
   } catch (error) {

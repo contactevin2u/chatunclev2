@@ -158,6 +158,8 @@ interface MessagePayload {
     fromMe?: boolean;
     participant?: string;
   };
+  // Pre-resolved mentions (JIDs to tag in group messages)
+  mentions?: string[];
 }
 
 interface SessionState {
@@ -1704,7 +1706,7 @@ class SessionManager {
             throw new Error('Text content is required');
           }
           // Parse @mentions from content for tagging group members
-          const groupMentions = parseMentions(payload.content);
+          const groupMentions = payload.mentions?.length ? payload.mentions : parseMentions(payload.content);
           if (groupMentions.length > 0) {
             console.log(`[WA][Group] Found ${groupMentions.length} mentions:`, groupMentions);
           }
