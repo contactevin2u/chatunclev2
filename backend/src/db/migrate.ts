@@ -1297,6 +1297,95 @@ CREATE INDEX IF NOT EXISTS idx_template_sequences_account_id ON template_sequenc
 
 
 -- ============================================================
+-- CLEANUP DUPLICATES BEFORE CREATING UNIQUE CONSTRAINTS
+-- ============================================================
+-- Remove duplicate contacts, keeping the one with most recent activity
+-- This is necessary because data may have been inserted without proper unique constraints
+
+DELETE FROM contacts
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, wa_id
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id
+    ) as rn
+    FROM contacts
+    WHERE account_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- Remove duplicate conversations (by account + contact), keeping most recent
+DELETE FROM conversations
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, contact_id
+      ORDER BY last_message_at DESC NULLS LAST, updated_at DESC NULLS LAST, id
+    ) as rn
+    FROM conversations
+    WHERE account_id IS NOT NULL AND contact_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- Remove duplicate conversations (by account + group), keeping most recent
+DELETE FROM conversations
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, group_id
+      ORDER BY last_message_at DESC NULLS LAST, updated_at DESC NULLS LAST, id
+    ) as rn
+    FROM conversations
+    WHERE account_id IS NOT NULL AND group_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- Remove duplicate groups, keeping most recent
+DELETE FROM groups
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, group_jid
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id
+    ) as rn
+    FROM groups
+    WHERE account_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- Remove duplicate lid_pn_mappings by lid, keeping most recent
+DELETE FROM lid_pn_mappings
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, lid
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id
+    ) as rn
+    FROM lid_pn_mappings
+    WHERE account_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- Remove duplicate lid_pn_mappings by pn, keeping most recent
+DELETE FROM lid_pn_mappings
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY account_id, pn
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id
+    ) as rn
+    FROM lid_pn_mappings
+    WHERE account_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- ============================================================
 -- UNIFIED ACCOUNT_ID UNIQUE CONSTRAINTS
 -- ============================================================
 -- These constraints are CRITICAL for ON CONFLICT clauses to work properly
