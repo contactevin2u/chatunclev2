@@ -2804,17 +2804,17 @@ class SessionManager {
 
     console.log(`[WA] Forwarding message ${messageKey.id} to ${targetJid}`);
 
-    // Try to get the original message from MessageStore (cache first, then DB)
-    let originalMsg = await messageStore.getMessage(accountId, messageKey as WAMessageKey);
+    // Try to get the original message content from MessageStore (cache first, then DB)
+    let originalMsgContent = await messageStore.getMessage(accountId, messageKey as WAMessageKey);
 
     // Fallback: try parsing raw_message from DB if provided
-    if (!originalMsg && rawMessageFallback) {
+    if (!originalMsgContent && rawMessageFallback) {
       try {
         const parsed = typeof rawMessageFallback === 'string'
           ? JSON.parse(rawMessageFallback)
           : rawMessageFallback;
         if (parsed && typeof parsed === 'object') {
-          originalMsg = parsed;
+          originalMsgContent = parsed;
           console.log(`[WA] Using raw_message fallback for forward`);
         }
       } catch (e) {
@@ -2822,9 +2822,16 @@ class SessionManager {
       }
     }
 
-    if (!originalMsg) {
+    if (!originalMsgContent) {
       throw new Error('Original message not found - cannot forward. Message may be too old or not cached.');
     }
+
+    // Build full WAMessage object for forwarding
+    // Baileys expects { forward: WAMessage } where WAMessage has key + message
+    const waMessage = {
+      key: messageKey,
+      message: originalMsgContent,
+    };
 
     // === ANTI-BAN MEASURES FOR FORWARDING ===
     // Forwards are more suspicious than regular messages, use longer delays
@@ -2864,11 +2871,9 @@ class SessionManager {
 
     try {
       // Use Baileys forward functionality
+      // Pass the full WAMessage object (key + message)
       const result = await sock.sendMessage(targetJid, {
-        forward: {
-          key: messageKey,
-          message: originalMsg,
-        },
+        forward: waMessage,
       });
 
       if (!result?.key?.id) {
