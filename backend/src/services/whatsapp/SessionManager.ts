@@ -1494,15 +1494,29 @@ class SessionManager {
           result = await sock.sendMessage(jid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
-        case 'image':
+        case 'image': {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
+          console.log(`[WA] Sending image from URL: ${payload.mediaUrl}`);
+
+          // Fetch image as buffer - more reliable for WhatsApp media upload
+          const imgResponse = await fetch(payload.mediaUrl);
+          if (!imgResponse.ok) {
+            throw new Error(`Failed to fetch image: ${imgResponse.status} ${imgResponse.statusText}`);
+          }
+          const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
+          const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+          console.log(`[WA] Fetched image: ${imgBuffer.length} bytes, type: ${contentType}`);
+
           result = await sock.sendMessage(jid, {
-            image: { url: payload.mediaUrl },
+            image: imgBuffer,
+            mimetype: contentType,
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
+          console.log(`[WA] Image send result:`, JSON.stringify(result, null, 2));
           break;
+        }
 
         case 'video':
           if (!payload.mediaUrl) {
@@ -1687,25 +1701,52 @@ class SessionManager {
           result = await sock.sendMessage(groupJid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
-        case 'image':
+        case 'image': {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
+          console.log(`[WA][Group] Sending image from URL: ${payload.mediaUrl}`);
+
+          // Fetch image as buffer - more reliable for WhatsApp media upload
+          const grpImgResponse = await fetch(payload.mediaUrl);
+          if (!grpImgResponse.ok) {
+            throw new Error(`Failed to fetch image: ${grpImgResponse.status} ${grpImgResponse.statusText}`);
+          }
+          const grpImgBuffer = Buffer.from(await grpImgResponse.arrayBuffer());
+          const grpContentType = grpImgResponse.headers.get('content-type') || 'image/jpeg';
+          console.log(`[WA][Group] Fetched image: ${grpImgBuffer.length} bytes, type: ${grpContentType}`);
+
           result = await sock.sendMessage(groupJid, {
-            image: { url: payload.mediaUrl },
+            image: grpImgBuffer,
+            mimetype: grpContentType,
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
+          console.log(`[WA][Group] Image send result:`, JSON.stringify(result, null, 2));
           break;
+        }
 
-        case 'video':
+        case 'video': {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
           }
+          console.log(`[WA] Sending video from URL: ${payload.mediaUrl}`);
+
+          // Fetch video as buffer
+          const vidResponse = await fetch(payload.mediaUrl);
+          if (!vidResponse.ok) {
+            throw new Error(`Failed to fetch video: ${vidResponse.status} ${vidResponse.statusText}`);
+          }
+          const vidBuffer = Buffer.from(await vidResponse.arrayBuffer());
+          const vidContentType = vidResponse.headers.get('content-type') || 'video/mp4';
+          console.log(`[WA] Fetched video: ${vidBuffer.length} bytes, type: ${vidContentType}`);
+
           result = await sock.sendMessage(groupJid, {
-            video: { url: payload.mediaUrl },
+            video: vidBuffer,
+            mimetype: vidContentType,
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
           break;
+        }
 
         case 'audio':
           if (!payload.mediaUrl) {
