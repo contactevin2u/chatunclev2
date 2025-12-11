@@ -28,6 +28,22 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const shouldFocusRef = useRef(false);
+
+  // Robust focus function that retries to handle scroll/DOM update interference
+  const focusInput = useCallback(() => {
+    shouldFocusRef.current = true;
+    const attemptFocus = (attempts: number) => {
+      if (attempts <= 0 || !shouldFocusRef.current) return;
+      if (inputRef.current && document.activeElement !== inputRef.current) {
+        inputRef.current.focus();
+      }
+      if (attempts > 1) {
+        setTimeout(() => attemptFocus(attempts - 1), 100);
+      }
+    };
+    attemptFocus(3); // Try 3 times, 100ms apart
+  }, []);
 
   // Emoji picker state
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -76,14 +92,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   // Auto-focus input when conversation changes
   useEffect(() => {
     if (conversationId) {
-      // Use setTimeout instead of requestAnimationFrame for more reliable focus
-      // The delay ensures any DOM updates have completed
-      const timer = setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-      return () => clearTimeout(timer);
+      focusInput();
     }
-  }, [conversationId]);
+  }, [conversationId, focusInput]);
 
   // Fetch templates on mount
   useEffect(() => {
@@ -259,15 +270,13 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     const { template, caption } = templatePreview;
     onSend(caption, template.content_type!, template.media_url!, template.media_mime_type);
     setTemplatePreview(null);
-    // Refocus input after sending
-    setTimeout(() => {
-      inputRef.current?.focus();
-    }, 50);
+    // Refocus input after sending (with retry logic)
+    focusInput();
   };
 
   const handleCancelTemplatePreview = () => {
     setTemplatePreview(null);
-    inputRef.current?.focus();
+    focusInput();
   };
 
   const handleEmojiSelect = (emoji: any) => {
@@ -383,10 +392,8 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         // Send location message
         onSend('', 'location', undefined, undefined, { latitude, longitude });
         setIsGettingLocation(false);
-        // Refocus input after sending
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 50);
+        // Refocus input after sending (with retry logic)
+        focusInput();
       },
       (error) => {
         setIsGettingLocation(false);
@@ -436,10 +443,8 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         clearAttachment();
         setMessage('');
         onCancelReply?.(); // Clear reply state after sending
-        // Refocus input after sending media
-        setTimeout(() => {
-          inputRef.current?.focus();
-        }, 50);
+        // Refocus input after sending media (with retry logic)
+        focusInput();
       } catch (error: any) {
         console.error('Failed to upload media:', error);
         alert(error.message || 'Failed to upload media');
@@ -454,10 +459,8 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
       onSend(message.trim(), undefined, undefined, undefined, undefined, quotedMessageId);
       setMessage('');
       onCancelReply?.(); // Clear reply state after sending
-      // Refocus input after sending
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
+      // Refocus input after sending (with retry logic)
+      focusInput();
     }
   };
 
