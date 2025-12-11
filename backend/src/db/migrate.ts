@@ -920,17 +920,30 @@ ALTER TABLE template_sequences ALTER COLUMN user_id DROP NOT NULL;
 -- Add index for account-based sequence queries
 CREATE INDEX IF NOT EXISTS idx_template_sequences_account ON template_sequences(whatsapp_account_id);
 
--- Migrate existing templates: assign to user's first account (if they have one)
+
+-- Migrate existing templates: assign to user's account (owned or shared access)
 -- This is a one-time migration for existing data
+--
+-- Strategy:
+-- 1. First try: user owns a WhatsApp account directly
+-- 2. Fallback: user has shared access to an account via account_access table
+-- This handles both account owners AND agents who created templates
+
 UPDATE templates t
-SET whatsapp_account_id = (
-  SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = t.user_id LIMIT 1
+SET whatsapp_account_id = COALESCE(
+  -- First priority: user owns an account directly
+  (SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = t.user_id LIMIT 1),
+  -- Fallback: user has shared access to an account
+  (SELECT aa.whatsapp_account_id FROM account_access aa WHERE aa.agent_id = t.user_id LIMIT 1)
 )
 WHERE t.whatsapp_account_id IS NULL AND t.user_id IS NOT NULL;
 
 UPDATE template_sequences ts
-SET whatsapp_account_id = (
-  SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = ts.user_id LIMIT 1
+SET whatsapp_account_id = COALESCE(
+  -- First priority: user owns an account directly
+  (SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = ts.user_id LIMIT 1),
+  -- Fallback: user has shared access to an account
+  (SELECT aa.whatsapp_account_id FROM account_access aa WHERE aa.agent_id = ts.user_id LIMIT 1)
 )
 WHERE ts.whatsapp_account_id IS NULL AND ts.user_id IS NOT NULL;
 
@@ -1228,6 +1241,95 @@ WHERE account_id IS NULL;
 
 -- Create index on contacts account_id
 CREATE INDEX IF NOT EXISTS idx_contacts_account_id ON contacts(account_id);
+
+
+-- Add account_id column to groups
+ALTER TABLE groups ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id for groups from whatsapp_account_id
+UPDATE groups
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+-- Create index on groups account_id
+CREATE INDEX IF NOT EXISTS idx_groups_account_id ON groups(account_id);
+
+-- Add account_id column to lid_pn_mappings
+ALTER TABLE lid_pn_mappings ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id for lid_pn_mappings from whatsapp_account_id
+UPDATE lid_pn_mappings
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+-- Create index on lid_pn_mappings account_id
+CREATE INDEX IF NOT EXISTS idx_lid_pn_mappings_account_id ON lid_pn_mappings(account_id);
+
+-- Add account_id column to templates (for multi-channel support)
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id for templates - use COALESCE to check ownership AND shared access
+UPDATE templates t
+SET account_id = COALESCE(
+  t.whatsapp_account_id,
+  (SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = t.user_id LIMIT 1),
+  (SELECT aa.whatsapp_account_id FROM account_access aa WHERE aa.agent_id = t.user_id LIMIT 1)
+)
+WHERE t.account_id IS NULL AND t.user_id IS NOT NULL;
+
+-- Create index on templates account_id
+CREATE INDEX IF NOT EXISTS idx_templates_account_id ON templates(account_id);
+
+-- Add account_id column to template_sequences (for multi-channel support)
+ALTER TABLE template_sequences ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id for template_sequences - use COALESCE to check ownership AND shared access
+UPDATE template_sequences ts
+SET account_id = COALESCE(
+  ts.whatsapp_account_id,
+  (SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = ts.user_id LIMIT 1),
+  (SELECT aa.whatsapp_account_id FROM account_access aa WHERE aa.agent_id = ts.user_id LIMIT 1)
+)
+WHERE ts.account_id IS NULL AND ts.user_id IS NOT NULL;
+
+-- Create index on template_sequences account_id
+CREATE INDEX IF NOT EXISTS idx_template_sequences_account_id ON template_sequences(account_id);
+
+
+-- ============================================================
+-- UNIFIED ACCOUNT_ID UNIQUE CONSTRAINTS
+-- ============================================================
+-- These constraints are CRITICAL for ON CONFLICT clauses to work properly
+-- They mirror the old whatsapp_account_id constraints but use the unified account_id
+
+-- Unique constraint for contacts: one contact per account + wa_id
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_account_id_wa_id_unique
+  ON contacts(account_id, wa_id)
+  WHERE account_id IS NOT NULL;
+
+-- Unique constraint for conversations: one conversation per account + contact
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_id_contact_unique
+  ON conversations(account_id, contact_id)
+  WHERE account_id IS NOT NULL AND contact_id IS NOT NULL;
+
+-- Unique constraint for group conversations: one conversation per account + group
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_account_id_group_unique
+  ON conversations(account_id, group_id)
+  WHERE account_id IS NOT NULL AND group_id IS NOT NULL;
+
+-- Unique constraint for groups: one group per account + group_jid
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_account_id_group_jid_unique
+  ON groups(account_id, group_jid)
+  WHERE account_id IS NOT NULL;
+
+-- Unique constraint for lid_pn_mappings: one mapping per account + lid/pn
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lid_pn_mappings_account_id_lid_unique
+  ON lid_pn_mappings(account_id, lid)
+  WHERE account_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lid_pn_mappings_account_id_pn_unique
+  ON lid_pn_mappings(account_id, pn)
+  WHERE account_id IS NOT NULL;
 
 -- Create unified accounts view that combines whatsapp_accounts and channel_accounts
 -- Drop existing view first to handle schema changes
