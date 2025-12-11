@@ -1315,6 +1315,76 @@ WHERE id IN (
   WHERE rn > 1
 );
 
+-- ============================================================
+-- MERGE LID/PN DUPLICATE CONTACTS
+-- ============================================================
+-- When both a LID contact and PN contact exist for the same person,
+-- merge them into the PN contact (more reliable identifier)
+-- This happens when messages arrive via different WhatsApp formats
+
+-- Step 1: Move messages from LID conversations to PN conversations
+UPDATE messages m
+SET conversation_id = pn_conv.id
+FROM conversations lid_conv
+JOIN contacts lid_c ON lid_conv.contact_id = lid_c.id
+JOIN lid_pn_mappings map ON lid_c.account_id = map.account_id AND lid_c.wa_id = map.lid
+JOIN contacts pn_c ON pn_c.account_id = map.account_id AND pn_c.wa_id = map.pn
+JOIN conversations pn_conv ON pn_conv.contact_id = pn_c.id AND pn_conv.account_id = pn_c.account_id
+WHERE m.conversation_id = lid_conv.id
+  AND lid_c.id != pn_c.id
+  AND lid_conv.id != pn_conv.id;
+
+-- Step 2: Delete LID conversations that now have no messages (merged to PN)
+DELETE FROM conversations
+WHERE id IN (
+  SELECT lid_conv.id
+  FROM conversations lid_conv
+  JOIN contacts lid_c ON lid_conv.contact_id = lid_c.id
+  JOIN lid_pn_mappings map ON lid_c.account_id = map.account_id AND lid_c.wa_id = map.lid
+  WHERE EXISTS (
+    SELECT 1 FROM contacts pn_c
+    JOIN conversations pn_conv ON pn_conv.contact_id = pn_c.id
+    WHERE pn_c.account_id = map.account_id AND pn_c.wa_id = map.pn
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM messages m WHERE m.conversation_id = lid_conv.id
+  )
+);
+
+-- Step 3: For LID conversations with remaining messages, update contact_id to PN contact
+UPDATE conversations conv
+SET contact_id = pn_c.id
+FROM contacts lid_c
+JOIN lid_pn_mappings map ON lid_c.account_id = map.account_id AND lid_c.wa_id = map.lid
+JOIN contacts pn_c ON pn_c.account_id = map.account_id AND pn_c.wa_id = map.pn
+WHERE conv.contact_id = lid_c.id
+  AND lid_c.id != pn_c.id;
+
+-- Step 4: Update PN contacts with name from LID contacts if PN has no name
+UPDATE contacts pn_c
+SET name = lid_c.name
+FROM lid_pn_mappings map
+JOIN contacts lid_c ON lid_c.account_id = map.account_id AND lid_c.wa_id = map.lid
+WHERE pn_c.account_id = map.account_id
+  AND pn_c.wa_id = map.pn
+  AND (pn_c.name IS NULL OR pn_c.name = '')
+  AND lid_c.name IS NOT NULL AND lid_c.name != '';
+
+-- Step 5: Delete orphaned LID contacts (those with PN equivalents and no conversations)
+DELETE FROM contacts
+WHERE id IN (
+  SELECT lid_c.id
+  FROM contacts lid_c
+  JOIN lid_pn_mappings map ON lid_c.account_id = map.account_id AND lid_c.wa_id = map.lid
+  WHERE EXISTS (
+    SELECT 1 FROM contacts pn_c
+    WHERE pn_c.account_id = map.account_id AND pn_c.wa_id = map.pn
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM conversations conv WHERE conv.contact_id = lid_c.id
+  )
+);
+
 -- Remove duplicate conversations (by account + contact), keeping most recent
 DELETE FROM conversations
 WHERE id IN (
