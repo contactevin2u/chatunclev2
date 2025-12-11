@@ -66,7 +66,7 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   useEffect(() => {
     if (prefillMessage) {
       setMessage(prefillMessage);
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         inputRef.current?.focus();
       });
       onPrefillConsumed?.();
@@ -76,9 +76,12 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
   // Auto-focus input when conversation changes
   useEffect(() => {
     if (conversationId) {
-      requestAnimationFrame(() => {
+      // Use setTimeout instead of requestAnimationFrame for more reliable focus
+      // The delay ensures any DOM updates have completed
+      const timer = setTimeout(() => {
         inputRef.current?.focus();
-      });
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [conversationId]);
 
@@ -257,9 +260,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
     onSend(caption, template.content_type!, template.media_url!, template.media_mime_type);
     setTemplatePreview(null);
     // Refocus input after sending
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       inputRef.current?.focus();
-    });
+    }, 50);
   };
 
   const handleCancelTemplatePreview = () => {
@@ -381,9 +384,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         onSend('', 'location', undefined, undefined, { latitude, longitude });
         setIsGettingLocation(false);
         // Refocus input after sending
-        requestAnimationFrame(() => {
+        setTimeout(() => {
           inputRef.current?.focus();
-        });
+        }, 50);
       },
       (error) => {
         setIsGettingLocation(false);
@@ -434,9 +437,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
         setMessage('');
         onCancelReply?.(); // Clear reply state after sending
         // Refocus input after sending media
-        requestAnimationFrame(() => {
+        setTimeout(() => {
           inputRef.current?.focus();
-        });
+        }, 50);
       } catch (error: any) {
         console.error('Failed to upload media:', error);
         alert(error.message || 'Failed to upload media');
@@ -452,9 +455,9 @@ export default function MessageInput({ onSend, disabled, conversationId, prefill
       setMessage('');
       onCancelReply?.(); // Clear reply state after sending
       // Refocus input after sending
-      requestAnimationFrame(() => {
+      setTimeout(() => {
         inputRef.current?.focus();
-      });
+      }, 50);
     }
   };
 
