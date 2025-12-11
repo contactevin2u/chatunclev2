@@ -60,7 +60,7 @@ router.get('/', async (req: Request, res: Response) => {
                 wa.created_at, wa.updated_at,
                 FALSE as is_owner, aa.permission, u.name as owner_name
          FROM whatsapp_accounts wa
-         JOIN account_access aa ON wa.id = aa.whatsapp_account_id
+         JOIN account_access aa ON wa.id = aa.account_id
          JOIN users u ON wa.user_id = u.id
          WHERE aa.agent_id = $1`,
         [req.user!.userId]
@@ -423,13 +423,13 @@ router.get('/:id/access', async (req: Request, res: Response) => {
       return;
     }
 
-    // Use whatsapp_account_id for backward compatibility
+    // Use unified account_id
     const accessList = await query(
       `SELECT aa.id, aa.agent_id, aa.permission, aa.granted_at,
               u.name as agent_name, u.email as agent_email
        FROM account_access aa
        JOIN users u ON aa.agent_id = u.id
-       WHERE aa.whatsapp_account_id = $1
+       WHERE aa.account_id = $1
        ORDER BY aa.granted_at DESC`,
       [req.params.id]
     );
@@ -482,11 +482,11 @@ router.post('/:id/access', async (req: Request, res: Response) => {
       return;
     }
 
-    // Grant or update access (use whatsapp_account_id for backward compatibility)
+    // Grant or update access using unified account_id
     const accessRecord = await queryOne(
-      `INSERT INTO account_access (whatsapp_account_id, agent_id, permission, granted_by)
+      `INSERT INTO account_access (account_id, agent_id, permission, granted_by)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (whatsapp_account_id, agent_id)
+       ON CONFLICT (account_id, agent_id)
        DO UPDATE SET permission = $3, granted_at = NOW()
        RETURNING *`,
       [req.params.id, agent.id, permission, req.user!.userId]
@@ -517,7 +517,7 @@ router.delete('/:id/access/:agentId', async (req: Request, res: Response) => {
     }
 
     const deletedCount = await execute(
-      'DELETE FROM account_access WHERE whatsapp_account_id = $1 AND agent_id = $2',
+      'DELETE FROM account_access WHERE account_id = $1 AND agent_id = $2',
       [req.params.id, req.params.agentId]
     );
 

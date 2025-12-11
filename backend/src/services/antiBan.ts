@@ -170,11 +170,11 @@ export function sleep(ms: number): Promise<void> {
 
 /**
  * Get account age in days from creation date
- * Backward-compatible: uses whatsapp_accounts directly
+ * Uses unified accounts view
  */
 export async function getAccountAgeDays(accountId: string): Promise<number> {
   const account = await queryOne(
-    'SELECT created_at FROM whatsapp_accounts WHERE id = $1',
+    'SELECT created_at FROM accounts WHERE id = $1',
     [accountId]
   );
 

@@ -20,17 +20,17 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
     const { limit = 50, before } = req.query;
     const userId = req.user!.userId;
 
-    // Backward-compatible query (uses whatsapp_accounts directly)
+    // Uses unified accounts view
     const conversation = await queryOne(`
-      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group, c.group_id,
+      SELECT c.id, c.account_id, c.is_group, c.group_id,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              COALESCE(c.channel_type, 'whatsapp') as channel_type
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
-      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, userId]);
 
@@ -84,9 +84,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     const { content, contentType = 'text', mediaUrl, mediaMimeType, latitude, longitude, locationName, quotedMessageId } = req.body;
     const agentId = req.user!.userId;
 
-    // Backward-compatible query (uses whatsapp_accounts directly)
+    // Uses unified accounts view
     const conversation = await queryOne(`
-      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group, c.first_response_at,
+      SELECT c.id, c.account_id, c.is_group, c.first_response_at,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              CASE WHEN a.user_id = $2 THEN 'owner' ELSE aa.permission END as permission,
@@ -95,8 +95,8 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
-      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, agentId]);
 
@@ -201,7 +201,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
 
     // Emit message:new to account room so ALL agents see the new message immediately
     // This is critical for multi-agent sync - other agents won't see the message otherwise
-    // Use account_id which is normalized from either whatsapp_account_id or channel_account_id
+    // Use unified account_id
     const io = getIO();
     io.to(`account:${conversation.account_id}`).emit('message:new', {
       accountId: conversation.account_id,
@@ -429,8 +429,8 @@ router.post('/:messageId/react', async (req: Request, res: Response) => {
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
-      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE m.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.messageId, req.user!.userId]);
 
@@ -534,8 +534,8 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
-      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE m.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.messageId, agentId]);
 
@@ -559,15 +559,15 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
       group_jid: string | null;
       permission: string;
     }>(`
-      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group,
+      SELECT c.id, c.account_id, c.is_group,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              CASE WHEN a.user_id = $2 THEN 'owner' ELSE aa.permission END as permission
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
-      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [targetConversationId, agentId]);
 
