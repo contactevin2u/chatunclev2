@@ -928,6 +928,33 @@ export const telegram = {
   // Get conversations
   getConversations: (token: string, accountId: string) =>
     request<{ conversations: any[] }>(`/api/telegram/accounts/${accountId}/conversations`, { token }),
+
+  // List access for an account (owner only)
+  listAccess: (token: string, accountId: string) =>
+    request<{ access: any[] }>(`/api/telegram/accounts/${accountId}/access`, { token }),
+
+  // Grant access to an agent
+  grantAccess: (token: string, accountId: string, agentEmail: string, permission: 'full' | 'send' | 'view' = 'full') =>
+    request<{ message: string; access: any }>(`/api/telegram/accounts/${accountId}/access`, {
+      method: 'POST',
+      body: { agentEmail, permission },
+      token,
+    }),
+
+  // Revoke access from an agent
+  revokeAccess: (token: string, accountId: string, agentId: string) =>
+    request<{ message: string }>(`/api/telegram/accounts/${accountId}/access/${agentId}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // Alias for addAccount (better naming)
+  addBot: (token: string, botToken: string, accountName?: string) =>
+    request<{ account: any }>('/api/telegram/accounts', {
+      method: 'POST',
+      body: { botToken, accountName },
+      token,
+    }),
 };
 
 // Meta API (Instagram & Facebook Messenger)
