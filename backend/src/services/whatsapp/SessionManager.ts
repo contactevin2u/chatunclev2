@@ -252,13 +252,11 @@ class SessionManager {
 
     // Create socket with proper configuration based on latest Baileys documentation
     // Reference: https://baileys.wiki/docs/api/type-aliases/SocketConfig/
-    // NOTE: Using raw keys from PostgreSQL without in-memory cache
-    // makeCacheableSignalKeyStore can cause stale key issues with external DB storage
     const sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
-        keys: state.keys,  // Direct PostgreSQL keys, no cache layer
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
       logger,
       // Use Desktop browser to get full history sync (per Baileys docs)
@@ -1500,21 +1498,10 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          console.log(`[WA] Sending image with URL: ${payload.mediaUrl}`);
-          console.log(`[WA] Caption: ${payload.content || '(none)'}`);
-          // Simple URL-based sending - only pass options if quoting
-          if (quotedMsg) {
-            result = await sock.sendMessage(jid, {
-              image: { url: payload.mediaUrl },
-              caption: payload.content || undefined,
-            }, { quoted: quotedMsg });
-          } else {
-            result = await sock.sendMessage(jid, {
-              image: { url: payload.mediaUrl },
-              caption: payload.content || undefined,
-            });
-          }
-          console.log(`[WA] Image sendMessage returned:`, JSON.stringify(result, null, 2));
+          result = await sock.sendMessage(jid, {
+            image: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          }, { quoted: quotedMsg });
           break;
 
         case 'video':
@@ -1704,18 +1691,10 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          // Simple URL-based sending - only pass options if quoting
-          if (quotedMsg) {
-            result = await sock.sendMessage(groupJid, {
-              image: { url: payload.mediaUrl },
-              caption: payload.content || undefined,
-            }, { quoted: quotedMsg });
-          } else {
-            result = await sock.sendMessage(groupJid, {
-              image: { url: payload.mediaUrl },
-              caption: payload.content || undefined,
-            });
-          }
+          result = await sock.sendMessage(groupJid, {
+            image: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          }, { quoted: quotedMsg });
           break;
 
         case 'video':

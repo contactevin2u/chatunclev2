@@ -157,7 +157,7 @@ export async function clearPostgresAuthState(accountId: string): Promise<void> {
     [accountId]
   );
   await execute(
-    'UPDATE accounts SET session_data = NULL WHERE id = $1',
+    'UPDATE whatsapp_accounts SET session_data = NULL WHERE id = $1',
     [accountId]
   );
   console.log(`[PgAuth] Cleared auth state for account ${accountId}`);
