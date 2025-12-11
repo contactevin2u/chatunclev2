@@ -1500,84 +1500,45 @@ class SessionManager {
           }
           console.log(`[WA] Sending image with URL: ${payload.mediaUrl}`);
           console.log(`[WA] Caption: ${payload.content || '(none)'}`);
-          try {
-            // Fetch image as buffer for more reliable sending
-            // (some URLs like Cloudinary may have issues with Baileys' built-in fetch)
-            const imgResponse = await fetch(payload.mediaUrl);
-            if (!imgResponse.ok) {
-              throw new Error(`Failed to fetch image: ${imgResponse.status}`);
-            }
-            const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
-            console.log(`[WA] Downloaded image buffer: ${imgBuffer.length} bytes`);
-
-            result = await sock.sendMessage(jid, {
-              image: imgBuffer,
-              caption: payload.content || undefined,
-              mimetype: payload.mediaMimeType || 'image/jpeg',
-            }, { quoted: quotedMsg });
-            console.log(`[WA] Image sendMessage returned:`, JSON.stringify(result, null, 2));
-          } catch (imgErr: any) {
-            console.error(`[WA] Image sendMessage ERROR:`, imgErr);
-            throw imgErr;
-          }
+          // Use simple URL-based sending (original working format - no mimetype)
+          result = await sock.sendMessage(jid, {
+            image: { url: payload.mediaUrl },
+            caption: payload.content || undefined,
+          }, { quoted: quotedMsg });
+          console.log(`[WA] Image sendMessage returned:`, JSON.stringify(result, null, 2));
           break;
 
-        case 'video': {
+        case 'video':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
           }
-          console.log(`[WA] Sending video with URL: ${payload.mediaUrl}`);
-          const vidResponse = await fetch(payload.mediaUrl);
-          if (!vidResponse.ok) {
-            throw new Error(`Failed to fetch video: ${vidResponse.status}`);
-          }
-          const vidBuffer = Buffer.from(await vidResponse.arrayBuffer());
-          console.log(`[WA] Downloaded video buffer: ${vidBuffer.length} bytes`);
           result = await sock.sendMessage(jid, {
-            video: vidBuffer,
+            video: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-            mimetype: payload.mediaMimeType || 'video/mp4',
           }, { quoted: quotedMsg });
           break;
-        }
 
-        case 'audio': {
+        case 'audio':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for audio');
           }
-          console.log(`[WA] Sending audio with URL: ${payload.mediaUrl}`);
-          const audResponse = await fetch(payload.mediaUrl);
-          if (!audResponse.ok) {
-            throw new Error(`Failed to fetch audio: ${audResponse.status}`);
-          }
-          const audBuffer = Buffer.from(await audResponse.arrayBuffer());
-          console.log(`[WA] Downloaded audio buffer: ${audBuffer.length} bytes`);
           result = await sock.sendMessage(jid, {
-            audio: audBuffer,
+            audio: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'audio/mp4',
             ptt: true,
           }, { quoted: quotedMsg });
           break;
-        }
 
-        case 'document': {
+        case 'document':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for document');
           }
-          console.log(`[WA] Sending document with URL: ${payload.mediaUrl}`);
-          const docResponse = await fetch(payload.mediaUrl);
-          if (!docResponse.ok) {
-            throw new Error(`Failed to fetch document: ${docResponse.status}`);
-          }
-          const docBuffer = Buffer.from(await docResponse.arrayBuffer());
-          console.log(`[WA] Downloaded document buffer: ${docBuffer.length} bytes`);
           result = await sock.sendMessage(jid, {
-            document: docBuffer,
+            document: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'application/octet-stream',
             fileName: payload.content || 'document',
           }, { quoted: quotedMsg });
           break;
-        }
 
         case 'location':
           if (payload.latitude === undefined || payload.longitude === undefined) {
@@ -1730,81 +1691,47 @@ class SessionManager {
           result = await sock.sendMessage(groupJid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
-        case 'image': {
+        case 'image':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          console.log(`[WA][Group] Sending image with URL: ${payload.mediaUrl}`);
-          const grpImgResponse = await fetch(payload.mediaUrl);
-          if (!grpImgResponse.ok) {
-            throw new Error(`Failed to fetch image: ${grpImgResponse.status}`);
-          }
-          const grpImgBuffer = Buffer.from(await grpImgResponse.arrayBuffer());
-          console.log(`[WA][Group] Downloaded image buffer: ${grpImgBuffer.length} bytes`);
           result = await sock.sendMessage(groupJid, {
-            image: grpImgBuffer,
+            image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-            mimetype: payload.mediaMimeType || 'image/jpeg',
           }, { quoted: quotedMsg });
           break;
-        }
 
-        case 'video': {
+        case 'video':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
           }
-          console.log(`[WA][Group] Sending video with URL: ${payload.mediaUrl}`);
-          const grpVidResponse = await fetch(payload.mediaUrl);
-          if (!grpVidResponse.ok) {
-            throw new Error(`Failed to fetch video: ${grpVidResponse.status}`);
-          }
-          const grpVidBuffer = Buffer.from(await grpVidResponse.arrayBuffer());
-          console.log(`[WA][Group] Downloaded video buffer: ${grpVidBuffer.length} bytes`);
           result = await sock.sendMessage(groupJid, {
-            video: grpVidBuffer,
+            video: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-            mimetype: payload.mediaMimeType || 'video/mp4',
           }, { quoted: quotedMsg });
           break;
-        }
 
-        case 'audio': {
+        case 'audio':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for audio');
           }
-          console.log(`[WA][Group] Sending audio with URL: ${payload.mediaUrl}`);
-          const grpAudResponse = await fetch(payload.mediaUrl);
-          if (!grpAudResponse.ok) {
-            throw new Error(`Failed to fetch audio: ${grpAudResponse.status}`);
-          }
-          const grpAudBuffer = Buffer.from(await grpAudResponse.arrayBuffer());
-          console.log(`[WA][Group] Downloaded audio buffer: ${grpAudBuffer.length} bytes`);
           result = await sock.sendMessage(groupJid, {
-            audio: grpAudBuffer,
+            audio: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'audio/mp4',
             ptt: true,
           }, { quoted: quotedMsg });
           break;
-        }
 
-        case 'document': {
+        case 'document':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for document');
           }
-          console.log(`[WA][Group] Sending document with URL: ${payload.mediaUrl}`);
-          const grpDocResponse = await fetch(payload.mediaUrl);
-          if (!grpDocResponse.ok) {
-            throw new Error(`Failed to fetch document: ${grpDocResponse.status}`);
-          }
-          const grpDocBuffer = Buffer.from(await grpDocResponse.arrayBuffer());
-          console.log(`[WA][Group] Downloaded document buffer: ${grpDocBuffer.length} bytes`);
           result = await sock.sendMessage(groupJid, {
-            document: grpDocBuffer,
+            document: { url: payload.mediaUrl },
             mimetype: payload.mediaMimeType || 'application/octet-stream',
             fileName: payload.content || 'document',
           }, { quoted: quotedMsg });
           break;
-        }
 
         case 'location':
           if (payload.latitude === undefined || payload.longitude === undefined) {
