@@ -16,7 +16,7 @@ async function processScheduledMessages() {
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       WHERE sm.status = 'pending' AND sm.scheduled_at <= NOW()
       ORDER BY sm.scheduled_at ASC
       LIMIT 10

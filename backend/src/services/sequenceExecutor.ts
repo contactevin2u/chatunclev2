@@ -188,11 +188,12 @@ export async function executeSequence(
     }
 
     // Get conversation details (with shared access check) using unified accounts table
+    // COALESCE handles backward compatibility with whatsapp_account_id
     const conversation = await queryOne<any>(`
-      SELECT c.id, c.account_id, ct.wa_id, ct.jid_type
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, ct.wa_id, ct.jid_type
       FROM conversations c
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, agentId]);

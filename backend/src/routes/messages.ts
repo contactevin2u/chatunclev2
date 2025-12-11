@@ -29,7 +29,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, userId]);
@@ -95,7 +95,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.conversationId, agentId]);
@@ -429,7 +429,7 @@ router.post('/:messageId/react', async (req: Request, res: Response) => {
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE m.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.messageId, req.user!.userId]);
@@ -534,7 +534,7 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
       JOIN conversations c ON m.conversation_id = c.id
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE m.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.messageId, agentId]);
@@ -566,7 +566,7 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [targetConversationId, agentId]);

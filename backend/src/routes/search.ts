@@ -51,7 +51,7 @@ router.get('/', async (req: Request, res: Response) => {
         FROM messages m
         JOIN conversations c ON m.conversation_id = c.id
         JOIN contacts ct ON c.contact_id = ct.id
-        JOIN accounts a ON c.account_id = a.id
+        JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
         WHERE LOWER(m.content) LIKE $1 ${accountFilter}
         ORDER BY m.created_at DESC
         LIMIT $2
@@ -100,7 +100,7 @@ router.get('/', async (req: Request, res: Response) => {
           ) as last_message
         FROM conversations c
         JOIN contacts ct ON c.contact_id = ct.id
-        JOIN accounts a ON c.account_id = a.id
+        JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
         WHERE (LOWER(ct.name) LIKE $1 OR ct.phone_number LIKE $1) ${accountFilter}
         ORDER BY c.id, c.last_message_at DESC
         LIMIT $2
@@ -132,7 +132,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
     const conversation = await query(`
       SELECT c.id
       FROM conversations c
-      JOIN accounts a ON c.account_id = a.id
+      JOIN accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       WHERE c.id = $1 AND a.user_id = $2
     `, [conversationId, userId]);
 
