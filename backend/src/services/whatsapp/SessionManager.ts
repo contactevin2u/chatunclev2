@@ -1500,12 +1500,37 @@ class SessionManager {
           }
           console.log(`[WA] Sending image with URL: ${payload.mediaUrl}`);
           console.log(`[WA] Caption: ${payload.content || '(none)'}`);
-          // Use simple URL-based sending (original working format - no mimetype)
-          result = await sock.sendMessage(jid, {
-            image: { url: payload.mediaUrl },
-            caption: payload.content || undefined,
-          }, { quoted: quotedMsg });
-          console.log(`[WA] Image sendMessage returned:`, JSON.stringify(result, null, 2));
+          try {
+            // Use stream-based sending for more reliable delivery
+            const { Readable } = await import('stream');
+            const imgFetchResponse = await fetch(payload.mediaUrl);
+            if (!imgFetchResponse.ok) {
+              throw new Error(`Failed to fetch image: ${imgFetchResponse.status}`);
+            }
+            // Convert web ReadableStream to Node.js Readable stream
+            const webStream = imgFetchResponse.body;
+            if (!webStream) {
+              throw new Error('No response body from image fetch');
+            }
+            const nodeStream = Readable.fromWeb(webStream as any);
+            console.log(`[WA] Created stream for image`);
+
+            result = await sock.sendMessage(jid, {
+              image: { stream: nodeStream },
+              caption: payload.content || undefined,
+              mimetype: payload.mediaMimeType || 'image/jpeg',
+            }, { quoted: quotedMsg });
+            console.log(`[WA] Image sendMessage returned:`, JSON.stringify(result, null, 2));
+          } catch (streamErr: any) {
+            console.error(`[WA] Stream-based send failed:`, streamErr.message);
+            // Fallback to URL-based
+            console.log(`[WA] Falling back to URL-based sending`);
+            result = await sock.sendMessage(jid, {
+              image: { url: payload.mediaUrl },
+              caption: payload.content || undefined,
+            }, { quoted: quotedMsg });
+            console.log(`[WA] Image (URL fallback) sendMessage returned:`, JSON.stringify(result, null, 2));
+          }
           break;
 
         case 'video':
@@ -1695,10 +1720,31 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          result = await sock.sendMessage(groupJid, {
-            image: { url: payload.mediaUrl },
-            caption: payload.content || undefined,
-          }, { quoted: quotedMsg });
+          try {
+            // Use stream-based sending for more reliable delivery
+            const { Readable: GrpReadable } = await import('stream');
+            const grpImgResponse = await fetch(payload.mediaUrl);
+            if (!grpImgResponse.ok) {
+              throw new Error(`Failed to fetch image: ${grpImgResponse.status}`);
+            }
+            const grpWebStream = grpImgResponse.body;
+            if (!grpWebStream) {
+              throw new Error('No response body from image fetch');
+            }
+            const grpNodeStream = GrpReadable.fromWeb(grpWebStream as any);
+
+            result = await sock.sendMessage(groupJid, {
+              image: { stream: grpNodeStream },
+              caption: payload.content || undefined,
+              mimetype: payload.mediaMimeType || 'image/jpeg',
+            }, { quoted: quotedMsg });
+          } catch (grpStreamErr: any) {
+            console.error(`[WA][Group] Stream-based send failed:`, grpStreamErr.message);
+            result = await sock.sendMessage(groupJid, {
+              image: { url: payload.mediaUrl },
+              caption: payload.content || undefined,
+            }, { quoted: quotedMsg });
+          }
           break;
 
         case 'video':
