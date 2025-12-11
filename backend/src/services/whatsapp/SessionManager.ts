@@ -477,7 +477,7 @@ class SessionManager {
             await execute(
               `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                VALUES ($1, $2, $3)
-               ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+               ON CONFLICT (account_id, lid) WHERE account_id IS NOT NULL DO UPDATE SET pn = $3, updated_at = NOW()`,
               [accountId, waId, resolvedPn]
             );
           }
@@ -563,14 +563,14 @@ class SessionManager {
               await execute(
                 `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                  VALUES ($1, $2, $3)
-                 ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+                 ON CONFLICT (account_id, lid) WHERE account_id IS NOT NULL DO UPDATE SET pn = $3, updated_at = NOW()`,
                 [accountId, waId, nameMatch.wa_id]
               );
             } else {
               await execute(
                 `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                  VALUES ($1, $2, $3)
-                 ON CONFLICT (account_id, pn) DO UPDATE SET lid = $2, updated_at = NOW()`,
+                 ON CONFLICT (account_id, pn) WHERE account_id IS NOT NULL DO UPDATE SET lid = $2, updated_at = NOW()`,
                 [accountId, nameMatch.wa_id, waId]
               );
             }
@@ -1023,7 +1023,7 @@ class SessionManager {
             await execute(
               `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                VALUES ($1, $2, $3)
-               ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+               ON CONFLICT (account_id, lid) WHERE account_id IS NOT NULL DO UPDATE SET pn = $3, updated_at = NOW()`,
               [accountId, waId, resolvedPn]
             );
           }
@@ -2495,7 +2495,7 @@ class SessionManager {
     const group = await queryOne(
       `INSERT INTO groups (account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (account_id, group_jid) DO UPDATE SET
+       ON CONFLICT (account_id, group_jid) WHERE account_id IS NOT NULL DO UPDATE SET
          name = COALESCE(EXCLUDED.name, groups.name),
          description = COALESCE(EXCLUDED.description, groups.description),
          owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
@@ -2703,7 +2703,7 @@ class SessionManager {
         await execute(
           `INSERT INTO lid_pn_mappings (account_id, lid, pn)
            VALUES ($1, $2, $3)
-           ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+           ON CONFLICT (account_id, lid) WHERE account_id IS NOT NULL DO UPDATE SET pn = $3, updated_at = NOW()`,
           [accountId, lidClean, pnClean]
         );
 

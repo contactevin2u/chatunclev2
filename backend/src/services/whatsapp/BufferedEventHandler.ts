@@ -428,7 +428,7 @@ async function processHistorySync(
             const group = await queryOne(
               `INSERT INTO groups (account_id, group_jid, name, participant_count)
                VALUES ($1, $2, $3, 0)
-               ON CONFLICT (account_id, group_jid) DO UPDATE SET
+               ON CONFLICT (account_id, group_jid) WHERE account_id IS NOT NULL DO UPDATE SET
                  name = COALESCE(NULLIF(EXCLUDED.name, ''), groups.name),
                  updated_at = NOW()
                RETURNING id`,

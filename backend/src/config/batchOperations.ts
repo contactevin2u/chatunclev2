@@ -46,7 +46,7 @@ export async function batchInsertContacts(
   const query = `
     INSERT INTO contacts (account_id, wa_id, phone_number, name, jid_type)
     VALUES ${placeholders.join(', ')}
-    ON CONFLICT (account_id, wa_id) DO UPDATE SET
+    ON CONFLICT (account_id, wa_id) WHERE account_id IS NOT NULL DO UPDATE SET
       name = COALESCE(EXCLUDED.name, contacts.name),
       phone_number = COALESCE(EXCLUDED.phone_number, contacts.phone_number),
       jid_type = EXCLUDED.jid_type,
