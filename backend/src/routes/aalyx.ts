@@ -231,7 +231,7 @@ router.post('/orders/:id/remind', async (req: Request, res: Response) => {
 
     // Get order with conversation details
     const order = await queryOne<AalyxOrder & { wa_id: string; contact_name: string; account_id: string }>(`
-      SELECT ao.*, ct.wa_id, ct.name as contact_name, c.account_id
+      SELECT ao.*, ct.wa_id, ct.name as contact_name, COALESCE(c.account_id, c.whatsapp_account_id) as account_id
       FROM aalyx_orders ao
       JOIN conversations c ON ao.conversation_id = c.id
       JOIN contacts ct ON ao.contact_id = ct.id

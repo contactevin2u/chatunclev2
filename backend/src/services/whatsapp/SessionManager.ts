@@ -1500,18 +1500,9 @@ class SessionManager {
           }
           console.log(`[WA] Sending image from URL: ${payload.mediaUrl}`);
 
-          // Fetch image as buffer - more reliable for WhatsApp media upload
-          const imgResponse = await fetch(payload.mediaUrl);
-          if (!imgResponse.ok) {
-            throw new Error(`Failed to fetch image: ${imgResponse.status} ${imgResponse.statusText}`);
-          }
-          const imgBuffer = Buffer.from(await imgResponse.arrayBuffer());
-          const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
-          console.log(`[WA] Fetched image: ${imgBuffer.length} bytes, type: ${contentType}`);
-
+          // Use URL-based approach like video - simpler and works with Baileys
           result = await sock.sendMessage(jid, {
-            image: imgBuffer,
-            mimetype: contentType,
+            image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
           console.log(`[WA] Image send result:`, JSON.stringify(result, null, 2));

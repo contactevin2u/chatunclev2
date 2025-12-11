@@ -1613,6 +1613,62 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_account_access_account_agent_unique
 -- INCOGNITO MODE FOR WHATSAPP ACCOUNTS
 -- ============================================================
 ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS incognito_mode BOOLEAN DEFAULT FALSE;
+
+-- ============================================================
+-- UNIFIED ACCOUNT_ID FOR AI TABLES
+-- ============================================================
+-- Add account_id to AI tables so they work with multi-channel (Telegram, TikTok, etc.)
+-- Previously these tables only had whatsapp_account_id which broke non-WhatsApp channels
+
+-- 1. ai_settings: Add account_id for unified multi-channel AI settings
+ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS account_id UUID;
+
+UPDATE ai_settings
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_settings_account_id ON ai_settings(account_id);
+
+-- Add unique constraint on account_id (similar to whatsapp_account_id unique)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_settings_account_id_unique
+  ON ai_settings(account_id)
+  WHERE account_id IS NOT NULL;
+
+-- 2. ai_logs: Add account_id for unified multi-channel AI logging
+ALTER TABLE ai_logs ADD COLUMN IF NOT EXISTS account_id UUID;
+
+UPDATE ai_logs
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_logs_account_id ON ai_logs(account_id, created_at DESC);
+
+-- 3. knowledge_documents: Add account_id for unified multi-channel knowledge base
+ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS account_id UUID;
+
+UPDATE knowledge_documents
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_account_id ON knowledge_documents(account_id);
+
+-- 4. knowledge_chunks: Add account_id for unified multi-channel knowledge search
+ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS account_id UUID;
+
+UPDATE knowledge_chunks
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_account_id ON knowledge_chunks(account_id);
+
+-- 5. auto_reply_rules: Add account_id for unified multi-channel auto-replies
+ALTER TABLE auto_reply_rules ADD COLUMN IF NOT EXISTS account_id UUID;
+
+UPDATE auto_reply_rules
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_auto_reply_rules_account_id ON auto_reply_rules(account_id);
 `;
 
 async function runMigrations() {

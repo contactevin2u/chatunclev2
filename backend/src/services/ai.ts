@@ -200,7 +200,7 @@ export async function searchKnowledge(accountId: string, searchQuery: string): P
         SELECT content, document_name,
           ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', $2)) as rank
         FROM knowledge_chunks
-        WHERE whatsapp_account_id = $1
+        WHERE COALESCE(account_id, whatsapp_account_id) = $1
           AND to_tsvector('simple', content) @@ plainto_tsquery('simple', $2)
         ORDER BY rank DESC
         LIMIT 5
@@ -221,7 +221,7 @@ export async function searchKnowledge(accountId: string, searchQuery: string): P
     const placeholders = words.map((_, i) => `LOWER(content) LIKE $${i + 2}`).join(' OR ');
     const results = await query(`
       SELECT content, document_name FROM knowledge_chunks
-      WHERE whatsapp_account_id = $1 AND (${placeholders})
+      WHERE COALESCE(account_id, whatsapp_account_id) = $1 AND (${placeholders})
       LIMIT 5
     `, [accountId, ...words.map(w => `%${w}%`)]);
 
@@ -255,7 +255,7 @@ async function getConversationContext(conversationId: string): Promise<string> {
 export async function getAISettings(accountId: string): Promise<any> {
   try {
     const settings = await queryOne(`
-      SELECT * FROM ai_settings WHERE whatsapp_account_id = $1
+      SELECT * FROM ai_settings WHERE COALESCE(account_id, whatsapp_account_id) = $1
     `, [accountId]);
 
     return settings || {
@@ -400,7 +400,7 @@ export async function generateResponse(
       // 13. Log the interaction for analytics
       try {
         await query(`
-          INSERT INTO ai_logs (whatsapp_account_id, conversation_id, customer_message, ai_response, model, tokens_used)
+          INSERT INTO ai_logs (account_id, conversation_id, customer_message, ai_response, model, tokens_used)
           VALUES ($1, $2, $3, $4, $5, $6)
         `, [accountId, conversationId, customerMessage, response, settings.model || 'gpt-4o-mini', completion.usage?.total_tokens || 0]);
       } catch (e) {
@@ -447,7 +447,7 @@ export async function processDocument(
     }
 
     const doc = await queryOne(`
-      INSERT INTO knowledge_documents (whatsapp_account_id, name, mime_type, content_length)
+      INSERT INTO knowledge_documents (account_id, name, mime_type, content_length)
       VALUES ($1, $2, $3, $4) RETURNING id
     `, [accountId, documentName, mimeType, textContent.length]);
 
@@ -459,7 +459,7 @@ export async function processDocument(
 
     for (let i = 0; i < chunks.length; i++) {
       await query(`
-        INSERT INTO knowledge_chunks (whatsapp_account_id, document_id, document_name, content, chunk_index)
+        INSERT INTO knowledge_chunks (account_id, document_id, document_name, content, chunk_index)
         VALUES ($1, $2, $3, $4, $5)
       `, [accountId, doc.id, documentName, chunks[i], i]);
     }

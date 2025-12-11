@@ -22,7 +22,7 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
 
     // Uses unified accounts view
     const conversation = await queryOne(`
-      SELECT c.id, c.account_id, c.is_group, c.group_id,
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group, c.group_id,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              COALESCE(c.channel_type, 'whatsapp') as channel_type
@@ -85,8 +85,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     const agentId = req.user!.userId;
 
     // Uses unified accounts view
+    // CRITICAL: Must use COALESCE for account_id to handle old conversations
     const conversation = await queryOne(`
-      SELECT c.id, c.account_id, c.is_group, c.first_response_at,
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group, c.first_response_at,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              CASE WHEN a.user_id = $2 THEN 'owner' ELSE aa.permission END as permission,
@@ -422,7 +423,7 @@ router.post('/:messageId/react', async (req: Request, res: Response) => {
     }>(`
       SELECT m.id, m.wa_message_id, m.conversation_id, m.sender_type, m.reactions,
              COALESCE(m.channel_type, 'whatsapp') as channel_type,
-             c.account_id, c.is_group, c.group_id,
+             COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group, c.group_id,
              ct.wa_id, ct.jid_type,
              g.group_jid
       FROM messages m
@@ -527,7 +528,7 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
     }>(`
       SELECT m.id, m.wa_message_id, m.conversation_id, m.content_type, m.content,
              m.media_url, m.media_mime_type, m.sender_type, m.sender_jid, m.raw_message,
-             c.account_id, c.is_group,
+             COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group,
              ct.wa_id, ct.jid_type,
              g.group_jid
       FROM messages m
@@ -559,7 +560,7 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
       group_jid: string | null;
       permission: string;
     }>(`
-      SELECT c.id, c.account_id, c.is_group,
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, c.is_group,
              ct.wa_id, ct.jid_type,
              g.group_jid,
              CASE WHEN a.user_id = $2 THEN 'owner' ELSE aa.permission END as permission
