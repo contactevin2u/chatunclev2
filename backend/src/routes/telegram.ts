@@ -58,27 +58,28 @@ telegramAdapter.onStatusChange((accountId, status, error) => {
 router.use(authenticate);
 
 // List user's Telegram accounts (owned + shared, same pattern as WhatsApp accounts)
+// Backward compatible: uses channel_accounts directly
 router.get('/accounts', async (req: Request, res: Response) => {
   try {
-    // Get owned accounts
+    // Get owned accounts from channel_accounts
     const ownedAccounts = await query(
-      `SELECT id, channel_identifier, name as account_name, status, settings, created_at, updated_at,
+      `SELECT id, channel_identifier, account_name, status, settings, created_at, updated_at,
               TRUE as is_owner, 'owner' as permission
-       FROM accounts
+       FROM channel_accounts
        WHERE user_id = $1 AND channel_type = 'telegram'
        ORDER BY created_at DESC`,
       [req.user!.userId]
     );
 
-    // Get shared accounts (via account_access)
+    // Get shared accounts (via channel_account_access)
     const sharedAccounts = await query(
-      `SELECT a.id, a.channel_identifier, a.name as account_name, a.status, a.settings, a.created_at, a.updated_at,
-              FALSE as is_owner, aa.permission, u.name as owner_name
-       FROM accounts a
-       JOIN account_access aa ON a.id = aa.account_id
-       JOIN users u ON a.user_id = u.id
-       WHERE aa.agent_id = $1 AND a.channel_type = 'telegram'
-       ORDER BY a.created_at DESC`,
+      `SELECT ca.id, ca.channel_identifier, ca.account_name, ca.status, ca.settings, ca.created_at, ca.updated_at,
+              FALSE as is_owner, caa.permission_level as permission, u.name as owner_name
+       FROM channel_accounts ca
+       JOIN channel_account_access caa ON ca.id = caa.channel_account_id
+       JOIN users u ON ca.user_id = u.id
+       WHERE caa.user_id = $1 AND ca.channel_type = 'telegram'
+       ORDER BY ca.created_at DESC`,
       [req.user!.userId]
     );
 

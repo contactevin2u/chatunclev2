@@ -1247,6 +1247,7 @@ SELECT
   incognito_mode,
   show_channel_name,
   channel_display_name,
+  NULL::jsonb as settings,
   created_at,
   updated_at
 FROM whatsapp_accounts
@@ -1264,6 +1265,7 @@ SELECT
   FALSE as incognito_mode,
   FALSE as show_channel_name,
   NULL as channel_display_name,
+  settings,
   created_at,
   updated_at
 FROM channel_accounts;
