@@ -37,8 +37,8 @@ router.get('/orders/conversation/:conversationId', async (req: Request, res: Res
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE c.id = $1 AND a.user_id = $2
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -69,8 +69,8 @@ router.get('/orders/outstanding', async (req: Request, res: Response) => {
       FROM aalyx_orders ao
       JOIN conversations c ON ao.conversation_id = c.id
       JOIN contacts ct ON ao.contact_id = ct.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE wa.user_id = $1
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE a.user_id = $1
         AND ao.payment_status IN ('unpaid', 'partial')
         AND ao.status NOT IN ('cancelled', 'completed')
       ORDER BY ao.payment_due_date ASC NULLS LAST
@@ -94,8 +94,8 @@ router.post('/orders/conversation/:conversationId', async (req: Request, res: Re
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE c.id = $1 AND a.user_id = $2
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -151,8 +151,8 @@ router.patch('/orders/:id', async (req: Request, res: Response) => {
       SELECT ao.id
       FROM aalyx_orders ao
       JOIN conversations c ON ao.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE ao.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE ao.id = $1 AND a.user_id = $2
     `, [id, userId]);
 
     if (!existing) {
@@ -205,8 +205,8 @@ router.post('/orders/:id/mark-paid', async (req: Request, res: Response) => {
       WHERE id = $1
         AND EXISTS (
           SELECT 1 FROM conversations c
-          JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-          WHERE c.id = aalyx_orders.conversation_id AND wa.user_id = $2
+          JOIN accounts a ON c.whatsapp_account_id = a.id
+          WHERE c.id = aalyx_orders.conversation_id AND a.user_id = $2
         )
       RETURNING *
     `, [id, userId]);
@@ -235,8 +235,8 @@ router.post('/orders/:id/remind', async (req: Request, res: Response) => {
       FROM aalyx_orders ao
       JOIN conversations c ON ao.conversation_id = c.id
       JOIN contacts ct ON ao.contact_id = ct.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE ao.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE ao.id = $1 AND a.user_id = $2
     `, [id, userId]);
 
     if (!order) {
@@ -280,8 +280,8 @@ router.post('/orders/:id/sync', async (req: Request, res: Response) => {
       SELECT ao.*
       FROM aalyx_orders ao
       JOIN conversations c ON ao.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE ao.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE ao.id = $1 AND a.user_id = $2
     `, [id, userId]);
 
     if (!order) {

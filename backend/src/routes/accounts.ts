@@ -1,37 +1,45 @@
 import { Router, Request, Response } from 'express';
 import { query, queryOne, execute } from '../config/database';
 import { authenticate } from '../middleware/auth';
-import { WhatsAppAccount } from '../types';
+import { Account } from '../types';
 import { sessionManager } from '../services/whatsapp/SessionManager';
 import { getAntiBanStats, ANTI_BAN_CONFIG } from '../services/antiBan';
+import { hasAccountAccess, canSendMessages } from '../helpers/accountAccess';
 
 const router = Router();
 
 // All routes require authentication
 router.use(authenticate);
 
-// List user's WhatsApp accounts (owned + shared)
+// List user's accounts (owned + shared) - supports channel_type filter
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const channelType = req.query.channel_type as string | undefined;
+    const channelFilter = channelType ? `AND channel_type = $2` : '';
+    const params = channelType ? [req.user!.userId, channelType] : [req.user!.userId];
+
     // Get owned accounts
-    const ownedAccounts = await query<WhatsAppAccount & { is_owner: boolean; permission: string }>(
-      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at,
+    const ownedAccounts = await query<Account & { is_owner: boolean; permission: string }>(
+      `SELECT id, phone_number, name, status, channel_type, channel_identifier,
+              incognito_mode, show_channel_name, channel_display_name,
+              credentials, settings, created_at, updated_at,
               TRUE as is_owner, 'owner' as permission
-       FROM whatsapp_accounts
-       WHERE user_id = $1`,
-      [req.user!.userId]
+       FROM accounts
+       WHERE user_id = $1 ${channelFilter}`,
+      params
     );
 
     // Get shared accounts (accounts this user has access to but doesn't own)
-    const sharedAccounts = await query<WhatsAppAccount & { is_owner: boolean; permission: string; owner_name: string }>(
-      `SELECT wa.id, wa.phone_number, wa.name, wa.status, wa.incognito_mode, wa.show_channel_name, wa.channel_display_name,
-              wa.created_at, wa.updated_at,
+    const sharedAccounts = await query<Account & { is_owner: boolean; permission: string; owner_name: string }>(
+      `SELECT a.id, a.phone_number, a.name, a.status, a.channel_type, a.channel_identifier,
+              a.incognito_mode, a.show_channel_name, a.channel_display_name,
+              a.credentials, a.settings, a.created_at, a.updated_at,
               FALSE as is_owner, aa.permission, u.name as owner_name
-       FROM whatsapp_accounts wa
-       JOIN account_access aa ON wa.id = aa.whatsapp_account_id
-       JOIN users u ON wa.user_id = u.id
-       WHERE aa.agent_id = $1`,
-      [req.user!.userId]
+       FROM accounts a
+       JOIN account_access aa ON a.id = aa.account_id
+       JOIN users u ON a.user_id = u.id
+       WHERE aa.agent_id = $1 ${channelFilter}`,
+      params
     );
 
     // Combine and sort by created_at
@@ -51,11 +59,11 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name } = req.body;
 
-    // Create account record
-    const account = await queryOne<WhatsAppAccount>(
-      `INSERT INTO whatsapp_accounts (user_id, name, status)
-       VALUES ($1, $2, 'qr_pending')
-       RETURNING id, phone_number, name, status, created_at`,
+    // Create account record (WhatsApp by default)
+    const account = await queryOne<Account>(
+      `INSERT INTO accounts (user_id, name, status, channel_type)
+       VALUES ($1, $2, 'qr_pending', 'whatsapp')
+       RETURNING id, phone_number, name, status, channel_type, created_at`,
       [req.user!.userId, name || 'WhatsApp Account']
     );
 
@@ -72,19 +80,27 @@ router.post('/', async (req: Request, res: Response) => {
 // Get specific account
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const account = await queryOne<WhatsAppAccount>(
-      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
-       FROM whatsapp_accounts
-       WHERE id = $1 AND user_id = $2`,
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
+    if (!access.hasAccess) {
       res.status(404).json({ error: 'Account not found' });
       return;
     }
 
-    res.json({ account });
+    const account = await queryOne<Account>(
+      `SELECT id, phone_number, name, status, channel_type, channel_identifier,
+              incognito_mode, show_channel_name, channel_display_name,
+              credentials, settings, created_at, updated_at
+       FROM accounts
+       WHERE id = $1`,
+      [req.params.id]
+    );
+
+    res.json({
+      account,
+      is_owner: access.isOwner,
+      permission: access.permission,
+    });
   } catch (error) {
     console.error('Get account error:', error);
     res.status(500).json({ error: 'Failed to get account' });
@@ -96,14 +112,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { name, incognitoMode, showChannelName, channelDisplayName } = req.body;
 
-    // Check ownership
-    const existing = await queryOne<WhatsAppAccount>(
-      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    // Check ownership (only owners can update settings)
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!existing) {
-      res.status(404).json({ error: 'Account not found' });
+    if (!access.isOwner) {
+      res.status(403).json({ error: 'Only account owner can update settings' });
       return;
     }
 
@@ -131,11 +144,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
       updates.push(`channel_display_name = $${paramIndex++}`);
     }
 
-    const account = await queryOne<WhatsAppAccount>(`
-      UPDATE whatsapp_accounts
+    const account = await queryOne<Account>(`
+      UPDATE accounts
       SET ${updates.join(', ')}
       WHERE id = $1
-      RETURNING id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
+      RETURNING id, phone_number, name, status, channel_type, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
     `, params);
 
     res.json({ account });
@@ -145,7 +158,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Bulk update incognito mode for all user's accounts
+// Bulk update incognito mode for all user's WhatsApp accounts
 router.patch('/bulk/incognito', async (req: Request, res: Response) => {
   try {
     const { incognitoMode } = req.body;
@@ -155,16 +168,17 @@ router.patch('/bulk/incognito', async (req: Request, res: Response) => {
       return;
     }
 
-    // Update all accounts owned by this user
+    // Update all WhatsApp accounts owned by this user
     await execute(
-      `UPDATE whatsapp_accounts SET incognito_mode = $1, updated_at = NOW() WHERE user_id = $2`,
+      `UPDATE accounts SET incognito_mode = $1, updated_at = NOW()
+       WHERE user_id = $2 AND channel_type = 'whatsapp'`,
       [incognitoMode, req.user!.userId]
     );
 
     // Get updated accounts
-    const accounts = await query<WhatsAppAccount>(
+    const accounts = await query<Account>(
       `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
-       FROM whatsapp_accounts WHERE user_id = $1`,
+       FROM accounts WHERE user_id = $1 AND channel_type = 'whatsapp'`,
       [req.user!.userId]
     );
 
@@ -185,9 +199,10 @@ router.patch('/bulk/incognito', async (req: Request, res: Response) => {
 // Get incognito status for user's accounts
 router.get('/bulk/incognito', async (req: Request, res: Response) => {
   try {
-    // Check if ANY account has incognito mode on
+    // Check if ANY WhatsApp account has incognito mode on
     const result = await queryOne<{ any_incognito: boolean }>(
-      `SELECT bool_or(incognito_mode) as any_incognito FROM whatsapp_accounts WHERE user_id = $1`,
+      `SELECT bool_or(incognito_mode) as any_incognito FROM accounts
+       WHERE user_id = $1 AND channel_type = 'whatsapp'`,
       [req.user!.userId]
     );
 
@@ -201,23 +216,22 @@ router.get('/bulk/incognito', async (req: Request, res: Response) => {
 // Disconnect and remove account
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    // Check ownership
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    // Check ownership (only owners can delete)
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
-      res.status(404).json({ error: 'Account not found' });
+    if (!access.isOwner) {
+      res.status(403).json({ error: 'Only account owner can delete account' });
       return;
     }
 
-    // Disconnect session
-    await sessionManager.destroySession(req.params.id);
+    // Disconnect session (for WhatsApp accounts)
+    if (access.channelType === 'whatsapp') {
+      await sessionManager.destroySession(req.params.id);
+    }
 
     // Delete from database (cascades to contacts, conversations, messages)
     await execute(
-      'DELETE FROM whatsapp_accounts WHERE id = $1',
+      'DELETE FROM accounts WHERE id = $1',
       [req.params.id]
     );
 
@@ -228,16 +242,18 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Reconnect existing account
+// Reconnect existing account (WhatsApp only)
 router.post('/:id/reconnect', async (req: Request, res: Response) => {
   try {
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT * FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
+    if (!access.hasAccess) {
       res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    if (access.channelType !== 'whatsapp') {
+      res.status(400).json({ error: 'Reconnect only available for WhatsApp accounts' });
       return;
     }
 
@@ -251,17 +267,18 @@ router.post('/:id/reconnect', async (req: Request, res: Response) => {
   }
 });
 
-// Get anti-ban statistics for an account
+// Get anti-ban statistics for an account (WhatsApp only)
 router.get('/:id/anti-ban-stats', async (req: Request, res: Response) => {
   try {
-    // Check ownership
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT id, created_at FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
+    if (!access.hasAccess) {
       res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    if (access.channelType !== 'whatsapp') {
+      res.status(400).json({ error: 'Anti-ban stats only available for WhatsApp accounts' });
       return;
     }
 
@@ -339,14 +356,10 @@ function getRecommendations(stats: any): string[] {
 // List agents with access to an account (owner only)
 router.get('/:id/access', async (req: Request, res: Response) => {
   try {
-    // Only owner can view access list
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
-      res.status(404).json({ error: 'Account not found or not owner' });
+    if (!access.isOwner) {
+      res.status(403).json({ error: 'Only account owner can view access list' });
       return;
     }
 
@@ -355,7 +368,7 @@ router.get('/:id/access', async (req: Request, res: Response) => {
               u.name as agent_name, u.email as agent_email
        FROM account_access aa
        JOIN users u ON aa.agent_id = u.id
-       WHERE aa.whatsapp_account_id = $1
+       WHERE aa.account_id = $1
        ORDER BY aa.granted_at DESC`,
       [req.params.id]
     );
@@ -384,13 +397,10 @@ router.post('/:id/access', async (req: Request, res: Response) => {
     }
 
     // Only owner can grant access
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT id, name FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
-      res.status(404).json({ error: 'Account not found or not owner' });
+    if (!access.isOwner) {
+      res.status(403).json({ error: 'Only account owner can grant access' });
       return;
     }
 
@@ -412,10 +422,10 @@ router.post('/:id/access', async (req: Request, res: Response) => {
     }
 
     // Grant or update access
-    const access = await queryOne(
-      `INSERT INTO account_access (whatsapp_account_id, agent_id, permission, granted_by)
+    const accessRecord = await queryOne(
+      `INSERT INTO account_access (account_id, agent_id, permission, granted_by)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (whatsapp_account_id, agent_id)
+       ON CONFLICT (account_id, agent_id)
        DO UPDATE SET permission = $3, granted_at = NOW()
        RETURNING *`,
       [req.params.id, agent.id, permission, req.user!.userId]
@@ -424,7 +434,7 @@ router.post('/:id/access', async (req: Request, res: Response) => {
     res.status(201).json({
       message: `Access granted to ${agent.name}`,
       access: {
-        ...access,
+        ...accessRecord,
         agent_name: agent.name,
         agent_email: agent.email,
       },
@@ -438,19 +448,15 @@ router.post('/:id/access', async (req: Request, res: Response) => {
 // Revoke access from an agent (owner only)
 router.delete('/:id/access/:agentId', async (req: Request, res: Response) => {
   try {
-    // Only owner can revoke access
-    const account = await queryOne<WhatsAppAccount>(
-      'SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
-      res.status(404).json({ error: 'Account not found or not owner' });
+    if (!access.isOwner) {
+      res.status(403).json({ error: 'Only account owner can revoke access' });
       return;
     }
 
     const deletedCount = await execute(
-      'DELETE FROM account_access WHERE whatsapp_account_id = $1 AND agent_id = $2',
+      'DELETE FROM account_access WHERE account_id = $1 AND agent_id = $2',
       [req.params.id, req.params.agentId]
     );
 
@@ -484,16 +490,15 @@ router.get('/agents/list', async (req: Request, res: Response) => {
 // Refresh group names - fetches metadata from WhatsApp for groups with placeholder names
 router.post('/:id/refresh-groups', async (req: Request, res: Response) => {
   try {
-    // Check ownership or access
-    const account = await queryOne<WhatsAppAccount>(
-      `SELECT wa.id FROM whatsapp_accounts wa
-       LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-       WHERE wa.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)`,
-      [req.params.id, req.user!.userId]
-    );
+    const access = await hasAccountAccess(req.user!.userId, req.params.id);
 
-    if (!account) {
+    if (!access.hasAccess) {
       res.status(404).json({ error: 'Account not found' });
+      return;
+    }
+
+    if (access.channelType !== 'whatsapp') {
+      res.status(400).json({ error: 'Group refresh only available for WhatsApp accounts' });
       return;
     }
 
@@ -502,7 +507,7 @@ router.post('/:id/refresh-groups', async (req: Request, res: Response) => {
     // Get groups with placeholder names
     const placeholderGroups = await query(
       `SELECT id, group_jid, name FROM groups
-       WHERE whatsapp_account_id = $1 AND name ~ '^Group [0-9]+$'`,
+       WHERE account_id = $1 AND name ~ '^Group [0-9]+$'`,
       [accountId]
     );
 

@@ -248,6 +248,7 @@ async function sendAutoReply(
     io.to(`account:${accountId}`).emit('message:new', {
       accountId,
       conversationId,
+      channelType: 'whatsapp',
       message: savedMessage,
       isAutoReply: true,
       ruleName,

@@ -7,110 +7,141 @@ const router = Router();
 router.use(authenticate);
 
 // Get analytics overview
+// Supports both WhatsApp and Telegram channels via UNION queries
 router.get('/overview', async (req: Request, res: Response) => {
   try {
-    const { accountId, startDate, endDate, agentId } = req.query;
+    const { accountId, startDate, endDate, agentId, channelType } = req.query;
     const userId = req.user!.userId;
     const isAdmin = req.user!.role === 'admin';
 
-    let accountFilter = '';
-    const params: any[] = [];
-    let paramIndex = 1;
+    // Determine which channels to include
+    const includeWhatsApp = !channelType || channelType === 'whatsapp' || channelType === 'all';
+    const includeTelegram = !channelType || channelType === 'telegram' || channelType === 'all';
 
-    // Build account filter
-    if (accountId) {
-      params.push(accountId);
-      accountFilter = `AND wa.id = $${paramIndex++}`;
-    } else if (!isAdmin) {
-      params.push(userId);
-      accountFilter = `AND wa.user_id = $${paramIndex++}`;
-    }
+    // Build all_conversations CTE that includes both channels
+    const allConversationsCTE = `
+      WITH all_conversations AS (
+        ${includeWhatsApp ? `
+          SELECT c.id, c.first_response_at, c.created_at, a.id as account_id
+          FROM conversations c
+          JOIN accounts a ON c.whatsapp_account_id = a.id
+          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+          WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
+            ${accountId ? `AND a.id = $2` : ''}
+        ` : ''}
+        ${includeWhatsApp && includeTelegram ? 'UNION ALL' : ''}
+        ${includeTelegram ? `
+          SELECT c.id, c.first_response_at, c.created_at, a.id as account_id
+          FROM conversations c
+          JOIN accounts a ON c.channel_account_id = a.id
+          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+          WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
+            AND c.channel_type = 'telegram'
+            ${accountId ? `AND a.id = $2` : ''}
+        ` : ''}
+      )
+    `;
 
-    // Date filters
+    const params: any[] = [userId];
+    if (accountId) params.push(accountId);
+
+    // Date filter params (will be added after accountId if present)
     let dateFilter = '';
     if (startDate) {
       params.push(startDate);
-      dateFilter += ` AND m.created_at >= $${paramIndex++}`;
+      dateFilter += ` AND m.created_at >= $${params.length}`;
     }
     if (endDate) {
       params.push(endDate);
-      dateFilter += ` AND m.created_at <= $${paramIndex++}`;
+      dateFilter += ` AND m.created_at <= $${params.length}`;
     }
 
     // Agent filter (admin only)
     let agentFilter = '';
     if (isAdmin && agentId) {
       params.push(agentId);
-      agentFilter = ` AND m.agent_id = $${paramIndex++}`;
+      agentFilter = ` AND m.agent_id = $${params.length}`;
     }
 
     // Total messages sent by agents
     const sentResult = await queryOne(`
+      ${allConversationsCTE}
       SELECT COUNT(*) as count
       FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE m.sender_type = 'agent' ${accountFilter} ${dateFilter} ${agentFilter}
+      JOIN all_conversations ac ON m.conversation_id = ac.id
+      WHERE m.sender_type = 'agent' ${dateFilter} ${agentFilter}
     `, params);
 
     // Total messages received from contacts
+    const receivedParams = accountId ? [userId, accountId] : [userId];
+    if (startDate) receivedParams.push(startDate as string);
+    if (endDate) receivedParams.push(endDate as string);
+    let receivedDateFilter = '';
+    if (startDate) receivedDateFilter += ` AND m.created_at >= $${receivedParams.length - (endDate ? 1 : 0)}`;
+    if (endDate) receivedDateFilter += ` AND m.created_at <= $${receivedParams.length}`;
+
     const receivedResult = await queryOne(`
+      ${allConversationsCTE}
       SELECT COUNT(*) as count
       FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE m.sender_type = 'contact' ${accountFilter} ${dateFilter}
-    `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
+      JOIN all_conversations ac ON m.conversation_id = ac.id
+      WHERE m.sender_type = 'contact' ${receivedDateFilter}
+    `, receivedParams);
 
     // Total conversations
+    const convParams = accountId ? [userId, accountId] : [userId];
     const conversationsResult = await queryOne(`
-      SELECT COUNT(DISTINCT c.id) as count
-      FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE 1=1 ${accountFilter}
-    `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
+      ${allConversationsCTE}
+      SELECT COUNT(DISTINCT ac.id) as count
+      FROM all_conversations ac
+    `, convParams);
 
     // Average response time
     const avgResponseResult = await queryOne(`
+      ${allConversationsCTE}
       SELECT AVG(m.response_time_ms) as avg_time
       FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN all_conversations ac ON m.conversation_id = ac.id
       WHERE m.sender_type = 'agent'
         AND m.response_time_ms IS NOT NULL
-        ${accountFilter} ${dateFilter} ${agentFilter}
+        ${dateFilter} ${agentFilter}
     `, params);
 
     // First response time average
     const firstResponseResult = await queryOne(`
-      SELECT AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at)) * 1000) as avg_time
-      FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.first_response_at IS NOT NULL ${accountFilter}
-    `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
+      ${allConversationsCTE}
+      SELECT AVG(EXTRACT(EPOCH FROM (ac.first_response_at - ac.created_at)) * 1000) as avg_time
+      FROM all_conversations ac
+      WHERE ac.first_response_at IS NOT NULL
+    `, convParams);
 
     // Response rate (conversations with at least one agent reply / total conversations)
-    // Optimized: Uses LEFT JOIN + GROUP BY instead of correlated EXISTS subquery
     const responseRateResult = await queryOne(`
+      ${allConversationsCTE}
       SELECT
-        COUNT(DISTINCT CASE WHEN agent_msgs.conversation_id IS NOT NULL THEN c.id END)::float
-        / NULLIF(COUNT(DISTINCT c.id), 0) * 100 as rate
-      FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+        COUNT(DISTINCT CASE WHEN agent_msgs.conversation_id IS NOT NULL THEN ac.id END)::float
+        / NULLIF(COUNT(DISTINCT ac.id), 0) * 100 as rate
+      FROM all_conversations ac
       LEFT JOIN (
         SELECT DISTINCT conversation_id FROM messages WHERE sender_type = 'agent'
-      ) agent_msgs ON agent_msgs.conversation_id = c.id
-      WHERE 1=1 ${accountFilter}
-    `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
+      ) agent_msgs ON agent_msgs.conversation_id = ac.id
+    `, convParams);
 
     // Auto-reply count
+    const autoReplyParams = accountId ? [userId, accountId] : [userId];
+    if (startDate) autoReplyParams.push(startDate as string);
+    if (endDate) autoReplyParams.push(endDate as string);
+    let autoReplyDateFilter = '';
+    if (startDate) autoReplyDateFilter += ` AND m.created_at >= $${autoReplyParams.length - (endDate ? 1 : 0)}`;
+    if (endDate) autoReplyDateFilter += ` AND m.created_at <= $${autoReplyParams.length}`;
+
     const autoReplyResult = await queryOne(`
+      ${allConversationsCTE}
       SELECT COUNT(*) as count
       FROM messages m
-      JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE m.is_auto_reply = TRUE ${accountFilter} ${dateFilter}
-    `, params.slice(0, accountId ? 1 : (!isAdmin ? 1 : 0)));
+      JOIN all_conversations ac ON m.conversation_id = ac.id
+      WHERE m.is_auto_reply = TRUE ${autoReplyDateFilter}
+    `, autoReplyParams);
 
     res.json({
       total_messages_sent: parseInt(sentResult?.count || '0'),
@@ -140,10 +171,10 @@ router.get('/by-agent', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      accountFilter = `AND wa.id = $${paramIndex++}`;
+      accountFilter = `AND a.id = $${paramIndex++}`;
     } else if (!isAdmin) {
       params.push(userId);
-      accountFilter = `AND wa.user_id = $${paramIndex++}`;
+      accountFilter = `AND a.user_id = $${paramIndex++}`;
     }
 
     let dateFilter = '';
@@ -166,7 +197,7 @@ router.get('/by-agent', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.is_auto_reply = TRUE THEN 1 END) as auto_replies
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       LEFT JOIN users u ON m.agent_id = u.id
       WHERE m.sender_type = 'agent' ${accountFilter} ${dateFilter}
       GROUP BY u.id, u.name
@@ -193,10 +224,10 @@ router.get('/by-day', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      accountFilter = `AND wa.id = $${paramIndex++}`;
+      accountFilter = `AND a.id = $${paramIndex++}`;
     } else if (!isAdmin) {
       params.push(userId);
-      accountFilter = `AND wa.user_id = $${paramIndex++}`;
+      accountFilter = `AND a.user_id = $${paramIndex++}`;
     }
 
     const result = await query(`
@@ -206,7 +237,7 @@ router.get('/by-day', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.sender_type = 'contact' THEN 1 END) as received
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE m.created_at >= NOW() - INTERVAL '1 day' * $1 ${accountFilter}
       GROUP BY DATE(m.created_at)
       ORDER BY date ASC
@@ -231,10 +262,10 @@ router.get('/response-times', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      accountFilter = `AND wa.id = $1`;
+      accountFilter = `AND a.id = $1`;
     } else if (!isAdmin) {
       params.push(userId);
-      accountFilter = `AND wa.user_id = $1`;
+      accountFilter = `AND a.user_id = $1`;
     }
 
     const result = await query(`
@@ -249,7 +280,7 @@ router.get('/response-times', async (req: Request, res: Response) => {
         COUNT(*) as count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE m.sender_type = 'agent'
         AND m.response_time_ms IS NOT NULL
         ${accountFilter}
@@ -284,10 +315,10 @@ router.get('/hourly-activity', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      accountFilter = `AND wa.id = $${paramIndex++}`;
+      accountFilter = `AND a.id = $${paramIndex++}`;
     } else if (!isAdmin) {
       params.push(userId);
-      accountFilter = `AND wa.user_id = $${paramIndex++}`;
+      accountFilter = `AND a.user_id = $${paramIndex++}`;
     }
 
     const result = await query(`
@@ -297,7 +328,7 @@ router.get('/hourly-activity', async (req: Request, res: Response) => {
         COUNT(*) as message_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE m.created_at >= NOW() - INTERVAL '1 day' * $1 ${accountFilter}
       GROUP BY day_of_week, hour
       ORDER BY day_of_week, hour
@@ -351,7 +382,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
       SELECT COUNT(DISTINCT fc.contact_id) as count
       FROM first_conversations fc
       JOIN conversations c ON fc.contact_id = c.contact_id AND fc.rn = 1
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE fc.rn = 1 ${accountFilter} ${dateFilter}
     `, params);
 
@@ -366,7 +397,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
       )
       SELECT COUNT(DISTINCT c.contact_id) as count
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
       WHERE cfc.first_conv_at < c.created_at ${accountFilter} ${dateFilter}
     `, params);
@@ -375,7 +406,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
     const totalConversationsResult = await queryOne(`
       SELECT COUNT(*) as count
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE 1=1 ${accountFilter} ${dateFilter}
     `, params);
 
@@ -386,10 +417,10 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
 
     if (accountId) {
       messageParams.push(accountId);
-      accountFilter = `AND wa.id = $${msgParamIndex++}`;
+      accountFilter = `AND a.id = $${msgParamIndex++}`;
     } else if (!isAdmin) {
       messageParams.push(userId);
-      accountFilter = `AND wa.user_id = $${msgParamIndex++}`;
+      accountFilter = `AND a.user_id = $${msgParamIndex++}`;
     } else {
       accountFilter = '';
     }
@@ -410,7 +441,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.sender_type = 'contact' THEN 1 END) as received
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       WHERE 1=1 ${accountFilter} ${messageDateFilter}
     `, messageParams);
 
@@ -422,10 +453,10 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
 
     if (accountId) {
       dailyParams.push(accountId);
-      dailyAccountFilter = `AND wa.id = $${dailyParamIndex++}`;
+      dailyAccountFilter = `AND a.id = $${dailyParamIndex++}`;
     } else if (!isAdmin) {
       dailyParams.push(userId);
-      dailyAccountFilter = `AND wa.user_id = $${dailyParamIndex++}`;
+      dailyAccountFilter = `AND a.user_id = $${dailyParamIndex++}`;
     }
 
     if (startDate) {
@@ -455,7 +486,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
         END) as existing_contacts,
         COUNT(*) as total_conversations
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
       LEFT JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
       WHERE 1=1 ${dailyAccountFilter} ${dailyDateFilter}
       GROUP BY DATE(c.created_at)

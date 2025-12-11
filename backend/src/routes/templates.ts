@@ -33,9 +33,9 @@ interface TemplateSequence {
 // Helper to check if user has access to an account
 async function userHasAccountAccess(userId: string, accountId: string): Promise<boolean> {
   const result = await queryOne(
-    `SELECT 1 FROM whatsapp_accounts wa
-     LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
-     WHERE wa.id = $2 AND (wa.user_id = $1 OR aa.agent_id IS NOT NULL)`,
+    `SELECT 1 FROM accounts a
+     LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+     WHERE a.id = $2 AND (a.user_id = $1 OR aa.agent_id IS NOT NULL)`,
     [userId, accountId]
   );
   return !!result;
@@ -90,10 +90,10 @@ router.get('/', async (req: Request, res: Response) => {
       // Legacy: get all templates user has access to (own + shared accounts)
       const templates = await query<Template>(
         `SELECT DISTINCT t.* FROM templates t
-         LEFT JOIN whatsapp_accounts wa ON t.whatsapp_account_id = wa.id
-         LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
+         LEFT JOIN accounts a ON t.whatsapp_account_id = a.id
+         LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
          WHERE t.user_id = $1
-            OR wa.user_id = $1
+            OR a.user_id = $1
             OR aa.agent_id IS NOT NULL
          ORDER BY t.name ASC`,
         [req.user!.userId]
@@ -265,10 +265,10 @@ router.get('/sequences', async (req: Request, res: Response) => {
       // Legacy: get all sequences user has access to
       sequences = await query<TemplateSequence>(
         `SELECT DISTINCT ts.* FROM template_sequences ts
-         LEFT JOIN whatsapp_accounts wa ON ts.whatsapp_account_id = wa.id
-         LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $1
+         LEFT JOIN accounts a ON ts.whatsapp_account_id = a.id
+         LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
          WHERE ts.user_id = $1
-            OR wa.user_id = $1
+            OR a.user_id = $1
             OR aa.agent_id IS NOT NULL
          ORDER BY ts.name ASC`,
         [req.user!.userId]

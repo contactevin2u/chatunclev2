@@ -468,15 +468,24 @@ export default function InboxPage() {
   });
 
   // Join account rooms when conversations are loaded
-  // This ensures ALL agents viewing the same WhatsApp account get real-time updates
+  // This ensures ALL agents viewing the same account (WhatsApp OR Telegram) get real-time updates
   useEffect(() => {
     if (!conversationsList.length) return;
 
-    // Get unique account IDs from conversations
+    // Get unique account IDs from conversations (both WhatsApp and Telegram)
     const accountIds: string[] = [];
     conversationsList.forEach(conv => {
+      // WhatsApp accounts
       if (conv.whatsapp_account_id && !accountIds.includes(conv.whatsapp_account_id)) {
         accountIds.push(conv.whatsapp_account_id);
+      }
+      // Telegram/other channel accounts (channel_account_id)
+      if (conv.channel_account_id && !accountIds.includes(conv.channel_account_id)) {
+        accountIds.push(conv.channel_account_id);
+      }
+      // Normalized account_id (used in UNION queries)
+      if (conv.account_id && !accountIds.includes(conv.account_id)) {
+        accountIds.push(conv.account_id);
       }
       // Also handle unified groups with multiple accounts
       conv.accounts?.forEach(acc => {

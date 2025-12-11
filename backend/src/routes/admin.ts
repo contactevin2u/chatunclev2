@@ -20,12 +20,12 @@ router.get('/agents', async (req: Request, res: Response) => {
         u.name,
         u.role,
         u.created_at,
-        COUNT(DISTINCT wa.id) as account_count,
+        COUNT(DISTINCT a.id) as account_count,
         COUNT(DISTINCT c.id) as conversation_count,
-        COUNT(DISTINCT aa.whatsapp_account_id) as shared_account_count
+        COUNT(DISTINCT aa.account_id) as shared_account_count
       FROM users u
-      LEFT JOIN whatsapp_accounts wa ON u.id = wa.user_id
-      LEFT JOIN conversations c ON wa.id = c.whatsapp_account_id
+      LEFT JOIN accounts a ON u.id = a.user_id
+      LEFT JOIN conversations c ON a.id = c.whatsapp_account_id
       LEFT JOIN account_access aa ON u.id = aa.agent_id
       GROUP BY u.id
       ORDER BY u.created_at DESC
@@ -46,15 +46,15 @@ router.get('/agents/:id/shared-accounts', async (req: Request, res: Response) =>
         aa.id as access_id,
         aa.permission,
         aa.granted_at,
-        wa.id as account_id,
-        wa.name as account_name,
-        wa.phone_number,
-        wa.status,
+        a.id as account_id,
+        a.name as account_name,
+        a.phone_number,
+        a.status,
         owner.name as owner_name,
         owner.email as owner_email
       FROM account_access aa
-      JOIN whatsapp_accounts wa ON aa.whatsapp_account_id = wa.id
-      JOIN users owner ON wa.user_id = owner.id
+      JOIN accounts a ON aa.account_id = a.id
+      JOIN users owner ON a.user_id = owner.id
       WHERE aa.agent_id = $1
       ORDER BY aa.granted_at DESC
     `, [req.params.id]);
@@ -226,14 +226,14 @@ router.get('/conversations', async (req: Request, res: Response) => {
         c.unread_count,
         ct.name as contact_name,
         ct.phone_number as contact_phone,
-        wa.name as account_name,
+        a.name as account_name,
         u.name as agent_name,
         u.email as agent_email,
         (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message
       FROM conversations c
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      JOIN users u ON wa.user_id = u.id
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN users u ON a.user_id = u.id
       WHERE 1=1
     `;
 
@@ -269,14 +269,14 @@ router.get('/stats', async (req: Request, res: Response) => {
       activeAccounts,
     ] = await Promise.all([
       queryOne<{ count: string }>('SELECT COUNT(*) as count FROM users'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM whatsapp_accounts'),
+      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM accounts'),
       queryOne<{ count: string }>('SELECT COUNT(*) as count FROM conversations'),
       queryOne<{ count: string }>('SELECT COUNT(*) as count FROM messages'),
       queryOne<{ count: string }>(
         "SELECT COUNT(*) as count FROM messages WHERE created_at > NOW() - INTERVAL '24 hours'"
       ),
       queryOne<{ count: string }>(
-        "SELECT COUNT(*) as count FROM whatsapp_accounts WHERE status = 'connected'"
+        "SELECT COUNT(*) as count FROM accounts WHERE status = 'connected'"
       ),
     ]);
 

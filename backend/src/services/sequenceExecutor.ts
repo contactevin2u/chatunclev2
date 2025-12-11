@@ -103,6 +103,7 @@ async function sendSequenceItem(
     io.to(`account:${context.waAccountId}`).emit('message:new', {
       accountId: context.waAccountId,
       conversationId: context.conversationId,
+      channelType: 'whatsapp',
       message: {
         ...message,
         agent_name: context.agentName,
@@ -186,14 +187,14 @@ export async function executeSequence(
       return { success: false, messagesSent: 0, error: 'Sequence has no items' };
     }
 
-    // Get conversation details (with shared access check)
+    // Get conversation details (with shared access check) using unified accounts table
     const conversation = await queryOne<any>(`
-      SELECT c.id, c.whatsapp_account_id, ct.wa_id, ct.jid_type
+      SELECT c.id, c.account_id, ct.wa_id, ct.jid_type
       FROM conversations c
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+      JOIN accounts a ON c.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, agentId]);
 
     if (!conversation) {
@@ -205,7 +206,7 @@ export async function executeSequence(
 
     const context: ExecutionContext = {
       conversationId,
-      waAccountId: conversation.whatsapp_account_id,
+      waAccountId: conversation.account_id,
       waId: conversation.wa_id,
       jidType: conversation.jid_type || 'pn',
       agentId,

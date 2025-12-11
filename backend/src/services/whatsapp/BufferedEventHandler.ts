@@ -641,7 +641,7 @@ export function setupBufferedEventProcessing(
           [accountId]
         );
         // Emit to account room so ALL agents see status change
-        io.to(`account:${accountId}`).emit('account:status', { accountId, status: 'disconnected' });
+        io.to(`account:${accountId}`).emit('account:status', { accountId, channelType: 'whatsapp', status: 'disconnected' });
 
         if (shouldReconnect) {
           onReconnect();
@@ -664,6 +664,7 @@ export function setupBufferedEventProcessing(
         // Emit to account room so ALL agents see status change
         io.to(`account:${accountId}`).emit('account:status', {
           accountId,
+          channelType: 'whatsapp',
           status: 'connected',
           phoneNumber,
           name,

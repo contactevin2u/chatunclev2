@@ -17,9 +17,9 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {
@@ -58,9 +58,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE c.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
 
     if (!conversation) {

@@ -80,6 +80,13 @@ export interface Conversation {
   accounts?: GroupAccount[];
   last_message_account?: string | null;
   default_conversation_id?: string;
+  // Multi-channel fields (Telegram, TikTok, Instagram, Messenger)
+  channel_account_id?: string | null;
+  channel_type?: 'whatsapp' | 'telegram' | 'tiktok' | 'instagram' | 'messenger';
+  telegram_chat_id?: number | null;
+  tiktok_conversation_id?: string | null;
+  instagram_conversation_id?: string | null;
+  messenger_conversation_id?: string | null;
 }
 
 export interface GroupAccount {

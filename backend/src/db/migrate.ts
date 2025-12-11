@@ -971,6 +971,222 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_account_content
 -- Cleanup old rate limit entries (older than 24 hours)
 -- Run periodically to prevent table bloat
 DELETE FROM ai_rate_limits WHERE updated_at < NOW() - INTERVAL '24 hours';
+
+-- ============================================================
+-- MULTI-CHANNEL SUPPORT
+-- ============================================================
+-- Enables ChatUncle to handle multiple messaging channels:
+-- WhatsApp, Telegram, Instagram, Facebook Messenger, TikTok
+
+-- Channel type definitions
+CREATE TABLE IF NOT EXISTS channel_types (
+  id SERIAL PRIMARY KEY,
+  code VARCHAR(50) UNIQUE NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  icon VARCHAR(50),
+  color VARCHAR(7),
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Insert default channel types
+INSERT INTO channel_types (code, name, icon, color) VALUES
+  ('whatsapp', 'WhatsApp', 'message-circle', '#25D366'),
+  ('telegram', 'Telegram', 'send', '#0088CC'),
+  ('instagram', 'Instagram', 'instagram', '#E4405F'),
+  ('messenger', 'Messenger', 'message-square', '#0084FF'),
+  ('tiktok', 'TikTok Shop', 'shopping-bag', '#000000')
+ON CONFLICT (code) DO NOTHING;
+
+-- Unified channel accounts table
+CREATE TABLE IF NOT EXISTS channel_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  channel_type VARCHAR(50) NOT NULL,
+  channel_identifier VARCHAR(255) NOT NULL,  -- Phone, bot username, page ID, etc.
+  account_name VARCHAR(255),
+  credentials JSONB,                          -- Encrypted tokens, bot tokens, etc.
+  status VARCHAR(50) DEFAULT 'disconnected',  -- connected, disconnected, error, qr_pending
+  settings JSONB DEFAULT '{}',
+  last_connected_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(user_id, channel_type, channel_identifier)
+);
+
+-- Channel account access (same pattern as whatsapp account_access)
+CREATE TABLE IF NOT EXISTS channel_account_access (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel_account_id UUID REFERENCES channel_accounts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  permission_level VARCHAR(50) DEFAULT 'view',  -- full, send, view
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(channel_account_id, user_id)
+);
+
+-- Add channel_type to existing tables (backwards compatible, defaults to whatsapp)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_type VARCHAR(50) DEFAULT 'whatsapp';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS channel_type VARCHAR(50) DEFAULT 'whatsapp';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS channel_type VARCHAR(50) DEFAULT 'whatsapp';
+
+-- Add channel_account_id to link to unified channel accounts
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS channel_account_id UUID REFERENCES channel_accounts(id) ON DELETE SET NULL;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS channel_account_id UUID REFERENCES channel_accounts(id) ON DELETE SET NULL;
+
+-- Indexes for multi-channel queries
+CREATE INDEX IF NOT EXISTS idx_channel_accounts_user ON channel_accounts(user_id, channel_type);
+CREATE INDEX IF NOT EXISTS idx_channel_accounts_status ON channel_accounts(status);
+CREATE INDEX IF NOT EXISTS idx_conversations_channel ON conversations(channel_type);
+CREATE INDEX IF NOT EXISTS idx_contacts_channel ON contacts(channel_type);
+CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_type);
+
+-- Telegram-specific: Store chat_id for conversations
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS telegram_chat_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_conversations_telegram_chat ON conversations(telegram_chat_id) WHERE telegram_chat_id IS NOT NULL;
+
+-- Telegram-specific: Store user_id for contacts
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS telegram_user_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_contacts_telegram_user ON contacts(telegram_user_id) WHERE telegram_user_id IS NOT NULL;
+
+-- ============================================================
+-- CRITICAL MULTI-CHANNEL INDEXES
+-- ============================================================
+-- These indexes are essential for multi-channel queries that use UNION
+-- between WhatsApp and Telegram data
+
+-- Channel account access indexes
+CREATE INDEX IF NOT EXISTS idx_channel_account_access_user ON channel_account_access(user_id);
+CREATE INDEX IF NOT EXISTS idx_channel_account_access_account ON channel_account_access(channel_account_id);
+CREATE INDEX IF NOT EXISTS idx_channel_account_access_account_user ON channel_account_access(channel_account_id, user_id);
+
+-- Conversations with channel_account_id (for Telegram)
+CREATE INDEX IF NOT EXISTS idx_conversations_channel_account ON conversations(channel_account_id) WHERE channel_account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_conversations_channel_account_last_msg ON conversations(channel_account_id, last_message_at DESC NULLS LAST) WHERE channel_account_id IS NOT NULL;
+
+-- Contacts with channel_account_id (for Telegram)
+CREATE INDEX IF NOT EXISTS idx_contacts_channel_account ON contacts(channel_account_id) WHERE channel_account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_channel_account_waid ON contacts(channel_account_id, wa_id) WHERE channel_account_id IS NOT NULL;
+
+-- Messages channel_type index for filtering
+CREATE INDEX IF NOT EXISTS idx_messages_channel_type ON messages(channel_type) WHERE channel_type IS NOT NULL AND channel_type != 'whatsapp';
+
+-- Composite index for Telegram conversation queries
+CREATE INDEX IF NOT EXISTS idx_conversations_channel_telegram ON conversations(channel_account_id, telegram_chat_id) WHERE channel_type = 'telegram';
+
+-- Add raw_message column to messages for forwarding fallback
+-- Stores original WhatsApp message for later forwarding when message is no longer in cache
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS raw_message JSONB;
+
+-- ============================================================
+-- CRITICAL: TELEGRAM UNIQUE CONSTRAINTS
+-- ============================================================
+-- Prevents duplicate Telegram contacts and conversations
+-- Similar to WhatsApp's UNIQUE(whatsapp_account_id, wa_id) constraint
+
+-- Unique constraint for Telegram contacts: one contact per channel_account + wa_id (telegram user ID stored as wa_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_channel_account_waid_unique
+  ON contacts(channel_account_id, wa_id)
+  WHERE channel_account_id IS NOT NULL;
+
+-- Unique constraint for Telegram conversations: one conversation per channel_account + contact
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_channel_account_contact_unique
+  ON conversations(channel_account_id, contact_id)
+  WHERE channel_account_id IS NOT NULL AND contact_id IS NOT NULL;
+
+-- Unique constraint for Telegram conversations with telegram_chat_id (for groups or direct chats)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_channel_telegram_chat_unique
+  ON conversations(channel_account_id, telegram_chat_id)
+  WHERE channel_account_id IS NOT NULL AND telegram_chat_id IS NOT NULL;
+
+-- ============================================================
+-- TIKTOK SHOP SCHEMA
+-- ============================================================
+-- TikTok Shop specific columns for conversations and contacts
+
+-- TikTok Shop conversation ID (seller-buyer conversation)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tiktok_conversation_id VARCHAR(100);
+
+-- TikTok buyer user ID
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS tiktok_user_id VARCHAR(100);
+
+-- Indexes for TikTok queries
+CREATE INDEX IF NOT EXISTS idx_conversations_tiktok_conv
+  ON conversations(channel_account_id, tiktok_conversation_id)
+  WHERE channel_type = 'tiktok';
+
+CREATE INDEX IF NOT EXISTS idx_contacts_tiktok_user
+  ON contacts(tiktok_user_id)
+  WHERE tiktok_user_id IS NOT NULL;
+
+-- Unique constraint for TikTok conversations
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_tiktok_conv_unique
+  ON conversations(channel_account_id, tiktok_conversation_id)
+  WHERE channel_account_id IS NOT NULL AND tiktok_conversation_id IS NOT NULL;
+
+-- Unique constraint for TikTok contacts per channel account
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_tiktok_user_unique
+  ON contacts(channel_account_id, tiktok_user_id)
+  WHERE channel_account_id IS NOT NULL AND tiktok_user_id IS NOT NULL;
+
+-- ============================================================
+-- INSTAGRAM SCHEMA
+-- ============================================================
+-- Instagram DM specific columns for conversations and contacts
+
+-- Instagram conversation ID (thread ID)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS instagram_conversation_id VARCHAR(100);
+
+-- Instagram user ID
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS instagram_user_id VARCHAR(100);
+
+-- Indexes for Instagram queries
+CREATE INDEX IF NOT EXISTS idx_conversations_instagram_conv
+  ON conversations(channel_account_id, instagram_conversation_id)
+  WHERE channel_type = 'instagram';
+
+CREATE INDEX IF NOT EXISTS idx_contacts_instagram_user
+  ON contacts(instagram_user_id)
+  WHERE instagram_user_id IS NOT NULL;
+
+-- Unique constraint for Instagram conversations
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_instagram_conv_unique
+  ON conversations(channel_account_id, instagram_conversation_id)
+  WHERE channel_account_id IS NOT NULL AND instagram_conversation_id IS NOT NULL;
+
+-- Unique constraint for Instagram contacts per channel account
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_instagram_user_unique
+  ON contacts(channel_account_id, instagram_user_id)
+  WHERE channel_account_id IS NOT NULL AND instagram_user_id IS NOT NULL;
+
+-- ============================================================
+-- FACEBOOK MESSENGER SCHEMA
+-- ============================================================
+-- Messenger specific columns for conversations and contacts
+
+-- Messenger conversation ID (thread ID = sender PSID)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS messenger_conversation_id VARCHAR(100);
+
+-- Messenger user ID (PSID - Page Scoped ID)
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS messenger_user_id VARCHAR(100);
+
+-- Indexes for Messenger queries
+CREATE INDEX IF NOT EXISTS idx_conversations_messenger_conv
+  ON conversations(channel_account_id, messenger_conversation_id)
+  WHERE channel_type = 'messenger';
+
+CREATE INDEX IF NOT EXISTS idx_contacts_messenger_user
+  ON contacts(messenger_user_id)
+  WHERE messenger_user_id IS NOT NULL;
+
+-- Unique constraint for Messenger conversations
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_messenger_conv_unique
+  ON conversations(channel_account_id, messenger_conversation_id)
+  WHERE channel_account_id IS NOT NULL AND messenger_conversation_id IS NOT NULL;
+
+-- Unique constraint for Messenger contacts per channel account
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_messenger_user_unique
+  ON contacts(channel_account_id, messenger_user_id)
+  WHERE channel_account_id IS NOT NULL AND messenger_user_id IS NOT NULL;
 `;
 
 async function runMigrations() {

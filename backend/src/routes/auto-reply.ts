@@ -22,10 +22,10 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const rules = await query<AutoReplyRule>(`
-      SELECT ar.*, t.name as template_name, wa.name as account_name
+      SELECT ar.*, t.name as template_name, a.name as account_name
       FROM auto_reply_rules ar
       LEFT JOIN templates t ON ar.response_template_id = t.id
-      LEFT JOIN whatsapp_accounts wa ON ar.whatsapp_account_id = wa.id
+      LEFT JOIN accounts a ON ar.whatsapp_account_id = a.id
       WHERE ${filter}
       ORDER BY ar.priority DESC, ar.created_at DESC
     `, params);
@@ -110,11 +110,11 @@ router.post('/', async (req: Request, res: Response) => {
     // Verify account ownership if specified
     if (whatsappAccountId) {
       const account = await queryOne(`
-        SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+        SELECT id FROM accounts WHERE id = $1 AND user_id = $2
       `, [whatsappAccountId, userId]);
 
       if (!account) {
-        res.status(404).json({ error: 'WhatsApp account not found' });
+        res.status(404).json({ error: 'Account not found' });
         return;
       }
     }

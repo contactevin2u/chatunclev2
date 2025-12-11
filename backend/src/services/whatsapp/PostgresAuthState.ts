@@ -39,7 +39,7 @@ export async function usePostgresAuthState(accountId: string): Promise<{
   // Load credentials from database
   const loadCreds = async (): Promise<any> => {
     const row = await queryOne(
-      'SELECT session_data FROM whatsapp_accounts WHERE id = $1',
+      'SELECT session_data FROM accounts WHERE id = $1',
       [accountId]
     );
 
@@ -57,7 +57,7 @@ export async function usePostgresAuthState(accountId: string): Promise<{
   const saveCreds = async () => {
     const credsJson = JSON.stringify(creds, BufferJSON.replacer);
     await execute(
-      `UPDATE whatsapp_accounts
+      `UPDATE accounts
        SET session_data = $1::jsonb, updated_at = NOW()
        WHERE id = $2`,
       [credsJson, accountId]
@@ -157,7 +157,7 @@ export async function clearPostgresAuthState(accountId: string): Promise<void> {
     [accountId]
   );
   await execute(
-    'UPDATE whatsapp_accounts SET session_data = NULL WHERE id = $1',
+    'UPDATE accounts SET session_data = NULL WHERE id = $1',
     [accountId]
   );
   console.log(`[PgAuth] Cleared auth state for account ${accountId}`);

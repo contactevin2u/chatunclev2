@@ -167,7 +167,7 @@ class SessionManager {
     healthMonitor.setReconnectCallback(async (accountId: string, reason: string) => {
       console.log(`[WA] Health monitor triggered reconnect for ${accountId}: ${reason}`);
       const account = await queryOne<{ user_id: string }>(
-        'SELECT user_id FROM whatsapp_accounts WHERE id = $1',
+        'SELECT user_id FROM accounts WHERE id = $1',
         [accountId]
       );
       if (account) {
@@ -235,7 +235,7 @@ class SessionManager {
 
     // Fetch account settings for incognito mode
     const accountSettings = await queryOne<{ incognito_mode: boolean }>(
-      `SELECT incognito_mode FROM whatsapp_accounts WHERE id = $1`,
+      `SELECT incognito_mode FROM accounts WHERE id = $1`,
       [accountId]
     );
     const incognitoMode = accountSettings?.incognito_mode || false;
@@ -475,9 +475,9 @@ class SessionManager {
             console.log(`[WA] Baileys lidMapping resolved LID ${waId} -> PN ${resolvedPn}`);
             // Store this mapping in our database for future use
             await execute(
-              `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+              `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                VALUES ($1, $2, $3)
-               ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+               ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
               [accountId, waId, resolvedPn]
             );
           }
@@ -489,7 +489,7 @@ class SessionManager {
 
     // Get or create contact with LID/PN deduplication
     let contact = await queryOne(
-      'SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2',
+      'SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2',
       [accountId, waId]
     );
 
@@ -503,14 +503,14 @@ class SessionManager {
         let pnToLookup = resolvedPn;
         if (!pnToLookup) {
           const mapping = await queryOne(
-            `SELECT pn FROM lid_pn_mappings WHERE whatsapp_account_id = $1 AND lid = $2`,
+            `SELECT pn FROM lid_pn_mappings WHERE account_id = $1 AND lid = $2`,
             [accountId, waId]
           );
           pnToLookup = mapping?.pn || null;
         }
         if (pnToLookup) {
           mappedContact = await queryOne(
-            `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+            `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
             [accountId, pnToLookup]
           );
           if (mappedContact) {
@@ -520,12 +520,12 @@ class SessionManager {
       } else if (jidType === 'pn') {
         // This is a PN - check if we have a mapping from a LID contact
         const mapping = await queryOne(
-          `SELECT lid FROM lid_pn_mappings WHERE whatsapp_account_id = $1 AND pn = $2`,
+          `SELECT lid FROM lid_pn_mappings WHERE account_id = $1 AND pn = $2`,
           [accountId, waId]
         );
         if (mapping?.lid) {
           mappedContact = await queryOne(
-            `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+            `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
             [accountId, mapping.lid]
           );
           if (mappedContact) {
@@ -551,7 +551,7 @@ class SessionManager {
         if (pushName) {
           const nameMatch = await queryOne(
             `SELECT * FROM contacts
-             WHERE whatsapp_account_id = $1 AND name = $2
+             WHERE account_id = $1 AND name = $2
              AND jid_type != $3
              ORDER BY created_at ASC LIMIT 1`,
             [accountId, pushName, jidType]
@@ -561,16 +561,16 @@ class SessionManager {
             // Store the mapping for future use
             if (jidType === 'lid') {
               await execute(
-                `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+                `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                  VALUES ($1, $2, $3)
-                 ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+                 ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
                 [accountId, waId, nameMatch.wa_id]
               );
             } else {
               await execute(
-                `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+                `INSERT INTO lid_pn_mappings (account_id, lid, pn)
                  VALUES ($1, $2, $3)
-                 ON CONFLICT (whatsapp_account_id, pn) DO UPDATE SET lid = $2, updated_at = NOW()`,
+                 ON CONFLICT (account_id, pn) DO UPDATE SET lid = $2, updated_at = NOW()`,
                 [accountId, nameMatch.wa_id, waId]
               );
             }
@@ -590,7 +590,7 @@ class SessionManager {
           // For LID contacts, if we resolved PN, store it. For PN contacts, wa_id IS the phone number
           const phoneNumber = jidType === 'pn' ? waId : resolvedPn;
           contact = await queryOne(
-            `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+            `INSERT INTO contacts (account_id, wa_id, phone_number, name, jid_type)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING *`,
             [accountId, waId, phoneNumber, pushName, jidType]
@@ -633,13 +633,13 @@ class SessionManager {
 
     // Get or create conversation
     let conversation = await queryOne(
-      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND contact_id = $2',
+      'SELECT * FROM conversations WHERE account_id = $1 AND contact_id = $2',
       [accountId, contact.id]
     );
 
     if (!conversation) {
       conversation = await queryOne(
-        `INSERT INTO conversations (whatsapp_account_id, contact_id, unread_count, last_message_at)
+        `INSERT INTO conversations (account_id, contact_id, unread_count, last_message_at)
          VALUES ($1, $2, $3, NOW())
          RETURNING *`,
         [accountId, contact.id, isRealTime ? 1 : 0]
@@ -963,6 +963,7 @@ class SessionManager {
       io.to(roomName).emit('message:new', {
         accountId,
         conversationId: conversation.id,
+        channelType: 'whatsapp',
         message: savedMessage,
         contact: {
           id: contact.id,
@@ -1010,14 +1011,14 @@ class SessionManager {
 
     // Get or create contact
     let contact = await queryOne(
-      'SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2',
+      'SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2',
       [accountId, waId]
     );
 
     if (!contact) {
       const phoneNumber = jidType === 'pn' ? waId : null;
       contact = await queryOne(
-        `INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, jid_type)
+        `INSERT INTO contacts (account_id, wa_id, phone_number, jid_type)
          VALUES ($1, $2, $3, $4)
          RETURNING *`,
         [accountId, waId, phoneNumber, jidType]
@@ -1033,13 +1034,13 @@ class SessionManager {
 
     // Get or create conversation
     let conversation = await queryOne(
-      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND contact_id = $2',
+      'SELECT * FROM conversations WHERE account_id = $1 AND contact_id = $2',
       [accountId, contact.id]
     );
 
     if (!conversation) {
       conversation = await queryOne(
-        `INSERT INTO conversations (whatsapp_account_id, contact_id, last_message_at)
+        `INSERT INTO conversations (account_id, contact_id, last_message_at)
          VALUES ($1, $2, NOW())
          RETURNING *`,
         [accountId, contact.id]
@@ -1300,6 +1301,7 @@ class SessionManager {
       io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
+        channelType: 'whatsapp',
         message: savedMessage,
         contact: {
           id: contact.id,
@@ -1703,7 +1705,7 @@ class SessionManager {
 
     // Get or create group record
     let group = await queryOne(
-      'SELECT * FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      'SELECT * FROM groups WHERE account_id = $1 AND group_jid = $2',
       [accountId, groupJid]
     );
 
@@ -1731,7 +1733,7 @@ class SessionManager {
       }
 
       group = await queryOne(
-        `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, participant_count)
+        `INSERT INTO groups (account_id, group_jid, name, description, participant_count)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [accountId, groupJid, groupName, groupDesc, participantCount]
@@ -1761,9 +1763,9 @@ class SessionManager {
 
     // Get or create group conversation (use ON CONFLICT to handle race conditions)
     let conversation = await queryOne(
-      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, unread_count, last_message_at)
+      `INSERT INTO conversations (account_id, group_id, is_group, unread_count, last_message_at)
        VALUES ($1, $2, TRUE, $3, NOW())
-       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL
+       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL
        DO UPDATE SET
          unread_count = CASE WHEN $3 > 0 THEN conversations.unread_count + 1 ELSE conversations.unread_count END,
          last_message_at = NOW(),
@@ -1774,7 +1776,7 @@ class SessionManager {
     if (!conversation) {
       // Fallback query if RETURNING didn't work
       conversation = await queryOne(
-        'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+        'SELECT * FROM conversations WHERE account_id = $1 AND group_id = $2',
         [accountId, group.id]
       );
     }
@@ -2028,6 +2030,7 @@ class SessionManager {
       io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
+        channelType: 'whatsapp',
         isGroup: true,
         message: savedMessage,
         group: {
@@ -2065,7 +2068,7 @@ class SessionManager {
 
     // Get or create group record
     let group = await queryOne(
-      'SELECT * FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      'SELECT * FROM groups WHERE account_id = $1 AND group_jid = $2',
       [accountId, groupJid]
     );
 
@@ -2091,7 +2094,7 @@ class SessionManager {
       }
 
       group = await queryOne(
-        `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, participant_count)
+        `INSERT INTO groups (account_id, group_jid, name, description, participant_count)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [accountId, groupJid, groupName, groupDesc, participantCount]
@@ -2119,16 +2122,16 @@ class SessionManager {
 
     // Get or create group conversation (use ON CONFLICT to handle race conditions)
     let conversation = await queryOne(
-      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+      `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
        VALUES ($1, $2, TRUE, NOW())
-       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL
+       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL
        DO UPDATE SET last_message_at = NOW(), updated_at = NOW()
        RETURNING *`,
       [accountId, group.id]
     );
     if (!conversation) {
       conversation = await queryOne(
-        'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+        'SELECT * FROM conversations WHERE account_id = $1 AND group_id = $2',
         [accountId, group.id]
       );
     }
@@ -2318,6 +2321,7 @@ class SessionManager {
       io.to(`account:${accountId}`).emit('message:new', {
         accountId,
         conversationId: conversation.id,
+        channelType: 'whatsapp',
         isGroup: true,
         message: savedMessage,
         group: {
@@ -2394,9 +2398,9 @@ class SessionManager {
     console.log(`[WA][Group] New group discovered: ${metadata.subject} (${extractGroupId(groupJid)})`);
 
     const group = await queryOne(
-      `INSERT INTO groups (whatsapp_account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
+      `INSERT INTO groups (account_id, group_jid, name, description, owner_jid, participant_count, is_announce, is_restrict)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+       ON CONFLICT (account_id, group_jid) DO UPDATE SET
          name = COALESCE(EXCLUDED.name, groups.name),
          description = COALESCE(EXCLUDED.description, groups.description),
          owner_jid = COALESCE(EXCLUDED.owner_jid, groups.owner_jid),
@@ -2436,9 +2440,9 @@ class SessionManager {
     }
 
     await queryOne(
-      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+      `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
        VALUES ($1, $2, TRUE, NOW())
-       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
+       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
        RETURNING *`,
       [accountId, group.id]
     );
@@ -2466,7 +2470,7 @@ class SessionManager {
            is_announce = COALESCE($3, is_announce),
            is_restrict = COALESCE($4, is_restrict),
            updated_at = NOW()
-       WHERE whatsapp_account_id = $5 AND group_jid = $6`,
+       WHERE account_id = $5 AND group_jid = $6`,
       [
         update.subject || null,
         update.desc || null,
@@ -2525,7 +2529,7 @@ class SessionManager {
     await sleep(delay);
 
     const group = await queryOne(
-      'SELECT id FROM groups WHERE whatsapp_account_id = $1 AND group_jid = $2',
+      'SELECT id FROM groups WHERE account_id = $1 AND group_jid = $2',
       [accountId, groupJid]
     );
 
@@ -2602,18 +2606,18 @@ class SessionManager {
         const pnClean = typeof pn === 'string' ? pn.replace('@s.whatsapp.net', '') : pn;
 
         await execute(
-          `INSERT INTO lid_pn_mappings (whatsapp_account_id, lid, pn)
+          `INSERT INTO lid_pn_mappings (account_id, lid, pn)
            VALUES ($1, $2, $3)
-           ON CONFLICT (whatsapp_account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+           ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
           [accountId, lidClean, pnClean]
         );
 
         const lidContact = await queryOne(
-          `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+          `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
           [accountId, lidClean]
         );
         const pnContact = await queryOne(
-          `SELECT * FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2`,
+          `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
           [accountId, pnClean]
         );
 
@@ -2947,7 +2951,7 @@ class SessionManager {
       // Restore ALL accounts that have session data (not just 'connected' ones)
       // This handles cases where server restarted while accounts were temporarily disconnected
       const accounts = await query<{ id: string; user_id: string; status: string }>(
-        "SELECT id, user_id, status FROM whatsapp_accounts WHERE session_data IS NOT NULL"
+        "SELECT id, user_id, status FROM accounts WHERE session_data IS NOT NULL"
       );
 
       console.log(`[WA] Found ${accounts.length} WhatsApp accounts with session data to restore...`);
@@ -2967,7 +2971,7 @@ class SessionManager {
           console.error(`[WA] Failed to restore session ${account.id}:`, error);
           // Mark as disconnected if restoration fails
           await execute(
-            "UPDATE whatsapp_accounts SET status = 'disconnected' WHERE id = $1",
+            "UPDATE accounts SET status = 'disconnected' WHERE id = $1",
             [account.id]
           );
         }

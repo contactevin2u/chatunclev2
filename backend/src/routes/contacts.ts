@@ -7,32 +7,43 @@ const router = Router();
 
 router.use(authenticate);
 
-// List contacts
+// List contacts - uses unified 'accounts' table for all channels
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { accountId, labelId, search } = req.query;
+    const { accountId, labelId, search, channelType } = req.query;
+    const userId = req.user!.userId;
 
+    // Unified query - no more UNION needed
     let sql = `
       SELECT DISTINCT
         ct.id,
-        ct.whatsapp_account_id,
+        ct.account_id,
         ct.wa_id,
         ct.name,
         ct.phone_number,
         ct.profile_pic_url,
         ct.created_at,
-        wa.name as account_name
+        a.name as account_name,
+        COALESCE(ct.channel_type, 'whatsapp') as channel_type
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
       LEFT JOIN contact_labels cl ON ct.id = cl.contact_id
-      WHERE wa.user_id = $1
+      WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
     `;
 
-    const params: any[] = [req.user!.userId];
+    const params: any[] = [userId];
 
+    // Filter by channel type
+    if (channelType) {
+      params.push(channelType);
+      sql += ` AND COALESCE(ct.channel_type, 'whatsapp') = $${params.length}`;
+    }
+
+    // Filter by account ID
     if (accountId) {
       params.push(accountId);
-      sql += ` AND ct.whatsapp_account_id = $${params.length}`;
+      sql += ` AND ct.account_id = $${params.length}`;
     }
 
     if (labelId) {
@@ -45,6 +56,7 @@ router.get('/', async (req: Request, res: Response) => {
       sql += ` AND (ct.name ILIKE $${params.length} OR ct.phone_number ILIKE $${params.length})`;
     }
 
+    sql += ' GROUP BY ct.id, ct.account_id, ct.wa_id, ct.name, ct.phone_number, ct.profile_pic_url, ct.created_at, a.name, ct.channel_type';
     sql += ' ORDER BY ct.name ASC NULLS LAST';
 
     const contacts = await query(sql, params);
@@ -80,13 +92,17 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// Get single contact
+// Get single contact - uses unified 'accounts' table
 router.get('/:id', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.userId;
+    const contactId = req.params.id;
+
+    // Single unified query
     const contact = await queryOne(`
       SELECT
         ct.id,
-        ct.whatsapp_account_id,
+        ct.account_id,
         ct.wa_id,
         ct.name,
         ct.phone_number,
@@ -94,12 +110,13 @@ router.get('/:id', async (req: Request, res: Response) => {
         ct.jid_type,
         ct.created_at,
         ct.updated_at,
-        wa.name as account_name
+        a.name as account_name,
+        COALESCE(ct.channel_type, 'whatsapp') as channel_type
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
-    `, [req.params.id, req.user!.userId]);
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [contactId, userId]);
 
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
@@ -112,7 +129,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       FROM labels l
       JOIN contact_labels cl ON l.id = cl.label_id
       WHERE cl.contact_id = $1
-    `, [req.params.id]);
+    `, [contactId]);
 
     (contact as any).labels = labels;
 
@@ -126,22 +143,36 @@ router.get('/:id', async (req: Request, res: Response) => {
 // Get contact profile picture (fetches from WhatsApp if not cached)
 router.get('/:id/profile-pic', async (req: Request, res: Response) => {
   try {
-    // Verify contact ownership or shared access
-    const contact = await queryOne(`
-      SELECT ct.id, ct.whatsapp_account_id, ct.profile_pic_url
+    const userId = req.user!.userId;
+    const contactId = req.params.id;
+
+    // Unified query
+    const contact = await queryOne<{
+      id: string;
+      account_id: string;
+      profile_pic_url: string | null;
+      channel_type: string;
+    }>(`
+      SELECT ct.id, ct.account_id, ct.profile_pic_url, COALESCE(ct.channel_type, 'whatsapp') as channel_type
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
-    `, [req.params.id, req.user!.userId]);
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [contactId, userId]);
 
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
       return;
     }
 
-    // Get profile pic (will fetch from WhatsApp and cache if needed)
-    const profilePicUrl = await getContactProfilePic(contact.whatsapp_account_id, contact.id);
+    // For non-WhatsApp contacts, just return cached URL (no live fetching)
+    if (contact.channel_type !== 'whatsapp') {
+      res.json({ profile_pic_url: contact.profile_pic_url || null });
+      return;
+    }
+
+    // For WhatsApp contacts, fetch from WhatsApp and cache if needed
+    const profilePicUrl = await getContactProfilePic(contact.account_id, contact.id);
 
     res.json({ profile_pic_url: profilePicUrl });
   } catch (error) {
@@ -150,19 +181,21 @@ router.get('/:id/profile-pic', async (req: Request, res: Response) => {
   }
 });
 
-// Update contact
+// Update contact - uses unified 'accounts' table
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { name } = req.body;
+    const userId = req.user!.userId;
+    const contactId = req.params.id;
 
     // Verify ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
-    `, [req.params.id, req.user!.userId]);
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [contactId, userId]);
 
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
@@ -173,7 +206,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       UPDATE contacts SET name = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING *
-    `, [name, req.params.id]);
+    `, [name, contactId]);
 
     res.json({ contact: updated });
   } catch (error) {
@@ -182,19 +215,21 @@ router.patch('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Add label to contact
+// Add label to contact - uses unified 'accounts' table
 router.post('/:id/labels', async (req: Request, res: Response) => {
   try {
     const { labelId } = req.body;
+    const userId = req.user!.userId;
+    const contactId = req.params.id;
 
     // Verify contact ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
-    `, [req.params.id, req.user!.userId]);
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [contactId, userId]);
 
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
@@ -204,7 +239,7 @@ router.post('/:id/labels', async (req: Request, res: Response) => {
     // Verify label ownership
     const label = await queryOne(
       'SELECT id FROM labels WHERE id = $1 AND user_id = $2',
-      [labelId, req.user!.userId]
+      [labelId, userId]
     );
 
     if (!label) {
@@ -216,7 +251,7 @@ router.post('/:id/labels', async (req: Request, res: Response) => {
       INSERT INTO contact_labels (contact_id, label_id)
       VALUES ($1, $2)
       ON CONFLICT DO NOTHING
-    `, [req.params.id, labelId]);
+    `, [contactId, labelId]);
 
     res.json({ message: 'Label added' });
   } catch (error) {
@@ -225,17 +260,20 @@ router.post('/:id/labels', async (req: Request, res: Response) => {
   }
 });
 
-// Remove label from contact
+// Remove label from contact - uses unified 'accounts' table
 router.delete('/:id/labels/:labelId', async (req: Request, res: Response) => {
   try {
+    const userId = req.user!.userId;
+    const contactId = req.params.id;
+
     // Verify contact ownership or shared access
     const contact = await queryOne(`
       SELECT ct.id
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE ct.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
-    `, [req.params.id, req.user!.userId]);
+      JOIN accounts a ON ct.account_id = a.id
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE ct.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
+    `, [contactId, userId]);
 
     if (!contact) {
       res.status(404).json({ error: 'Contact not found' });
@@ -244,7 +282,7 @@ router.delete('/:id/labels/:labelId', async (req: Request, res: Response) => {
 
     await execute(
       'DELETE FROM contact_labels WHERE contact_id = $1 AND label_id = $2',
-      [req.params.id, req.params.labelId]
+      [contactId, req.params.labelId]
     );
 
     res.json({ message: 'Label removed' });
@@ -254,18 +292,22 @@ router.delete('/:id/labels/:labelId', async (req: Request, res: Response) => {
   }
 });
 
-// Export contacts to CSV
+// Export contacts to CSV - uses unified 'accounts' table
 router.get('/export', async (req: Request, res: Response) => {
   try {
-    const { accountId, labelId } = req.query;
+    const { accountId, labelId, channelType } = req.query;
     const userId = req.user!.userId;
 
+    // Unified query - no more UNION
     let sql = `
-      SELECT DISTINCT
+      SELECT
+        ct.id,
         ct.name,
         ct.phone_number,
         ct.wa_id,
-        wa.name as account_name,
+        a.name as account_name,
+        ct.account_id,
+        COALESCE(ct.channel_type, 'whatsapp') as channel_type,
         ct.created_at,
         (
           SELECT string_agg(l.name, ', ')
@@ -274,15 +316,20 @@ router.get('/export', async (req: Request, res: Response) => {
           WHERE cl.contact_id = ct.id
         ) as labels
       FROM contacts ct
-      JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-      WHERE wa.user_id = $1
+      JOIN accounts a ON ct.account_id = a.id
+      WHERE a.user_id = $1
     `;
 
     const params: any[] = [userId];
 
+    if (channelType) {
+      params.push(channelType);
+      sql += ` AND COALESCE(ct.channel_type, 'whatsapp') = $${params.length}`;
+    }
+
     if (accountId) {
       params.push(accountId);
-      sql += ` AND ct.whatsapp_account_id = $${params.length}`;
+      sql += ` AND ct.account_id = $${params.length}`;
     }
 
     if (labelId) {
@@ -295,7 +342,7 @@ router.get('/export', async (req: Request, res: Response) => {
     const contacts = await query(sql, params);
 
     // Generate CSV
-    const headers = ['Name', 'Phone Number', 'WhatsApp ID', 'Account', 'Labels', 'Created At'];
+    const headers = ['Name', 'Phone Number', 'Contact ID', 'Account', 'Channel', 'Labels', 'Created At'];
     const csvRows = [headers.join(',')];
 
     for (const contact of contacts) {
@@ -304,6 +351,7 @@ router.get('/export', async (req: Request, res: Response) => {
         `"${contact.phone_number || ''}"`,
         `"${contact.wa_id || ''}"`,
         `"${(contact.account_name || '').replace(/"/g, '""')}"`,
+        `"${contact.channel_type || 'whatsapp'}"`,
         `"${(contact.labels || '').replace(/"/g, '""')}"`,
         `"${contact.created_at ? new Date(contact.created_at).toISOString() : ''}"`,
       ];
@@ -321,10 +369,10 @@ router.get('/export', async (req: Request, res: Response) => {
   }
 });
 
-// Import contacts from CSV
+// Import contacts from CSV - uses unified 'accounts' table
 router.post('/import', async (req: Request, res: Response) => {
   try {
-    const { accountId, contacts: contactsData } = req.body;
+    const { accountId, contacts: contactsData, channelType = 'whatsapp' } = req.body;
     const userId = req.user!.userId;
 
     if (!accountId) {
@@ -337,9 +385,9 @@ router.post('/import', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify account ownership
+    // Verify account ownership using unified accounts table
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -360,16 +408,16 @@ router.post('/import', async (req: Request, res: Response) => {
 
         if (!phoneNumber && !waId) {
           results.failed++;
-          results.errors.push(`Missing phone number or WhatsApp ID for contact: ${name || 'Unknown'}`);
+          results.errors.push(`Missing phone number or contact ID for contact: ${name || 'Unknown'}`);
           continue;
         }
 
-        const contactWaId = waId || phoneNumber?.replace(/[^0-9]/g, '');
+        const contactId_wa = waId || phoneNumber?.replace(/[^0-9]/g, '');
 
-        // Upsert contact
+        // Upsert contact using unified schema
         const existingContact = await queryOne(`
-          SELECT id FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2
-        `, [accountId, contactWaId]);
+          SELECT id FROM contacts WHERE account_id = $1 AND wa_id = $2
+        `, [accountId, contactId_wa]);
 
         let contactId: string;
 
@@ -382,10 +430,10 @@ router.post('/import', async (req: Request, res: Response) => {
           results.updated++;
         } else {
           const newContact = await queryOne(`
-            INSERT INTO contacts (whatsapp_account_id, wa_id, name, phone_number)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO contacts (account_id, wa_id, name, phone_number, channel_type)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING id
-          `, [accountId, contactWaId, name, phoneNumber]);
+          `, [accountId, contactId_wa, name, phoneNumber, channelType]);
           contactId = newContact.id;
           results.imported++;
         }
@@ -428,7 +476,7 @@ router.post('/import', async (req: Request, res: Response) => {
   }
 });
 
-// Bulk add labels to contacts
+// Bulk add labels to contacts - uses unified 'accounts' table
 router.post('/bulk-label', async (req: Request, res: Response) => {
   try {
     const { contactIds, labelId } = req.body;
@@ -454,14 +502,14 @@ router.post('/bulk-label', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify contact ownership and add labels
+    // Verify contact ownership and add labels using unified accounts
     let added = 0;
     for (const contactId of contactIds) {
       const contact = await queryOne(`
         SELECT ct.id
         FROM contacts ct
-        JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-        WHERE ct.id = $1 AND wa.user_id = $2
+        JOIN accounts a ON ct.account_id = a.id
+        WHERE ct.id = $1 AND a.user_id = $2
       `, [contactId, userId]);
 
       if (contact) {
@@ -481,7 +529,7 @@ router.post('/bulk-label', async (req: Request, res: Response) => {
   }
 });
 
-// Bulk remove labels from contacts
+// Bulk remove labels from contacts - uses unified 'accounts' table
 router.post('/bulk-unlabel', async (req: Request, res: Response) => {
   try {
     const { contactIds, labelId } = req.body;
@@ -507,15 +555,15 @@ router.post('/bulk-unlabel', async (req: Request, res: Response) => {
       return;
     }
 
-    // Remove labels from owned contacts
+    // Remove labels from owned contacts using unified accounts
     await execute(`
       DELETE FROM contact_labels
       WHERE label_id = $1
         AND contact_id = ANY($2::uuid[])
         AND contact_id IN (
           SELECT ct.id FROM contacts ct
-          JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
-          WHERE wa.user_id = $3
+          JOIN accounts a ON ct.account_id = a.id
+          WHERE a.user_id = $3
         )
     `, [labelId, contactIds, userId]);
 

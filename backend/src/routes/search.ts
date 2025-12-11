@@ -27,10 +27,10 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (accountId) {
       baseParams.push(accountId);
-      accountFilter = `AND wa.id = $${++paramOffset}`;
+      accountFilter = `AND a.id = $${++paramOffset}`;
     } else if (!isAdmin) {
       baseParams.push(userId);
-      accountFilter = `AND wa.user_id = $${++paramOffset}`;
+      accountFilter = `AND a.user_id = $${++paramOffset}`;
     }
 
     const results: any = {};
@@ -47,11 +47,11 @@ router.get('/', async (req: Request, res: Response) => {
           c.id as conversation_id,
           ct.name as contact_name,
           ct.phone_number as contact_phone,
-          wa.name as account_name
+          a.name as account_name
         FROM messages m
         JOIN conversations c ON m.conversation_id = c.id
         JOIN contacts ct ON c.contact_id = ct.id
-        JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+        JOIN accounts a ON c.whatsapp_account_id = a.id
         WHERE LOWER(m.content) LIKE $1 ${accountFilter}
         ORDER BY m.created_at DESC
         LIMIT $2
@@ -69,10 +69,10 @@ router.get('/', async (req: Request, res: Response) => {
           ct.phone_number,
           ct.wa_id,
           ct.profile_pic_url,
-          wa.name as account_name,
-          wa.id as account_id
+          a.name as account_name,
+          a.id as account_id
         FROM contacts ct
-        JOIN whatsapp_accounts wa ON ct.whatsapp_account_id = wa.id
+        JOIN accounts a ON ct.whatsapp_account_id = a.id
         WHERE (LOWER(ct.name) LIKE $1 OR ct.phone_number LIKE $1 OR ct.wa_id LIKE $1) ${accountFilter}
         ORDER BY ct.name ASC
         LIMIT $2
@@ -90,8 +90,8 @@ router.get('/', async (req: Request, res: Response) => {
           c.unread_count,
           ct.name as contact_name,
           ct.phone_number as contact_phone,
-          wa.name as account_name,
-          wa.id as account_id,
+          a.name as account_name,
+          a.id as account_id,
           (
             SELECT content FROM messages
             WHERE conversation_id = c.id
@@ -100,7 +100,7 @@ router.get('/', async (req: Request, res: Response) => {
           ) as last_message
         FROM conversations c
         JOIN contacts ct ON c.contact_id = ct.id
-        JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+        JOIN accounts a ON c.whatsapp_account_id = a.id
         WHERE (LOWER(ct.name) LIKE $1 OR ct.phone_number LIKE $1) ${accountFilter}
         ORDER BY c.id, c.last_message_at DESC
         LIMIT $2
@@ -132,8 +132,8 @@ router.get('/conversation/:conversationId', async (req: Request, res: Response) 
     const conversation = await query(`
       SELECT c.id
       FROM conversations c
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
-      WHERE c.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON c.whatsapp_account_id = a.id
+      WHERE c.id = $1 AND a.user_id = $2
     `, [conversationId, userId]);
 
     if (conversation.length === 0) {

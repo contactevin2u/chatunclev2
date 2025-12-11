@@ -9,12 +9,13 @@ let processorInterval: NodeJS.Timeout | null = null;
 async function processScheduledMessages() {
   try {
     // Get all pending messages that are due (including jid_type for LID vs PN format)
+    // Uses unified 'accounts' table
     const pendingMessages = await query(`
-      SELECT sm.*, c.whatsapp_account_id, ct.wa_id, ct.jid_type, wa.user_id
+      SELECT sm.*, c.account_id, ct.wa_id, ct.jid_type, a.user_id
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN whatsapp_accounts wa ON c.whatsapp_account_id = wa.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE sm.status = 'pending' AND sm.scheduled_at <= NOW()
       ORDER BY sm.scheduled_at ASC
       LIMIT 10
@@ -27,9 +28,9 @@ async function processScheduledMessages() {
         console.log(`[Scheduler] Processing scheduled message ${msg.id} (${i + 1}/${pendingMessages.length})`);
 
         // === ANTI-BAN: Check batch cooldown for this account ===
-        const batchCheck = needsBatchCooldown(msg.whatsapp_account_id);
+        const batchCheck = needsBatchCooldown(msg.account_id);
         if (batchCheck.needed) {
-          console.log(`[Scheduler] Batch cooldown needed for ${msg.whatsapp_account_id}, waiting ${batchCheck.waitMs}ms`);
+          console.log(`[Scheduler] Batch cooldown needed for ${msg.account_id}, waiting ${batchCheck.waitMs}ms`);
           await sleep(batchCheck.waitMs);
         }
 
@@ -42,7 +43,7 @@ async function processScheduledMessages() {
 
         // Send the message (anti-ban measures built into sendMessage)
         const waMessageId = await sessionManager.sendMessage(
-          msg.whatsapp_account_id,
+          msg.account_id,
           msg.wa_id,
           {
             type: msg.content_type,
@@ -74,15 +75,16 @@ async function processScheduledMessages() {
 
         // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`account:${msg.whatsapp_account_id}`).emit('message:new', {
-          accountId: msg.whatsapp_account_id,
+        io.to(`account:${msg.account_id}`).emit('message:new', {
+          accountId: msg.account_id,
           conversationId: msg.conversation_id,
+          channelType: 'whatsapp',
           message: savedMessage,
           isScheduled: true,
         });
 
-        io.to(`account:${msg.whatsapp_account_id}`).emit('scheduled:sent', {
-          accountId: msg.whatsapp_account_id,
+        io.to(`account:${msg.account_id}`).emit('scheduled:sent', {
+          accountId: msg.account_id,
           scheduledMessageId: msg.id,
           messageId: savedMessage.id,
         });
@@ -98,8 +100,8 @@ async function processScheduledMessages() {
 
         // Notify frontend (emit to account room for multi-agent sync)
         const io = getIO();
-        io.to(`account:${msg.whatsapp_account_id}`).emit('scheduled:failed', {
-          accountId: msg.whatsapp_account_id,
+        io.to(`account:${msg.account_id}`).emit('scheduled:failed', {
+          accountId: msg.account_id,
           scheduledMessageId: msg.id,
           error: error.message,
         });

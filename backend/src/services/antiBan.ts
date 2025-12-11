@@ -173,7 +173,7 @@ export function sleep(ms: number): Promise<void> {
  */
 export async function getAccountAgeDays(accountId: string): Promise<number> {
   const account = await queryOne(
-    'SELECT created_at FROM whatsapp_accounts WHERE id = $1',
+    'SELECT created_at FROM accounts WHERE id = $1',
     [accountId]
   );
 
@@ -441,7 +441,7 @@ export async function hasMessagedContactBefore(accountId: string, contactWaId: s
     SELECT 1 FROM messages m
     JOIN conversations c ON m.conversation_id = c.id
     JOIN contacts ct ON c.contact_id = ct.id
-    WHERE c.whatsapp_account_id = $1 AND ct.wa_id = $2 AND m.sender_type = 'agent'
+    WHERE c.account_id = $1 AND ct.wa_id = $2 AND m.sender_type = 'agent'
     LIMIT 1
   `, [accountId, contactWaId]);
 

@@ -31,11 +31,11 @@ router.post('/', async (req: Request, res: Response) => {
 
     // Verify account ownership or shared access with send permission
     const account = await queryOne(`
-      SELECT wa.id, wa.user_id,
-             CASE WHEN wa.user_id = $2 THEN 'owner' ELSE aa.permission END as permission
-      FROM whatsapp_accounts wa
-      LEFT JOIN account_access aa ON wa.id = aa.whatsapp_account_id AND aa.agent_id = $2
-      WHERE wa.id = $1 AND (wa.user_id = $2 OR aa.agent_id IS NOT NULL)
+      SELECT a.id, a.user_id,
+             CASE WHEN a.user_id = $2 THEN 'owner' ELSE aa.permission END as permission
+      FROM accounts a
+      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      WHERE a.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [accountId, agentId]);
 
     if (!account) {

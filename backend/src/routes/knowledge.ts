@@ -38,7 +38,7 @@ router.get('/settings/:accountId', async (req: Request, res: Response) => {
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -63,7 +63,7 @@ router.put('/settings/:accountId', async (req: Request, res: Response) => {
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -112,7 +112,7 @@ router.get('/documents/:accountId', async (req: Request, res: Response) => {
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -148,7 +148,7 @@ router.post('/documents/:accountId', upload.single('file'), async (req: Request,
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -192,7 +192,7 @@ router.post('/documents/:accountId/text', async (req: Request, res: Response) =>
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -226,7 +226,7 @@ router.delete('/documents/:accountId/:documentId', async (req: Request, res: Res
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {
@@ -255,7 +255,7 @@ router.get('/logs/:accountId', async (req: Request, res: Response) => {
 
     // Verify user owns this account
     const account = await queryOne(`
-      SELECT id FROM whatsapp_accounts WHERE id = $1 AND user_id = $2
+      SELECT id FROM accounts WHERE id = $1 AND user_id = $2
     `, [accountId, userId]);
 
     if (!account) {

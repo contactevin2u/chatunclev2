@@ -25,14 +25,14 @@ router.get('/', async (req: Request, res: Response) => {
         g.is_restrict,
         g.created_at,
         g.updated_at,
-        wa.name as account_name,
+        a.name as account_name,
         c.id as conversation_id,
         c.unread_count,
         c.last_message_at
       FROM groups g
-      JOIN whatsapp_accounts wa ON g.whatsapp_account_id = wa.id
+      JOIN accounts a ON g.whatsapp_account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
-      WHERE wa.user_id = $1
+      WHERE a.user_id = $1
     `;
 
     const params: any[] = [req.user!.userId];
@@ -59,14 +59,14 @@ router.get('/:id', async (req: Request, res: Response) => {
     const group = await queryOne(`
       SELECT
         g.*,
-        wa.name as account_name,
+        a.name as account_name,
         c.id as conversation_id,
         c.unread_count,
         c.last_message_at
       FROM groups g
-      JOIN whatsapp_accounts wa ON g.whatsapp_account_id = wa.id
+      JOIN accounts a ON g.whatsapp_account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
-      WHERE g.id = $1 AND wa.user_id = $2
+      WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
 
     if (!group) {
@@ -100,12 +100,12 @@ router.get('/jid/:jid', async (req: Request, res: Response) => {
     const group = await queryOne(`
       SELECT
         g.*,
-        wa.name as account_name,
+        a.name as account_name,
         c.id as conversation_id
       FROM groups g
-      JOIN whatsapp_accounts wa ON g.whatsapp_account_id = wa.id
+      JOIN accounts a ON g.whatsapp_account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
-      WHERE g.group_jid = $1 AND wa.user_id = $2
+      WHERE g.group_jid = $1 AND a.user_id = $2
     `, [req.params.jid, req.user!.userId]);
 
     if (!group) {
@@ -127,8 +127,8 @@ router.get('/:id/profile-pic', async (req: Request, res: Response) => {
     const group = await queryOne(`
       SELECT g.id, g.whatsapp_account_id, g.profile_pic_url
       FROM groups g
-      JOIN whatsapp_accounts wa ON g.whatsapp_account_id = wa.id
-      WHERE g.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON g.whatsapp_account_id = a.id
+      WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
 
     if (!group) {
@@ -153,8 +153,8 @@ router.get('/:id/participants', async (req: Request, res: Response) => {
     const group = await queryOne(`
       SELECT g.id
       FROM groups g
-      JOIN whatsapp_accounts wa ON g.whatsapp_account_id = wa.id
-      WHERE g.id = $1 AND wa.user_id = $2
+      JOIN accounts a ON g.whatsapp_account_id = a.id
+      WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
 
     if (!group) {

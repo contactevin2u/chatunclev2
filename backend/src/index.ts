@@ -5,6 +5,9 @@ import { config } from './config/env';
 import { initializeSocket } from './services/socket';
 import { sessionManager } from './services/whatsapp/SessionManager';
 import { startScheduledMessageProcessor } from './services/scheduledMessageProcessor';
+import { restoreTelegramSessions } from './services/channel/telegramStartup';
+import { restoreTikTokSessions } from './services/channel/tiktokStartup';
+import { restoreMetaSessions } from './services/channel/metaStartup';
 import { securityHeaders, apiRateLimiter, sanitizeRequest, secureErrorHandler } from './middleware/security';
 
 // Routes
@@ -28,6 +31,9 @@ import knowledgeRoutes from './routes/knowledge';
 import orderopsRoutes from './routes/orderops';
 import groupsRoutes from './routes/groups';
 import gamificationRoutes from './routes/gamification';
+import telegramRoutes from './routes/telegram';
+import tiktokRoutes from './routes/tiktok';
+import metaRoutes from './routes/meta';
 
 import sendToPhoneRoutes from './routes/send-to-phone';
 const app = express();
@@ -117,6 +123,9 @@ app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api/orderops', orderopsRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/gamification', gamificationRoutes);
+app.use('/api/telegram', telegramRoutes);
+app.use('/api/tiktok', tiktokRoutes);
+app.use('/api/meta', metaRoutes);
 app.use('/api/send-to-phone', sendToPhoneRoutes);
 
 // Secure error handler - doesn't expose internal details in production
@@ -127,9 +136,19 @@ httpServer.listen(config.port, async () => {
   console.log(`Server running on port ${config.port}`);
   console.log(`Environment: ${config.nodeEnv}`);
 
-  // Restore WhatsApp sessions on startup
+  // Restore sessions on startup
   if (config.nodeEnv !== 'test') {
+    // Restore WhatsApp sessions
     await sessionManager.restoreAllSessions();
+
+    // Restore Telegram bot sessions
+    await restoreTelegramSessions();
+
+    // Restore TikTok Shop sessions
+    await restoreTikTokSessions();
+
+    // Restore Instagram and Messenger sessions
+    await restoreMetaSessions();
 
     // Start scheduled message processor
     startScheduledMessageProcessor();

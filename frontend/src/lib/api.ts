@@ -869,5 +869,267 @@ export const gamification = {
     request<{ history: any[] }>(`/api/gamification/points-history?limit=${limit}`, { token }),
 };
 
+// Telegram API
+export const telegram = {
+  // List Telegram bot accounts
+  listAccounts: (token: string) =>
+    request<{ accounts: any[] }>('/api/telegram/accounts', { token }),
+
+  // Add new Telegram bot
+  addAccount: (token: string, botToken: string, accountName?: string) =>
+    request<{ account: any }>('/api/telegram/accounts', {
+      method: 'POST',
+      body: { botToken, accountName },
+      token,
+    }),
+
+  // Get specific account
+  getAccount: (token: string, id: string) =>
+    request<{ account: any }>(`/api/telegram/accounts/${id}`, { token }),
+
+  // Update account settings
+  updateAccount: (token: string, id: string, data: { accountName?: string; settings?: any }) =>
+    request<{ account: any }>(`/api/telegram/accounts/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  // Delete account
+  deleteAccount: (token: string, id: string) =>
+    request<{ message: string }>(`/api/telegram/accounts/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // Reconnect account
+  reconnect: (token: string, id: string) =>
+    request<{ message: string; status: string }>(`/api/telegram/accounts/${id}/reconnect`, {
+      method: 'POST',
+      token,
+    }),
+
+  // Send message
+  sendMessage: (token: string, accountId: string, chatId: string, message: {
+    type?: string;
+    content?: string;
+    mediaUrl?: string;
+    caption?: string;
+    latitude?: number;
+    longitude?: number;
+    replyToMessageId?: string;
+  }) =>
+    request<{ success: boolean; messageId?: string; error?: string }>(`/api/telegram/accounts/${accountId}/send`, {
+      method: 'POST',
+      body: { chatId, message },
+      token,
+    }),
+
+  // Get conversations
+  getConversations: (token: string, accountId: string) =>
+    request<{ conversations: any[] }>(`/api/telegram/accounts/${accountId}/conversations`, { token }),
+};
+
+// Meta API (Instagram & Facebook Messenger)
+export const meta = {
+  // List Meta accounts (both Instagram and Messenger)
+  listAccounts: (token: string, channelType?: 'instagram' | 'messenger') => {
+    const query = channelType ? `?channelType=${channelType}` : '';
+    return request<{ accounts: any[] }>(`/api/meta/accounts${query}`, { token });
+  },
+
+  // Add new Meta account (Instagram or Messenger)
+  addAccount: (token: string, data: {
+    channelType: 'instagram' | 'messenger';
+    pageId: string;
+    pageAccessToken: string;
+    appSecret: string;
+    instagramAccountId?: string;  // Required for Instagram
+    accountName?: string;
+  }) =>
+    request<{ account: any; webhookUrl: string; message: string }>('/api/meta/accounts', {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  // Get specific account
+  getAccount: (token: string, id: string) =>
+    request<{ account: any }>(`/api/meta/accounts/${id}`, { token }),
+
+  // Update account settings
+  updateAccount: (token: string, id: string, data: { accountName?: string; settings?: any }) =>
+    request<{ account: any }>(`/api/meta/accounts/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  // Delete account
+  deleteAccount: (token: string, id: string) =>
+    request<{ message: string }>(`/api/meta/accounts/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // Reconnect account
+  reconnect: (token: string, id: string) =>
+    request<{ message: string; status: string }>(`/api/meta/accounts/${id}/reconnect`, {
+      method: 'POST',
+      token,
+    }),
+
+  // Send message
+  sendMessage: (token: string, accountId: string, recipientId: string, message: {
+    type?: string;
+    content?: string;
+    mediaUrl?: string;
+    useHumanAgentTag?: boolean;  // For messages outside 24h window
+  }) =>
+    request<{ success: boolean; messageId?: string; error?: string }>(`/api/meta/accounts/${accountId}/send`, {
+      method: 'POST',
+      body: { recipientId, message },
+      token,
+    }),
+
+  // Account access management
+  listAccess: (token: string, accountId: string) =>
+    request<{ access: any[] }>(`/api/meta/accounts/${accountId}/access`, { token }),
+
+  grantAccess: (token: string, accountId: string, agentEmail: string, permission: 'full' | 'send' | 'view' = 'full') =>
+    request<{ message: string; access: any }>(`/api/meta/accounts/${accountId}/access`, {
+      method: 'POST',
+      body: { agentEmail, permission },
+      token,
+    }),
+
+  revokeAccess: (token: string, accountId: string, agentId: string) =>
+    request<{ message: string }>(`/api/meta/accounts/${accountId}/access/${agentId}`, {
+      method: 'DELETE',
+      token,
+    }),
+};
+
+// Convenience aliases for Instagram and Messenger
+export const instagram = {
+  listAccounts: (token: string) => meta.listAccounts(token, 'instagram'),
+  addAccount: (token: string, data: {
+    pageId: string;
+    pageAccessToken: string;
+    appSecret: string;
+    instagramAccountId: string;
+    accountName?: string;
+  }) => meta.addAccount(token, { ...data, channelType: 'instagram' }),
+  getAccount: meta.getAccount,
+  updateAccount: meta.updateAccount,
+  deleteAccount: meta.deleteAccount,
+  reconnect: meta.reconnect,
+  sendMessage: meta.sendMessage,
+  listAccess: meta.listAccess,
+  grantAccess: meta.grantAccess,
+  revokeAccess: meta.revokeAccess,
+};
+
+export const messenger = {
+  listAccounts: (token: string) => meta.listAccounts(token, 'messenger'),
+  addAccount: (token: string, data: {
+    pageId: string;
+    pageAccessToken: string;
+    appSecret: string;
+    accountName?: string;
+  }) => meta.addAccount(token, { ...data, channelType: 'messenger' }),
+  getAccount: meta.getAccount,
+  updateAccount: meta.updateAccount,
+  deleteAccount: meta.deleteAccount,
+  reconnect: meta.reconnect,
+  sendMessage: meta.sendMessage,
+  listAccess: meta.listAccess,
+  grantAccess: meta.grantAccess,
+  revokeAccess: meta.revokeAccess,
+};
+
+// TikTok Shop API
+export const tiktok = {
+  // List TikTok Shop accounts
+  listAccounts: (token: string) =>
+    request<{ accounts: any[] }>('/api/tiktok/accounts', { token }),
+
+  // Add new TikTok Shop account
+  addAccount: (token: string, data: {
+    appKey: string;
+    appSecret: string;
+    accessToken: string;
+    refreshToken: string;
+    shopId: string;
+    shopCipher: string;
+    accountName?: string;
+  }) =>
+    request<{ account: any; webhookUrl: string }>('/api/tiktok/accounts', {
+      method: 'POST',
+      body: data,
+      token,
+    }),
+
+  // Get specific account
+  getAccount: (token: string, id: string) =>
+    request<{ account: any }>(`/api/tiktok/accounts/${id}`, { token }),
+
+  // Update account settings
+  updateAccount: (token: string, id: string, data: { accountName?: string; settings?: any }) =>
+    request<{ account: any }>(`/api/tiktok/accounts/${id}`, {
+      method: 'PATCH',
+      body: data,
+      token,
+    }),
+
+  // Delete account
+  deleteAccount: (token: string, id: string) =>
+    request<{ message: string }>(`/api/tiktok/accounts/${id}`, {
+      method: 'DELETE',
+      token,
+    }),
+
+  // Reconnect account
+  reconnect: (token: string, id: string) =>
+    request<{ message: string; status: string }>(`/api/tiktok/accounts/${id}/reconnect`, {
+      method: 'POST',
+      token,
+    }),
+
+  // Send message
+  sendMessage: (token: string, accountId: string, conversationId: string, message: {
+    type?: string;
+    content?: string;
+    mediaUrl?: string;
+    caption?: string;
+  }) =>
+    request<{ success: boolean; messageId?: string; error?: string }>(`/api/tiktok/accounts/${accountId}/send`, {
+      method: 'POST',
+      body: { conversationId, message },
+      token,
+    }),
+
+  // Get conversations
+  getConversations: (token: string, accountId: string) =>
+    request<{ conversations: any[] }>(`/api/tiktok/accounts/${accountId}/conversations`, { token }),
+
+  // Account access management
+  listAccess: (token: string, accountId: string) =>
+    request<{ access: any[] }>(`/api/tiktok/accounts/${accountId}/access`, { token }),
+
+  grantAccess: (token: string, accountId: string, agentEmail: string, permission: 'full' | 'send' | 'view' = 'full') =>
+    request<{ message: string; access: any }>(`/api/tiktok/accounts/${accountId}/access`, {
+      method: 'POST',
+      body: { agentEmail, permission },
+      token,
+    }),
+
+  revokeAccess: (token: string, accountId: string, agentId: string) =>
+    request<{ message: string }>(`/api/tiktok/accounts/${accountId}/access/${agentId}`, {
+      method: 'DELETE',
+      token,
+    }),
+};
+
 // Re-export API_URL for use in other places
 export { API_URL };
