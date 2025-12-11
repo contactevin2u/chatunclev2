@@ -5,6 +5,7 @@ import { config } from './config/env';
 import { initializeSocket } from './services/socket';
 import { sessionManager } from './services/whatsapp/SessionManager';
 import { startScheduledMessageProcessor } from './services/scheduledMessageProcessor';
+import { startRetryQueueProcessor } from './services/messageRetryQueue';
 import { restoreTelegramSessions } from './services/channel/telegramStartup';
 import { restoreTikTokSessions } from './services/channel/tiktokStartup';
 import { restoreMetaSessions } from './services/channel/metaStartup';
@@ -166,6 +167,9 @@ httpServer.listen(config.port, async () => {
 
     // Start scheduled message processor
     startScheduledMessageProcessor();
+
+    // Start message retry queue processor
+    startRetryQueueProcessor();
   }
 });
 

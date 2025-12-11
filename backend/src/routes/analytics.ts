@@ -18,27 +18,16 @@ router.get('/overview', async (req: Request, res: Response) => {
     const includeWhatsApp = !channelType || channelType === 'whatsapp' || channelType === 'all';
     const includeTelegram = !channelType || channelType === 'telegram' || channelType === 'all';
 
-    // Build all_conversations CTE that includes both channels
+    // Build all_conversations CTE - uses unified account_id column
     const allConversationsCTE = `
       WITH all_conversations AS (
-        ${includeWhatsApp ? `
-          SELECT c.id, c.first_response_at, c.created_at, a.id as account_id
-          FROM conversations c
-          JOIN accounts a ON c.whatsapp_account_id = a.id
-          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
-          WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
-            ${accountId ? `AND a.id = $2` : ''}
-        ` : ''}
-        ${includeWhatsApp && includeTelegram ? 'UNION ALL' : ''}
-        ${includeTelegram ? `
-          SELECT c.id, c.first_response_at, c.created_at, a.id as account_id
-          FROM conversations c
-          JOIN accounts a ON c.channel_account_id = a.id
-          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
-          WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
-            AND c.channel_type = 'telegram'
-            ${accountId ? `AND a.id = $2` : ''}
-        ` : ''}
+        SELECT c.id, c.first_response_at, c.created_at, a.id as account_id
+        FROM conversations c
+        JOIN accounts a ON c.account_id = a.id
+        LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+        WHERE (a.user_id = $1 OR aa.agent_id IS NOT NULL)
+          ${accountId ? `AND a.id = $2` : ''}
+          ${channelType && channelType !== 'all' ? `AND c.channel_type = '${channelType}'` : ''}
       )
     `;
 
@@ -197,7 +186,7 @@ router.get('/by-agent', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.is_auto_reply = TRUE THEN 1 END) as auto_replies
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN users u ON m.agent_id = u.id
       WHERE m.sender_type = 'agent' ${accountFilter} ${dateFilter}
       GROUP BY u.id, u.name
@@ -237,7 +226,7 @@ router.get('/by-day', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.sender_type = 'contact' THEN 1 END) as received
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE m.created_at >= NOW() - INTERVAL '1 day' * $1 ${accountFilter}
       GROUP BY DATE(m.created_at)
       ORDER BY date ASC
@@ -280,7 +269,7 @@ router.get('/response-times', async (req: Request, res: Response) => {
         COUNT(*) as count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE m.sender_type = 'agent'
         AND m.response_time_ms IS NOT NULL
         ${accountFilter}
@@ -328,7 +317,7 @@ router.get('/hourly-activity', async (req: Request, res: Response) => {
         COUNT(*) as message_count
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE m.created_at >= NOW() - INTERVAL '1 day' * $1 ${accountFilter}
       GROUP BY day_of_week, hour
       ORDER BY day_of_week, hour
@@ -382,7 +371,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
       SELECT COUNT(DISTINCT fc.contact_id) as count
       FROM first_conversations fc
       JOIN conversations c ON fc.contact_id = c.contact_id AND fc.rn = 1
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE fc.rn = 1 ${accountFilter} ${dateFilter}
     `, params);
 
@@ -397,7 +386,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
       )
       SELECT COUNT(DISTINCT c.contact_id) as count
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
       WHERE cfc.first_conv_at < c.created_at ${accountFilter} ${dateFilter}
     `, params);
@@ -406,7 +395,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
     const totalConversationsResult = await queryOne(`
       SELECT COUNT(*) as count
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE 1=1 ${accountFilter} ${dateFilter}
     `, params);
 
@@ -441,7 +430,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
         COUNT(CASE WHEN m.sender_type = 'contact' THEN 1 END) as received
       FROM messages m
       JOIN conversations c ON m.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE 1=1 ${accountFilter} ${messageDateFilter}
     `, messageParams);
 
@@ -486,7 +475,7 @@ router.get('/chat-stats', async (req: Request, res: Response) => {
         END) as existing_contacts,
         COUNT(*) as total_conversations
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN contact_first_conv cfc ON c.contact_id = cfc.contact_id
       WHERE 1=1 ${dailyAccountFilter} ${dailyDateFilter}
       GROUP BY DATE(c.created_at)

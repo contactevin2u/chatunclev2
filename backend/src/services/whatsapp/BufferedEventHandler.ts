@@ -380,7 +380,7 @@ async function processHistorySync(
       if (!contacts || contacts.length === 0) return 0;
 
       const contactBatch: Array<{
-        whatsapp_account_id: string;
+        account_id: string;
         wa_id: string;
         phone_number: string | null;
         name: string | null;
@@ -392,7 +392,7 @@ async function processHistorySync(
         const waId = extractUserIdFromJid(contact.id);
         const jidType = getJidType(contact.id);
         contactBatch.push({
-          whatsapp_account_id: accountId,
+          account_id: accountId,
           wa_id: waId,
           phone_number: jidType === 'pn' ? waId : null,
           name: contact.name || contact.notify || null,
@@ -426,9 +426,9 @@ async function processHistorySync(
             // Use chat data directly - NO slow groupMetadata API calls
             // Metadata will be fetched lazily when user opens the group
             const group = await queryOne(
-              `INSERT INTO groups (whatsapp_account_id, group_jid, name, participant_count)
+              `INSERT INTO groups (account_id, group_jid, name, participant_count)
                VALUES ($1, $2, $3, 0)
-               ON CONFLICT (whatsapp_account_id, group_jid) DO UPDATE SET
+               ON CONFLICT (account_id, group_jid) DO UPDATE SET
                  name = COALESCE(NULLIF(EXCLUDED.name, ''), groups.name),
                  updated_at = NOW()
                RETURNING id`,
@@ -437,9 +437,9 @@ async function processHistorySync(
 
             if (group) {
               await execute(
-                `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+                `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
                  VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
-                 ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING`,
+                 ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING`,
                 [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
               );
               processed++;
@@ -531,7 +531,7 @@ async function processContactsUpsert(
   const { accountId } = ctx;
 
   const contactBatch: Array<{
-    whatsapp_account_id: string;
+    account_id: string;
     wa_id: string;
     phone_number: string | null;
     name: string | null;
@@ -546,7 +546,7 @@ async function processContactsUpsert(
     const phoneNumber = jidType === 'pn' ? waId : null;
 
     contactBatch.push({
-      whatsapp_account_id: accountId,
+      account_id: accountId,
       wa_id: waId,
       phone_number: phoneNumber,
       name: contact.name || contact.notify || null,

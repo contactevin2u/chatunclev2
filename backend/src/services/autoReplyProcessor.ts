@@ -39,7 +39,7 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       LEFT JOIN templates t ON ar.response_template_id = t.id
       WHERE ar.user_id = $1
         AND ar.is_active = TRUE
-        AND (ar.whatsapp_account_id = $2 OR ar.whatsapp_account_id IS NULL)
+        AND (ar.account_id = $2 OR ar.account_id IS NULL)
       ORDER BY ar.priority DESC, ar.created_at ASC
     `, [userId, accountId]);
 

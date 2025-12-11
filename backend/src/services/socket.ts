@@ -3,8 +3,67 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env';
 import { JwtPayload } from '../types';
+import { queryOne } from '../config/database';
 
 let io: Server;
+
+// Cache for account access checks (5 minute TTL)
+const accessCache = new Map<string, { hasAccess: boolean; expiresAt: number }>();
+const ACCESS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Check if user has access to an account (owner or shared agent)
+ * Uses caching to reduce database queries
+ */
+async function userHasAccountAccess(userId: string, accountId: string): Promise<boolean> {
+  const cacheKey = `${userId}:${accountId}`;
+  const cached = accessCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.hasAccess;
+  }
+
+  try {
+    // Check if user owns the account OR has been granted access
+    const access = await queryOne<{ id: string }>(
+      `SELECT a.id FROM accounts a
+       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+       WHERE a.id = $2 AND (a.user_id = $1 OR aa.agent_id IS NOT NULL)`,
+      [userId, accountId]
+    );
+
+    const hasAccess = !!access;
+    accessCache.set(cacheKey, { hasAccess, expiresAt: Date.now() + ACCESS_CACHE_TTL });
+    return hasAccess;
+  } catch (error) {
+    console.error(`[Socket] Error checking account access:`, error);
+    return false;
+  }
+}
+
+// Clear access cache entry when permissions change
+export function clearAccessCache(userId?: string, accountId?: string): void {
+  if (userId && accountId) {
+    accessCache.delete(`${userId}:${accountId}`);
+  } else if (userId) {
+    // Clear all entries for this user
+    for (const key of accessCache.keys()) {
+      if (key.startsWith(`${userId}:`)) {
+        accessCache.delete(key);
+      }
+    }
+  } else if (accountId) {
+    // Clear all entries for this account
+    for (const key of accessCache.keys()) {
+      if (key.endsWith(`:${accountId}`)) {
+        accessCache.delete(key);
+      }
+    }
+  } else {
+    // Clear entire cache
+    accessCache.clear();
+  }
+}
 
 // Track connected users and their rooms for debugging
 const connectedUsers = new Map<string, { email: string; userId: string; rooms: Set<string> }>();
@@ -87,8 +146,21 @@ export function initializeSocket(httpServer: HttpServer): Server {
     // Join user's personal room for notifications
     socket.join(`user:${user.userId}`);
 
-    // Join specific account rooms with acknowledgment
-    socket.on('join:account', (accountId: string) => {
+    // Join specific account rooms with access validation
+    socket.on('join:account', async (accountId: string) => {
+      // Validate that user has access to this account
+      const hasAccess = await userHasAccountAccess(user.userId, accountId);
+
+      if (!hasAccess) {
+        console.log(`[Socket] Access denied: ${user.email} tried to join account ${accountId}`);
+        socket.emit('room:error', {
+          room: `account:${accountId}`,
+          accountId,
+          error: 'Access denied'
+        });
+        return;
+      }
+
       const roomName = `account:${accountId}`;
       socket.join(roomName);
 

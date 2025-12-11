@@ -199,7 +199,7 @@ router.get('/', async (req: Request, res: Response) => {
           last_message_account: mostRecent.account_name,
           // For compatibility - use first account's conversation as default
           default_conversation_id: mostRecent.id,
-          whatsapp_account_id: mostRecent.whatsapp_account_id,
+          account_id: mostRecent.account_id,
         });
       }
 

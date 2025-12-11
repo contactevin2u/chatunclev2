@@ -25,7 +25,7 @@ router.get('/agents', async (req: Request, res: Response) => {
         COUNT(DISTINCT aa.account_id) as shared_account_count
       FROM users u
       LEFT JOIN accounts a ON u.id = a.user_id
-      LEFT JOIN conversations c ON a.id = c.whatsapp_account_id
+      LEFT JOIN conversations c ON a.id = c.account_id
       LEFT JOIN account_access aa ON u.id = aa.agent_id
       GROUP BY u.id
       ORDER BY u.created_at DESC
@@ -232,7 +232,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
         (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_message
       FROM conversations c
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       JOIN users u ON a.user_id = u.id
       WHERE 1=1
     `;

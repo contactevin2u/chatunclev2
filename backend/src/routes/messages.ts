@@ -7,6 +7,7 @@ import { getIO } from '../services/socket';
 import { Message } from '../types';
 import { gamificationService } from '../services/gamificationService';
 import { substituteTemplateVariables } from '../utils/templateVariables';
+import { queueMessageForRetry } from '../services/messageRetryQueue';
 
 const router = Router();
 
@@ -371,6 +372,9 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
           WHERE id = $1
         `, [message!.id]);
 
+        // Queue for automatic retry
+        await queueMessageForRetry(message!.id);
+
         // Notify frontend of failure (emit to account room for multi-agent sync)
         const io = getIO();
         io.to(`account:${conversation.account_id}`).emit('message:status', {
@@ -379,6 +383,7 @@ router.post('/conversation/:conversationId', async (req: Request, res: Response)
           messageId: message!.id,
           status: 'failed',
           error: error.message,
+          willRetry: true,
         });
       }
     })();
@@ -685,11 +690,15 @@ router.post('/:messageId/forward', async (req: Request, res: Response) => {
           WHERE id = $1
         `, [forwardedDbMessage!.id]);
 
+        // Queue for automatic retry
+        await queueMessageForRetry(forwardedDbMessage!.id);
+
         io.to(`account:${targetConversation.account_id}`).emit('message:status', {
           accountId: targetConversation.account_id,
           messageId: forwardedDbMessage!.id,
           status: 'failed',
           error: error.message,
+          willRetry: true,
         });
       }
     })();

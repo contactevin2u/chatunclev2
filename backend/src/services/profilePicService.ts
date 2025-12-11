@@ -195,7 +195,7 @@ export async function batchFetchContactProfilePics(
     // Get contacts without profile pics or with stale pics
     const contacts = await queryOne(`
       SELECT id FROM contacts
-      WHERE whatsapp_account_id = $1
+      WHERE account_id = $1
         AND (profile_pic_url IS NULL OR profile_pic_fetched_at < NOW() - INTERVAL '7 days')
       ORDER BY updated_at DESC
       LIMIT $2

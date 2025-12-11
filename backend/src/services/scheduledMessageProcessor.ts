@@ -2,6 +2,7 @@ import { query, queryOne, execute } from '../config/database';
 import { sessionManager } from './whatsapp/SessionManager';
 import { getIO } from './socket';
 import { getRandomDelay, sleep, needsBatchCooldown } from './antiBan';
+import { queueMessageForRetry } from './messageRetryQueue';
 
 let processorInterval: NodeJS.Timeout | null = null;
 
@@ -9,7 +10,7 @@ let processorInterval: NodeJS.Timeout | null = null;
 async function processScheduledMessages() {
   try {
     // Get all pending messages that are due (including jid_type for LID vs PN format)
-    // Uses unified 'accounts' table
+    // Uses unified account_id column (populated from whatsapp_account_id or channel_account_id)
     const pendingMessages = await query(`
       SELECT sm.*, c.account_id, ct.wa_id, ct.jid_type, a.user_id
       FROM scheduled_messages sm

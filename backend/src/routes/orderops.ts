@@ -557,7 +557,7 @@ router.get('/contact/:contactId/orders', async (req: Request, res: Response) => 
     const orders = await query(`
       SELECT co.* FROM contact_orders co
       JOIN contacts c ON co.contact_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE co.contact_id = $1 AND a.user_id = $2
       ORDER BY co.created_at DESC
     `, [contactId, userId]);
@@ -737,7 +737,7 @@ router.get('/conversation/:conversationId/orders', async (req: Request, res: Res
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
@@ -809,7 +809,7 @@ router.post('/conversation/:conversationId/link', async (req: Request, res: Resp
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
@@ -999,7 +999,7 @@ router.delete('/conversation/:conversationId/orders/:orderId', async (req: Reque
     // Verify ownership (including shared account access)
     const conversation = await queryOne(`
       SELECT c.id FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
@@ -1033,7 +1033,7 @@ router.post('/conversation/:conversationId/orders/:orderId/sync', async (req: Re
     // Verify ownership (including shared account access)
     const conversation = await queryOne(`
       SELECT c.id, c.contact_id FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);

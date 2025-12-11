@@ -35,7 +35,11 @@ import {
   ContactProfile,
   SendMessageResult,
 } from '../types';
-import { execute } from '../../../config/database';
+import { execute, queryOne } from '../../../config/database';
+
+// Token refresh constants
+const TOKEN_REFRESH_BUFFER_MS = 7 * 24 * 60 * 60 * 1000; // Refresh 7 days before expiry
+const TOKEN_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // Check every 6 hours
 
 // Meta Graph API configuration
 const GRAPH_API_VERSION = 'v18.0';
@@ -58,7 +62,9 @@ interface MetaCredentials {
   pageId: string;
   pageAccessToken: string;
   appSecret: string;
+  appId?: string;              // Facebook App ID for token refresh
   instagramAccountId?: string;  // For Instagram, the IG business account ID
+  tokenExpiresAt?: string;     // ISO date string of token expiry
 }
 
 interface MetaPageInstance {
@@ -67,9 +73,11 @@ interface MetaPageInstance {
   pageId: string;
   pageAccessToken: string;
   appSecret: string;
+  appId?: string;
   instagramAccountId?: string;
   pageName?: string;
   startedAt: Date;
+  tokenExpiresAt?: Date;
 }
 
 interface MetaRateLimitState {
@@ -128,12 +136,136 @@ export class MetaAdapter extends BaseChannelAdapter {
   private rateLimitState: Map<string, MetaRateLimitState> = new Map();
   private appSecrets: Map<string, string> = new Map();  // accountId -> appSecret
   private defaultChannelType: 'instagram' | 'messenger';
+  private tokenCheckInterval: NodeJS.Timeout | null = null;
 
   constructor(channelType: 'instagram' | 'messenger' = 'instagram') {
     super();
     this.channelType = channelType;
     this.defaultChannelType = channelType;
     console.log(`[Meta] ${channelType} adapter initialized`);
+
+    // Start periodic token refresh check
+    this.startTokenRefreshCheck();
+  }
+
+  /**
+   * Start periodic check for token refresh
+   */
+  private startTokenRefreshCheck(): void {
+    if (this.tokenCheckInterval) return;
+
+    this.tokenCheckInterval = setInterval(() => {
+      this.checkAndRefreshTokens();
+    }, TOKEN_CHECK_INTERVAL_MS);
+
+    console.log(`[Meta] Token refresh check started (every ${TOKEN_CHECK_INTERVAL_MS / 3600000}h)`);
+  }
+
+  /**
+   * Check all connected accounts and refresh tokens as needed
+   */
+  private async checkAndRefreshTokens(): Promise<void> {
+    const now = Date.now();
+
+    for (const [accountId, page] of this.pages) {
+      if (!page.tokenExpiresAt) continue;
+
+      const expiresAt = page.tokenExpiresAt.getTime();
+      const shouldRefresh = expiresAt - now < TOKEN_REFRESH_BUFFER_MS;
+
+      if (shouldRefresh) {
+        console.log(`[Meta] Token for ${accountId} expires soon, attempting refresh...`);
+        try {
+          await this.refreshToken(accountId);
+        } catch (error) {
+          console.error(`[Meta] Failed to refresh token for ${accountId}:`, error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Refresh access token for an account
+   * Uses the Graph API to exchange for a new long-lived token
+   */
+  async refreshToken(accountId: string): Promise<boolean> {
+    const page = this.pages.get(accountId);
+    if (!page) {
+      console.error(`[Meta] Cannot refresh token: account ${accountId} not found`);
+      return false;
+    }
+
+    if (!page.appId || !page.appSecret) {
+      console.warn(`[Meta] Cannot refresh token: missing appId or appSecret for ${accountId}`);
+      return false;
+    }
+
+    try {
+      // Exchange current token for a new long-lived token
+      // https://developers.facebook.com/docs/facebook-login/guides/access-tokens/get-long-lived
+      const url = new URL(`${GRAPH_API_BASE}/oauth/access_token`);
+      url.searchParams.set('grant_type', 'fb_exchange_token');
+      url.searchParams.set('client_id', page.appId);
+      url.searchParams.set('client_secret', page.appSecret);
+      url.searchParams.set('fb_exchange_token', page.pageAccessToken);
+
+      const response = await fetch(url.toString());
+      const data = await response.json() as {
+        access_token?: string;
+        expires_in?: number;
+        error?: { message: string };
+      };
+
+      if (!response.ok || !data.access_token) {
+        throw new Error(data.error?.message || 'Token refresh failed');
+      }
+
+      // Update token in memory
+      page.pageAccessToken = data.access_token;
+      page.tokenExpiresAt = data.expires_in
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : undefined;
+
+      // Persist to database
+      await this.persistTokenToDatabase(accountId, data.access_token, page.tokenExpiresAt);
+
+      console.log(`[Meta] Token refreshed for ${accountId}, expires: ${page.tokenExpiresAt?.toISOString() || 'unknown'}`);
+      return true;
+    } catch (error: any) {
+      console.error(`[Meta] Token refresh error for ${accountId}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Persist refreshed token to database
+   */
+  private async persistTokenToDatabase(
+    accountId: string,
+    accessToken: string,
+    expiresAt?: Date
+  ): Promise<void> {
+    try {
+      await execute(
+        `UPDATE accounts
+         SET credentials = jsonb_set(
+           jsonb_set(
+             credentials::jsonb,
+             '{pageAccessToken}', $1::jsonb
+           ),
+           '{tokenExpiresAt}', $2::jsonb
+         ),
+         updated_at = NOW()
+         WHERE id = $3`,
+        [
+          JSON.stringify(accessToken),
+          expiresAt ? JSON.stringify(expiresAt.toISOString()) : 'null',
+          accountId
+        ]
+      );
+    } catch (error) {
+      console.error(`[Meta] Failed to persist token to database:`, error);
+    }
   }
 
   /**
@@ -173,12 +305,26 @@ export class MetaAdapter extends BaseChannelAdapter {
         pageId: credentials.pageId,
         pageAccessToken: credentials.pageAccessToken,
         appSecret: credentials.appSecret,
+        appId: credentials.appId,
         instagramAccountId: credentials.instagramAccountId,
         pageName: pageInfo.name,
         startedAt: new Date(),
+        tokenExpiresAt: credentials.tokenExpiresAt
+          ? new Date(credentials.tokenExpiresAt)
+          : undefined,
       };
 
       this.pages.set(accountId, page);
+
+      // Log token expiry status
+      if (page.tokenExpiresAt) {
+        const daysUntilExpiry = Math.floor((page.tokenExpiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+        console.log(`[Meta] Token expires in ${daysUntilExpiry} days`);
+        if (daysUntilExpiry < 7) {
+          // Try to refresh token immediately if expiring soon
+          this.refreshToken(accountId).catch(() => {});
+        }
+      }
 
       // Initialize rate limit state
       this.rateLimitState.set(accountId, {
@@ -256,12 +402,13 @@ export class MetaAdapter extends BaseChannelAdapter {
         endpoint = `${page.pageId}/messages`;
       }
 
-      // Send via Graph API
+      // Send via Graph API (with token refresh support)
       const response = await this.graphApiRequest(
         page.pageAccessToken,
         'POST',
         endpoint,
-        messagePayload
+        messagePayload,
+        accountId  // Pass accountId for token refresh on 401
       );
 
       if (response.message_id) {
@@ -291,7 +438,7 @@ export class MetaAdapter extends BaseChannelAdapter {
     if (!page) return null;
 
     try {
-      // Fetch user profile from Graph API
+      // Fetch user profile from Graph API (with token refresh support)
       const fields = page.channelType === 'instagram'
         ? 'id,username,name,profile_pic'
         : 'id,first_name,last_name,profile_pic';
@@ -300,7 +447,8 @@ export class MetaAdapter extends BaseChannelAdapter {
         page.pageAccessToken,
         'GET',
         contactId,
-        { fields }
+        { fields },
+        accountId  // Pass accountId for token refresh on 401
       );
 
       return {
@@ -334,6 +482,13 @@ export class MetaAdapter extends BaseChannelAdapter {
    */
   async shutdown(): Promise<void> {
     console.log('[Meta] Shutting down all page connections...');
+
+    // Stop token refresh check
+    if (this.tokenCheckInterval) {
+      clearInterval(this.tokenCheckInterval);
+      this.tokenCheckInterval = null;
+    }
+
     for (const accountId of this.pages.keys()) {
       await this.disconnect(accountId);
     }
@@ -417,13 +572,15 @@ export class MetaAdapter extends BaseChannelAdapter {
   }
 
   /**
-   * Make a Graph API request
+   * Make a Graph API request with automatic token refresh on 401
    */
   private async graphApiRequest(
     accessToken: string,
     method: 'GET' | 'POST' | 'DELETE',
     endpoint: string,
-    params?: Record<string, any>
+    params?: Record<string, any>,
+    accountId?: string,
+    retryCount: number = 0
   ): Promise<any> {
     const url = new URL(`${GRAPH_API_BASE}/${endpoint}`);
 
@@ -449,6 +606,37 @@ export class MetaAdapter extends BaseChannelAdapter {
     const data = await response.json() as Record<string, any>;
 
     if (!response.ok) {
+      const errorCode = data.error?.code;
+      const errorSubcode = data.error?.error_subcode;
+
+      // Check for token expiration errors
+      // Error codes: 190 = invalid/expired token, subcode 463 = expired
+      const isTokenError = errorCode === 190 ||
+        (response.status === 401) ||
+        (errorSubcode === 463);
+
+      // Attempt token refresh on token errors (only once)
+      if (isTokenError && accountId && retryCount === 0) {
+        console.log(`[Meta] Token error detected, attempting refresh for ${accountId}...`);
+
+        const refreshed = await this.refreshToken(accountId);
+        if (refreshed) {
+          // Get the new token
+          const page = this.pages.get(accountId);
+          if (page) {
+            console.log(`[Meta] Retrying request with new token...`);
+            return this.graphApiRequest(
+              page.pageAccessToken,
+              method,
+              endpoint,
+              params,
+              accountId,
+              retryCount + 1
+            );
+          }
+        }
+      }
+
       const errorMsg = data.error?.message || `API request failed (${response.status})`;
       throw new Error(errorMsg);
     }

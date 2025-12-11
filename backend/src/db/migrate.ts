@@ -1187,6 +1187,98 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_messenger_conv_unique
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_messenger_user_unique
   ON contacts(channel_account_id, messenger_user_id)
   WHERE channel_account_id IS NOT NULL AND messenger_user_id IS NOT NULL;
+
+-- ============================================================
+-- MESSAGE RETRY QUEUE
+-- ============================================================
+-- Adds retry tracking columns for failed messages with exponential backoff
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMP;
+
+-- Index for finding messages pending retry
+CREATE INDEX IF NOT EXISTS idx_messages_retry_pending
+  ON messages(next_retry_at)
+  WHERE status = 'failed' AND next_retry_at IS NOT NULL;
+
+-- ============================================================
+-- UNIFIED ACCOUNTS VIEW
+-- ============================================================
+-- Creates a unified view of all accounts (WhatsApp + other channels)
+-- This allows code to use 'accounts' table name uniformly
+
+-- Add account_id column to conversations (nullable, for unified access)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id from whatsapp_account_id or channel_account_id
+UPDATE conversations
+SET account_id = COALESCE(channel_account_id, whatsapp_account_id)
+WHERE account_id IS NULL;
+
+-- Create index on account_id
+CREATE INDEX IF NOT EXISTS idx_conversations_account_id ON conversations(account_id);
+
+-- Add account_id column to contacts
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate account_id for contacts
+UPDATE contacts
+SET account_id = COALESCE(channel_account_id, whatsapp_account_id)
+WHERE account_id IS NULL;
+
+-- Create index on contacts account_id
+CREATE INDEX IF NOT EXISTS idx_contacts_account_id ON contacts(account_id);
+
+-- Create unified accounts view that combines whatsapp_accounts and channel_accounts
+-- Drop existing view first to handle schema changes
+DROP VIEW IF EXISTS accounts;
+
+CREATE VIEW accounts AS
+SELECT
+  id,
+  user_id,
+  'whatsapp' as channel_type,
+  phone_number as channel_identifier,
+  name as account_name,
+  session_data as credentials,
+  status,
+  created_at,
+  updated_at
+FROM whatsapp_accounts
+UNION ALL
+SELECT
+  id,
+  user_id,
+  channel_type,
+  channel_identifier,
+  account_name,
+  credentials,
+  status,
+  created_at,
+  updated_at
+FROM channel_accounts;
+
+-- Create account_access unified view
+DROP VIEW IF EXISTS account_access_unified;
+
+CREATE VIEW account_access_unified AS
+SELECT
+  id,
+  whatsapp_account_id as account_id,
+  agent_id,
+  permission,
+  granted_by,
+  granted_at
+FROM account_access
+UNION ALL
+SELECT
+  id,
+  channel_account_id as account_id,
+  user_id as agent_id,
+  permission_level as permission,
+  NULL as granted_by,
+  created_at as granted_at
+FROM channel_account_access;
 `;
 
 async function runMigrations() {

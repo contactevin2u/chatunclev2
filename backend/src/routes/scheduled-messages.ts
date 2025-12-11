@@ -19,7 +19,7 @@ router.get('/', async (req: Request, res: Response) => {
       const conversation = await queryOne(`
         SELECT c.id
         FROM conversations c
-        JOIN accounts a ON c.whatsapp_account_id = a.id
+        JOIN accounts a ON c.account_id = a.id
         LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
         WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
       `, [conversationId, userId]);
@@ -45,7 +45,7 @@ router.get('/', async (req: Request, res: Response) => {
         FROM scheduled_messages sm
         JOIN conversations c ON sm.conversation_id = c.id
         LEFT JOIN contacts ct ON c.contact_id = ct.id
-        JOIN accounts a ON c.whatsapp_account_id = a.id
+        JOIN accounts a ON c.account_id = a.id
         LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
         WHERE a.user_id = $1 OR aa.agent_id IS NOT NULL
         ORDER BY sm.scheduled_at DESC
@@ -90,7 +90,7 @@ router.post('/', async (req: Request, res: Response) => {
     const conversation = await queryOne(`
       SELECT c.id
       FROM conversations c
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [conversationId, userId]);
@@ -125,7 +125,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       SELECT sm.id, sm.status
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE sm.id = $1 AND (sm.agent_id = $2 OR a.user_id = $2)
     `, [id, userId]);
 
@@ -187,7 +187,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       SELECT sm.id, sm.status
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE sm.id = $1 AND (sm.agent_id = $2 OR a.user_id = $2)
     `, [id, userId]);
 
@@ -223,7 +223,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
       SELECT sm.id, sm.status
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
-      JOIN accounts a ON c.whatsapp_account_id = a.id
+      JOIN accounts a ON c.account_id = a.id
       WHERE sm.id = $1 AND (sm.agent_id = $2 OR a.user_id = $2)
     `, [id, userId]);
 

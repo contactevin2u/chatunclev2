@@ -18,7 +18,7 @@ import { pool, execute, queryOne } from './database';
  */
 export async function batchInsertContacts(
   contacts: Array<{
-    whatsapp_account_id: string;
+    account_id: string;
     wa_id: string;
     phone_number: string | null;
     name: string | null;
@@ -35,7 +35,7 @@ export async function batchInsertContacts(
     const offset = i * 5;
     placeholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`);
     values.push(
-      contact.whatsapp_account_id,
+      contact.account_id,
       contact.wa_id,
       contact.phone_number,
       contact.name,
@@ -44,9 +44,9 @@ export async function batchInsertContacts(
   });
 
   const query = `
-    INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, name, jid_type)
+    INSERT INTO contacts (account_id, wa_id, phone_number, name, jid_type)
     VALUES ${placeholders.join(', ')}
-    ON CONFLICT (whatsapp_account_id, wa_id) DO UPDATE SET
+    ON CONFLICT (account_id, wa_id) DO UPDATE SET
       name = COALESCE(EXCLUDED.name, contacts.name),
       phone_number = COALESCE(EXCLUDED.phone_number, contacts.phone_number),
       jid_type = EXCLUDED.jid_type,
@@ -225,7 +225,7 @@ export async function getContactIdCached(
   }
 
   const contact = await queryOne<{ id: string }>(
-    'SELECT id FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2',
+    'SELECT id FROM contacts WHERE account_id = $1 AND wa_id = $2',
     [accountId, waId]
   );
 

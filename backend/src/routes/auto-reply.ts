@@ -18,14 +18,14 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      filter += ` AND (ar.whatsapp_account_id = $2 OR ar.whatsapp_account_id IS NULL)`;
+      filter += ` AND (ar.account_id = $2 OR ar.account_id IS NULL)`;
     }
 
     const rules = await query<AutoReplyRule>(`
       SELECT ar.*, t.name as template_name, a.name as account_name
       FROM auto_reply_rules ar
       LEFT JOIN templates t ON ar.response_template_id = t.id
-      LEFT JOIN accounts a ON ar.whatsapp_account_id = a.id
+      LEFT JOIN accounts a ON ar.account_id = a.id
       WHERE ${filter}
       ORDER BY ar.priority DESC, ar.created_at DESC
     `, params);
@@ -121,7 +121,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const rule = await queryOne<AutoReplyRule>(`
       INSERT INTO auto_reply_rules (
-        user_id, whatsapp_account_id, name, trigger_type, trigger_keywords, trigger_regex,
+        user_id, account_id, name, trigger_type, trigger_keywords, trigger_regex,
         response_type, response_content, response_template_id, use_ai, ai_prompt, priority
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)

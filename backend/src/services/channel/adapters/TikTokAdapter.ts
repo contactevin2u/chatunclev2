@@ -160,10 +160,10 @@ export class TikTokAdapter extends BaseChannelAdapter {
         shop.refreshToken = refreshResult.refreshToken;
         shop.tokenExpiresAt = refreshResult.expiresAt;
 
-        // Persist refreshed tokens
+        // Persist refreshed tokens to unified accounts table
         try {
           await execute(
-            `UPDATE channel_accounts
+            `UPDATE accounts
              SET credentials = jsonb_set(
                jsonb_set(
                  jsonb_set(credentials::jsonb, '{accessToken}', $1::jsonb),
@@ -172,7 +172,7 @@ export class TikTokAdapter extends BaseChannelAdapter {
                '{tokenExpiresAt}', $3::jsonb
              ),
              updated_at = NOW()
-             WHERE id = $4`,
+             WHERE id = $4 AND channel_type = 'tiktok'`,
             [
               JSON.stringify(refreshResult.accessToken),
               JSON.stringify(refreshResult.refreshToken),
@@ -774,10 +774,10 @@ export class TikTokAdapter extends BaseChannelAdapter {
       shop.refreshToken = result.refreshToken;
       shop.tokenExpiresAt = result.expiresAt;
 
-      // Persist new tokens to database
+      // Persist new tokens to unified accounts table
       try {
         await execute(
-          `UPDATE channel_accounts
+          `UPDATE accounts
            SET credentials = jsonb_set(
              jsonb_set(
                jsonb_set(credentials::jsonb, '{accessToken}', $1::jsonb),
@@ -786,7 +786,7 @@ export class TikTokAdapter extends BaseChannelAdapter {
              '{tokenExpiresAt}', $3::jsonb
            ),
            updated_at = NOW()
-           WHERE id = $4`,
+           WHERE id = $4 AND channel_type = 'tiktok'`,
           [
             JSON.stringify(result.accessToken),
             JSON.stringify(result.refreshToken),

@@ -1354,24 +1354,32 @@ class SessionManager {
         throw new Error(`Message blocked: ${preCheck.reason}`);
       }
 
-      // 2. Typing indicator - RUN IN PARALLEL (don't block message send)
-      // This allows instant multi-agent sync while still showing typing to contacts
+      // 2. Typing indicator - Wait realistic time before sending
+      // WhatsApp can detect if message appears too quickly after typing starts
       const messageLength = payload.content?.length || 50;
       const typingDuration = getTypingDuration(messageLength);
 
-      // Fire typing indicator in background (non-blocking)
+      // Start typing indicator
+      try {
+        await sock.sendPresenceUpdate('composing', jid);
+      } catch (e) {
+        // Typing indicator is optional, don't fail the message
+      }
+
+      // Wait for a realistic portion of typing time (300-600ms minimum)
+      // This balances responsiveness with natural behavior
+      const minWait = Math.min(typingDuration, Math.max(300, typingDuration * 0.3));
+      await sleep(minWait);
+
+      // Clear typing indicator after message is sent (in background)
       void (async () => {
         try {
-          await sock.sendPresenceUpdate('composing', jid);
-          await sleep(typingDuration);
+          await sleep(Math.max(0, typingDuration - minWait));
           await sock.sendPresenceUpdate('paused', jid);
         } catch (e) {
-          // Typing indicator is optional, don't fail the message
+          // Typing indicator is optional
         }
       })();
-
-      // Small delay to let typing start before message (50ms max)
-      await sleep(50);
     }
 
     let result;
@@ -1543,23 +1551,31 @@ class SessionManager {
         throw new Error(`Message blocked: ${preCheck.reason}`);
       }
 
-      // Typing indicator - RUN IN PARALLEL for instant multi-agent sync
+      // Typing indicator - Wait realistic time before sending
+      // Groups have shorter typing times (capped at 1.5s for responsiveness)
       const messageLength = payload.content?.length || 50;
       const typingDuration = Math.min(getTypingDuration(messageLength), 1500);
 
-      // Fire typing indicator in background (non-blocking)
+      // Start typing indicator
+      try {
+        await sock.sendPresenceUpdate('composing', groupJid);
+      } catch (e) {
+        // Typing indicator is optional, don't fail the message
+      }
+
+      // Wait for a realistic portion of typing time (200-400ms for groups)
+      const minWait = Math.min(typingDuration, Math.max(200, typingDuration * 0.3));
+      await sleep(minWait);
+
+      // Clear typing indicator after message is sent (in background)
       void (async () => {
         try {
-          await sock.sendPresenceUpdate('composing', groupJid);
-          await sleep(typingDuration);
+          await sleep(Math.max(0, typingDuration - minWait));
           await sock.sendPresenceUpdate('paused', groupJid);
         } catch (e) {
-          // Typing indicator is optional, don't fail the message
+          // Typing indicator is optional
         }
       })();
-
-      // Small delay to let typing start before message (50ms max)
-      await sleep(50);
     }
 
     let result;

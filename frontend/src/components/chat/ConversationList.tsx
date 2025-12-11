@@ -5,6 +5,7 @@ import { Conversation, GroupAccount } from '@/types';
 import { formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { Users, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChannelBadge, ChannelIcon, type ChannelType } from '@/components/channel/ChannelIcon';
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -115,6 +116,12 @@ export default function ConversationList({
                   <Users className="w-5 h-5 md:w-6 md:h-6" />
                 ) : (
                   getAvatarInitial(conversation)
+                )}
+                {/* Channel badge - show which platform this conversation is on */}
+                {conversation.channel_type && conversation.channel_type !== 'whatsapp' && !isUnifiedGroup && (
+                  <div className="absolute -bottom-0.5 -right-0.5">
+                    <ChannelBadge channel={conversation.channel_type as ChannelType} size="sm" />
+                  </div>
                 )}
                 {/* Account count badge for unified groups */}
                 {isUnifiedGroup && (

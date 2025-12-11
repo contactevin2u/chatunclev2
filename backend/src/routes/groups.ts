@@ -15,7 +15,7 @@ router.get('/', async (req: Request, res: Response) => {
     let sql = `
       SELECT
         g.id,
-        g.whatsapp_account_id,
+        g.account_id,
         g.group_jid,
         g.name,
         g.description,
@@ -30,7 +30,7 @@ router.get('/', async (req: Request, res: Response) => {
         c.unread_count,
         c.last_message_at
       FROM groups g
-      JOIN accounts a ON g.whatsapp_account_id = a.id
+      JOIN accounts a ON g.account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
       WHERE a.user_id = $1
     `;
@@ -39,7 +39,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (accountId) {
       params.push(accountId);
-      sql += ` AND g.whatsapp_account_id = $${params.length}`;
+      sql += ` AND g.account_id = $${params.length}`;
     }
 
     sql += ' ORDER BY c.last_message_at DESC NULLS LAST, g.name ASC';
@@ -64,7 +64,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         c.unread_count,
         c.last_message_at
       FROM groups g
-      JOIN accounts a ON g.whatsapp_account_id = a.id
+      JOIN accounts a ON g.account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
       WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
@@ -103,7 +103,7 @@ router.get('/jid/:jid', async (req: Request, res: Response) => {
         a.name as account_name,
         c.id as conversation_id
       FROM groups g
-      JOIN accounts a ON g.whatsapp_account_id = a.id
+      JOIN accounts a ON g.account_id = a.id
       LEFT JOIN conversations c ON c.group_id = g.id
       WHERE g.group_jid = $1 AND a.user_id = $2
     `, [req.params.jid, req.user!.userId]);
@@ -125,9 +125,9 @@ router.get('/:id/profile-pic', async (req: Request, res: Response) => {
   try {
     // Verify group ownership
     const group = await queryOne(`
-      SELECT g.id, g.whatsapp_account_id, g.profile_pic_url
+      SELECT g.id, g.account_id, g.profile_pic_url
       FROM groups g
-      JOIN accounts a ON g.whatsapp_account_id = a.id
+      JOIN accounts a ON g.account_id = a.id
       WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
 
@@ -137,7 +137,7 @@ router.get('/:id/profile-pic', async (req: Request, res: Response) => {
     }
 
     // Get profile pic (will fetch from WhatsApp and cache if needed)
-    const profilePicUrl = await getGroupProfilePic(group.whatsapp_account_id, group.id);
+    const profilePicUrl = await getGroupProfilePic(group.account_id, group.id);
 
     res.json({ profile_pic_url: profilePicUrl });
   } catch (error) {
@@ -153,7 +153,7 @@ router.get('/:id/participants', async (req: Request, res: Response) => {
     const group = await queryOne(`
       SELECT g.id
       FROM groups g
-      JOIN accounts a ON g.whatsapp_account_id = a.id
+      JOIN accounts a ON g.account_id = a.id
       WHERE g.id = $1 AND a.user_id = $2
     `, [req.params.id, req.user!.userId]);
 

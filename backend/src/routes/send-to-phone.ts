@@ -58,12 +58,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     // Check if contact already exists
     let contact = await queryOne(`
-      SELECT id, wa_id FROM contacts WHERE whatsapp_account_id = $1 AND wa_id = $2
+      SELECT id, wa_id FROM contacts WHERE account_id = $1 AND wa_id = $2
     `, [accountId, waId]);
 
     if (!contact) {
       contact = await queryOne(`
-        INSERT INTO contacts (whatsapp_account_id, wa_id, phone_number, jid_type)
+        INSERT INTO contacts (account_id, wa_id, phone_number, jid_type)
         VALUES ($1, $2, $3, 'pn') RETURNING id, wa_id
       `, [accountId, waId, phoneNumber]);
       console.log(`[SendToPhone] Created new contact: ${contact.id} for phone ${phoneNumber}`);
@@ -71,12 +71,12 @@ router.post('/', async (req: Request, res: Response) => {
 
     // Check if conversation already exists
     let conversation = await queryOne(`
-      SELECT id FROM conversations WHERE whatsapp_account_id = $1 AND contact_id = $2
+      SELECT id FROM conversations WHERE account_id = $1 AND contact_id = $2
     `, [accountId, contact.id]);
 
     if (!conversation) {
       conversation = await queryOne(`
-        INSERT INTO conversations (whatsapp_account_id, contact_id, is_group)
+        INSERT INTO conversations (account_id, contact_id, is_group)
         VALUES ($1, $2, false) RETURNING id
       `, [accountId, contact.id]);
       console.log(`[SendToPhone] Created new conversation: ${conversation.id}`);

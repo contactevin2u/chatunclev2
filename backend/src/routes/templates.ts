@@ -7,7 +7,7 @@ import { getAvailableVariables } from '../utils/templateVariables';
 interface Template {
   id: string;
   user_id?: string;
-  whatsapp_account_id?: string;
+  account_id?: string;
   name: string;
   content: string;
   shortcut?: string;
@@ -20,7 +20,7 @@ interface Template {
 interface TemplateSequence {
   id: string;
   user_id?: string;
-  whatsapp_account_id?: string;
+  account_id?: string;
   name: string;
   description?: string;
   shortcut?: string;
@@ -82,7 +82,7 @@ router.get('/', async (req: Request, res: Response) => {
 
       // Get templates for this account (shared)
       const templates = await query<Template>(
-        'SELECT * FROM templates WHERE whatsapp_account_id = $1 ORDER BY name ASC',
+        'SELECT * FROM templates WHERE account_id = $1 ORDER BY name ASC',
         [accountId]
       );
       res.json({ templates });
@@ -90,7 +90,7 @@ router.get('/', async (req: Request, res: Response) => {
       // Legacy: get all templates user has access to (own + shared accounts)
       const templates = await query<Template>(
         `SELECT DISTINCT t.* FROM templates t
-         LEFT JOIN accounts a ON t.whatsapp_account_id = a.id
+         LEFT JOIN accounts a ON t.account_id = a.id
          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
          WHERE t.user_id = $1
             OR a.user_id = $1
@@ -141,7 +141,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const template = await queryOne<Template>(
-      `INSERT INTO templates (whatsapp_account_id, user_id, name, content, shortcut, content_type, media_url, media_mime_type)
+      `INSERT INTO templates (account_id, user_id, name, content, shortcut, content_type, media_url, media_mime_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
       [
@@ -181,7 +181,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     // Check access - either owns the template OR has access to the account
     const hasAccess = existing.user_id === req.user!.userId ||
-      (existing.whatsapp_account_id && await userHasAccountAccess(req.user!.userId, existing.whatsapp_account_id));
+      (existing.account_id && await userHasAccountAccess(req.user!.userId, existing.account_id));
 
     if (!hasAccess) {
       res.status(403).json({ error: 'Access denied to this template' });
@@ -224,7 +224,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // Check access - either owns the template OR has access to the account
     const hasAccess = existing.user_id === req.user!.userId ||
-      (existing.whatsapp_account_id && await userHasAccountAccess(req.user!.userId, existing.whatsapp_account_id));
+      (existing.account_id && await userHasAccountAccess(req.user!.userId, existing.account_id));
 
     if (!hasAccess) {
       res.status(403).json({ error: 'Access denied to this template' });
@@ -258,14 +258,14 @@ router.get('/sequences', async (req: Request, res: Response) => {
       }
 
       sequences = await query<TemplateSequence>(
-        'SELECT * FROM template_sequences WHERE whatsapp_account_id = $1 ORDER BY name ASC',
+        'SELECT * FROM template_sequences WHERE account_id = $1 ORDER BY name ASC',
         [accountId]
       );
     } else {
       // Legacy: get all sequences user has access to
       sequences = await query<TemplateSequence>(
         `SELECT DISTINCT ts.* FROM template_sequences ts
-         LEFT JOIN accounts a ON ts.whatsapp_account_id = a.id
+         LEFT JOIN accounts a ON ts.account_id = a.id
          LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
          WHERE ts.user_id = $1
             OR a.user_id = $1
@@ -319,7 +319,7 @@ router.get('/sequences/:id', async (req: Request, res: Response) => {
 
     // Check access
     const hasAccess = sequence.user_id === req.user!.userId ||
-      (sequence.whatsapp_account_id && await userHasAccountAccess(req.user!.userId, sequence.whatsapp_account_id));
+      (sequence.account_id && await userHasAccountAccess(req.user!.userId, sequence.account_id));
 
     if (!hasAccess) {
       res.status(403).json({ error: 'Access denied to this sequence' });
@@ -368,7 +368,7 @@ router.post('/sequences', async (req: Request, res: Response) => {
     const result = await transaction(async (client) => {
       // Create sequence
       const sequence = await client.queryOne<TemplateSequence>(
-        `INSERT INTO template_sequences (whatsapp_account_id, user_id, name, description, shortcut)
+        `INSERT INTO template_sequences (account_id, user_id, name, description, shortcut)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
         [accountId, req.user!.userId, name, description || null, shortcut || null]
@@ -431,7 +431,7 @@ router.patch('/sequences/:id', async (req: Request, res: Response) => {
 
     // Check access
     const hasAccess = existing.user_id === req.user!.userId ||
-      (existing.whatsapp_account_id && await userHasAccountAccess(req.user!.userId, existing.whatsapp_account_id));
+      (existing.account_id && await userHasAccountAccess(req.user!.userId, existing.account_id));
 
     if (!hasAccess) {
       res.status(403).json({ error: 'Access denied to this sequence' });
@@ -523,7 +523,7 @@ router.delete('/sequences/:id', async (req: Request, res: Response) => {
 
     // Check access
     const hasAccess = existing.user_id === req.user!.userId ||
-      (existing.whatsapp_account_id && await userHasAccountAccess(req.user!.userId, existing.whatsapp_account_id));
+      (existing.account_id && await userHasAccountAccess(req.user!.userId, existing.account_id));
 
     if (!hasAccess) {
       res.status(403).json({ error: 'Access denied to this sequence' });
