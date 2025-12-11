@@ -1611,7 +1611,8 @@ class SessionManager {
           try {
             const lidMappings = await sock.signalRepository?.lidMapping?.getLIDsForPNs([jid]);
             if (lidMappings && lidMappings.length > 0 && lidMappings[0].lid) {
-              const lidJid = `${lidMappings[0].lid}@lid`;
+              // lidMappings[0].lid already contains @lid suffix (e.g., "59601412206606@lid")
+              const lidJid = lidMappings[0].lid.includes('@') ? lidMappings[0].lid : `${lidMappings[0].lid}@lid`;
               console.log(`[WA] EXPERIMENT: Sending to LID ${lidJid} instead of PN ${jid}`);
               targetJid = lidJid;
             }
