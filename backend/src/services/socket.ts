@@ -25,9 +25,10 @@ async function userHasAccountAccess(userId: string, accountId: string): Promise<
 
   try {
     // Check if user owns the account OR has been granted access
+    // Backward-compatible: uses whatsapp_accounts directly
     const access = await queryOne<{ id: string }>(
-      `SELECT a.id FROM accounts a
-       LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+      `SELECT a.id FROM whatsapp_accounts a
+       LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $1
        WHERE a.id = $2 AND (a.user_id = $1 OR aa.agent_id IS NOT NULL)`,
       [userId, accountId]
     );

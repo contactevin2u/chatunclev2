@@ -10,13 +10,13 @@ let processorInterval: NodeJS.Timeout | null = null;
 async function processScheduledMessages() {
   try {
     // Get all pending messages that are due (including jid_type for LID vs PN format)
-    // Uses unified account_id column (populated from whatsapp_account_id or channel_account_id)
+    // Backward-compatible: uses whatsapp_accounts directly with COALESCE for account_id
     const pendingMessages = await query(`
-      SELECT sm.*, c.account_id, ct.wa_id, ct.jid_type, a.user_id
+      SELECT sm.*, COALESCE(c.account_id, c.whatsapp_account_id) as account_id, ct.wa_id, ct.jid_type, a.user_id
       FROM scheduled_messages sm
       JOIN conversations c ON sm.conversation_id = c.id
       JOIN contacts ct ON c.contact_id = ct.id
-      JOIN accounts a ON c.account_id = a.id
+      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
       WHERE sm.status = 'pending' AND sm.scheduled_at <= NOW()
       ORDER BY sm.scheduled_at ASC
       LIMIT 10

@@ -46,8 +46,8 @@ router.get('/', async (req: Request, res: Response) => {
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
-      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $1
+      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
+      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $1
       LEFT JOIN LATERAL (
         SELECT json_build_object(
           'content', m.content,
@@ -221,10 +221,10 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // Get single conversation with recent messages (supports both 1:1 and groups)
-// Uses unified 'accounts' table for all channels
+// Backward-compatible: works with both old and new schemas
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    // Single unified query for all channel types
+    // Single unified query for all channel types (backward compatible)
     const conversation = await queryOne(`
       SELECT
         c.*,
@@ -246,8 +246,8 @@ router.get('/:id', async (req: Request, res: Response) => {
       FROM conversations c
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       LEFT JOIN groups g ON c.group_id = g.id
-      JOIN accounts a ON c.account_id = a.id
-      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
+      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 
@@ -296,10 +296,10 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // Mark conversation as read
 // Respects incognito mode - won't clear unread count or send read receipts when enabled
-// Uses unified 'accounts' table for all channels
+// Backward-compatible: works with both old and new schemas
 router.patch('/:id/read', async (req: Request, res: Response) => {
   try {
-    // Single unified query for all channel types
+    // Backward-compatible query (uses whatsapp_accounts directly)
     const conversation = await queryOne<{
       id: string;
       account_id: string;
@@ -310,14 +310,14 @@ router.patch('/:id/read', async (req: Request, res: Response) => {
       wa_id: string | null;
       jid_type: string | null;
     }>(`
-      SELECT c.id, c.account_id,
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id,
              COALESCE(c.channel_type, 'whatsapp') as channel_type,
              COALESCE(a.incognito_mode, FALSE) as incognito_mode,
              c.is_group,
              g.group_jid, ct.wa_id, ct.jid_type
       FROM conversations c
-      JOIN accounts a ON c.account_id = a.id
-      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
+      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
       LEFT JOIN groups g ON c.group_id = g.id
       LEFT JOIN contacts ct ON c.contact_id = ct.id
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
@@ -391,12 +391,12 @@ router.patch('/:id/read', async (req: Request, res: Response) => {
 // Works for both contact and group conversations
 router.get('/:id/profile-pic', async (req: Request, res: Response) => {
   try {
-    // Verify ownership or shared access using unified accounts table
+    // Verify ownership or shared access (backward compatible)
     const conversation = await queryOne<{ id: string; account_id: string }>(`
-      SELECT c.id, c.account_id
+      SELECT c.id, COALESCE(c.account_id, c.whatsapp_account_id) as account_id
       FROM conversations c
-      JOIN accounts a ON c.account_id = a.id
-      LEFT JOIN account_access aa ON a.id = aa.account_id AND aa.agent_id = $2
+      JOIN whatsapp_accounts a ON COALESCE(c.account_id, c.whatsapp_account_id) = a.id
+      LEFT JOIN account_access aa ON a.id = aa.whatsapp_account_id AND aa.agent_id = $2
       WHERE c.id = $1 AND (a.user_id = $2 OR aa.agent_id IS NOT NULL)
     `, [req.params.id, req.user!.userId]);
 

@@ -36,10 +36,10 @@ export async function usePostgresAuthState(accountId: string): Promise<{
 
   await ensureTable();
 
-  // Load credentials from database
+  // Load credentials from database (uses whatsapp_accounts directly for backward compatibility)
   const loadCreds = async (): Promise<any> => {
     const row = await queryOne(
-      'SELECT session_data FROM accounts WHERE id = $1',
+      'SELECT session_data FROM whatsapp_accounts WHERE id = $1',
       [accountId]
     );
 
@@ -53,11 +53,11 @@ export async function usePostgresAuthState(accountId: string): Promise<{
     return initAuthCreds();
   };
 
-  // Save credentials to database
+  // Save credentials to database (uses whatsapp_accounts directly)
   const saveCreds = async () => {
     const credsJson = JSON.stringify(creds, BufferJSON.replacer);
     await execute(
-      `UPDATE accounts
+      `UPDATE whatsapp_accounts
        SET session_data = $1::jsonb, updated_at = NOW()
        WHERE id = $2`,
       [credsJson, accountId]

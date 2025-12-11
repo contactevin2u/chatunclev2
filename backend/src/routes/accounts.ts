@@ -12,40 +12,82 @@ const router = Router();
 router.use(authenticate);
 
 // List user's accounts (owned + shared) - supports channel_type filter
+// Backward-compatible: works with both old (whatsapp_accounts) and new (accounts view) schemas
 router.get('/', async (req: Request, res: Response) => {
   try {
     const channelType = req.query.channel_type as string | undefined;
-    const channelFilter = channelType ? `AND channel_type = $2` : '';
-    const params = channelType ? [req.user!.userId, channelType] : [req.user!.userId];
+    const accounts: (Account & { is_owner: boolean; permission: string; owner_name?: string })[] = [];
 
-    // Get owned accounts
-    const ownedAccounts = await query<Account & { is_owner: boolean; permission: string }>(
-      `SELECT id, phone_number, name, status, channel_type, channel_identifier,
-              incognito_mode, show_channel_name, channel_display_name,
-              credentials, settings, created_at, updated_at,
-              TRUE as is_owner, 'owner' as permission
-       FROM accounts
-       WHERE user_id = $1 ${channelFilter}`,
-      params
-    );
+    // Get owned WhatsApp accounts
+    if (!channelType || channelType === 'whatsapp') {
+      const waAccounts = await query<Account & { is_owner: boolean; permission: string }>(
+        `SELECT id, phone_number, name, status, 'whatsapp' as channel_type, phone_number as channel_identifier,
+                COALESCE(incognito_mode, FALSE) as incognito_mode,
+                COALESCE(show_channel_name, TRUE) as show_channel_name,
+                channel_display_name, session_data as credentials, NULL as settings,
+                created_at, updated_at,
+                TRUE as is_owner, 'owner' as permission
+         FROM whatsapp_accounts
+         WHERE user_id = $1`,
+        [req.user!.userId]
+      );
+      accounts.push(...waAccounts);
+    }
 
-    // Get shared accounts (accounts this user has access to but doesn't own)
-    const sharedAccounts = await query<Account & { is_owner: boolean; permission: string; owner_name: string }>(
-      `SELECT a.id, a.phone_number, a.name, a.status, a.channel_type, a.channel_identifier,
-              a.incognito_mode, a.show_channel_name, a.channel_display_name,
-              a.credentials, a.settings, a.created_at, a.updated_at,
-              FALSE as is_owner, aa.permission, u.name as owner_name
-       FROM accounts a
-       JOIN account_access aa ON a.id = aa.account_id
-       JOIN users u ON a.user_id = u.id
-       WHERE aa.agent_id = $1 ${channelFilter}`,
-      params
-    );
+    // Get owned channel accounts (Telegram, Instagram, etc.)
+    if (!channelType || channelType !== 'whatsapp') {
+      const channelFilter = channelType ? `AND channel_type = $2` : '';
+      const params = channelType ? [req.user!.userId, channelType] : [req.user!.userId];
+      const channelAccounts = await query<Account & { is_owner: boolean; permission: string }>(
+        `SELECT id, NULL as phone_number, account_name as name, status, channel_type, channel_identifier,
+                FALSE as incognito_mode, FALSE as show_channel_name, NULL as channel_display_name,
+                credentials, settings, created_at, updated_at,
+                TRUE as is_owner, 'owner' as permission
+         FROM channel_accounts
+         WHERE user_id = $1 ${channelFilter}`,
+        params
+      );
+      accounts.push(...channelAccounts);
+    }
 
-    // Combine and sort by created_at
-    const accounts = [...ownedAccounts, ...sharedAccounts].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    // Get shared WhatsApp accounts
+    if (!channelType || channelType === 'whatsapp') {
+      const waShared = await query<Account & { is_owner: boolean; permission: string; owner_name: string }>(
+        `SELECT wa.id, wa.phone_number, wa.name, wa.status, 'whatsapp' as channel_type, wa.phone_number as channel_identifier,
+                COALESCE(wa.incognito_mode, FALSE) as incognito_mode,
+                COALESCE(wa.show_channel_name, TRUE) as show_channel_name,
+                wa.channel_display_name, wa.session_data as credentials, NULL as settings,
+                wa.created_at, wa.updated_at,
+                FALSE as is_owner, aa.permission, u.name as owner_name
+         FROM whatsapp_accounts wa
+         JOIN account_access aa ON wa.id = aa.whatsapp_account_id
+         JOIN users u ON wa.user_id = u.id
+         WHERE aa.agent_id = $1`,
+        [req.user!.userId]
+      );
+      accounts.push(...waShared);
+    }
+
+    // Get shared channel accounts
+    if (!channelType || channelType !== 'whatsapp') {
+      const channelFilter = channelType ? `AND ca.channel_type = $2` : '';
+      const params = channelType ? [req.user!.userId, channelType] : [req.user!.userId];
+      const channelShared = await query<Account & { is_owner: boolean; permission: string; owner_name: string }>(
+        `SELECT ca.id, NULL as phone_number, ca.account_name as name, ca.status, ca.channel_type, ca.channel_identifier,
+                FALSE as incognito_mode, FALSE as show_channel_name, NULL as channel_display_name,
+                ca.credentials, ca.settings, ca.created_at, ca.updated_at,
+                FALSE as is_owner, caa.permission_level as permission, u.name as owner_name
+         FROM channel_accounts ca
+         JOIN channel_account_access caa ON ca.id = caa.channel_account_id
+         JOIN users u ON ca.user_id = u.id
+         WHERE caa.user_id = $1 ${channelFilter}`,
+        params
+      );
+      accounts.push(...channelShared);
+    }
+
+    // Sort by created_at
+    accounts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     res.json({ accounts });
   } catch (error) {
@@ -59,11 +101,11 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { name } = req.body;
 
-    // Create account record (WhatsApp by default)
+    // Create account record in whatsapp_accounts table (not the view)
     const account = await queryOne<Account>(
-      `INSERT INTO accounts (user_id, name, status, channel_type)
-       VALUES ($1, $2, 'qr_pending', 'whatsapp')
-       RETURNING id, phone_number, name, status, channel_type, created_at`,
+      `INSERT INTO whatsapp_accounts (user_id, name, status)
+       VALUES ($1, $2, 'qr_pending')
+       RETURNING id, phone_number, name, status, 'whatsapp' as channel_type, created_at`,
       [req.user!.userId, name || 'WhatsApp Account']
     );
 
@@ -87,14 +129,28 @@ router.get('/:id', async (req: Request, res: Response) => {
       return;
     }
 
-    const account = await queryOne<Account>(
-      `SELECT id, phone_number, name, status, channel_type, channel_identifier,
-              incognito_mode, show_channel_name, channel_display_name,
-              credentials, settings, created_at, updated_at
-       FROM accounts
+    // Try WhatsApp accounts first, then channel_accounts
+    let account = await queryOne<Account>(
+      `SELECT id, phone_number, name, status, 'whatsapp' as channel_type, phone_number as channel_identifier,
+              COALESCE(incognito_mode, FALSE) as incognito_mode,
+              COALESCE(show_channel_name, TRUE) as show_channel_name,
+              channel_display_name, session_data as credentials, NULL as settings,
+              created_at, updated_at
+       FROM whatsapp_accounts
        WHERE id = $1`,
       [req.params.id]
     );
+
+    if (!account) {
+      account = await queryOne<Account>(
+        `SELECT id, NULL as phone_number, account_name as name, status, channel_type, channel_identifier,
+                FALSE as incognito_mode, FALSE as show_channel_name, NULL as channel_display_name,
+                credentials, settings, created_at, updated_at
+         FROM channel_accounts
+         WHERE id = $1`,
+        [req.params.id]
+      );
+    }
 
     res.json({
       account,
@@ -145,10 +201,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     const account = await queryOne<Account>(`
-      UPDATE accounts
+      UPDATE whatsapp_accounts
       SET ${updates.join(', ')}
       WHERE id = $1
-      RETURNING id, phone_number, name, status, channel_type, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
+      RETURNING id, phone_number, name, status, 'whatsapp' as channel_type, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
     `, params);
 
     res.json({ account });
@@ -168,17 +224,20 @@ router.patch('/bulk/incognito', async (req: Request, res: Response) => {
       return;
     }
 
-    // Update all WhatsApp accounts owned by this user
+    // Update all WhatsApp accounts owned by this user (use actual table, not view)
     await execute(
-      `UPDATE accounts SET incognito_mode = $1, updated_at = NOW()
-       WHERE user_id = $2 AND channel_type = 'whatsapp'`,
+      `UPDATE whatsapp_accounts SET incognito_mode = $1, updated_at = NOW()
+       WHERE user_id = $2`,
       [incognitoMode, req.user!.userId]
     );
 
     // Get updated accounts
     const accounts = await query<Account>(
-      `SELECT id, phone_number, name, status, incognito_mode, show_channel_name, channel_display_name, created_at, updated_at
-       FROM accounts WHERE user_id = $1 AND channel_type = 'whatsapp'`,
+      `SELECT id, phone_number, name, status,
+              COALESCE(incognito_mode, FALSE) as incognito_mode,
+              COALESCE(show_channel_name, TRUE) as show_channel_name,
+              channel_display_name, created_at, updated_at
+       FROM whatsapp_accounts WHERE user_id = $1`,
       [req.user!.userId]
     );
 
@@ -199,10 +258,10 @@ router.patch('/bulk/incognito', async (req: Request, res: Response) => {
 // Get incognito status for user's accounts
 router.get('/bulk/incognito', async (req: Request, res: Response) => {
   try {
-    // Check if ANY WhatsApp account has incognito mode on
+    // Check if ANY WhatsApp account has incognito mode on (use actual table)
     const result = await queryOne<{ any_incognito: boolean }>(
-      `SELECT bool_or(incognito_mode) as any_incognito FROM accounts
-       WHERE user_id = $1 AND channel_type = 'whatsapp'`,
+      `SELECT bool_or(COALESCE(incognito_mode, FALSE)) as any_incognito FROM whatsapp_accounts
+       WHERE user_id = $1`,
       [req.user!.userId]
     );
 
@@ -229,11 +288,12 @@ router.delete('/:id', async (req: Request, res: Response) => {
       await sessionManager.destroySession(req.params.id);
     }
 
-    // Delete from database (cascades to contacts, conversations, messages)
-    await execute(
-      'DELETE FROM accounts WHERE id = $1',
-      [req.params.id]
-    );
+    // Delete from appropriate table based on channel type
+    if (access.channelType === 'whatsapp') {
+      await execute('DELETE FROM whatsapp_accounts WHERE id = $1', [req.params.id]);
+    } else {
+      await execute('DELETE FROM channel_accounts WHERE id = $1', [req.params.id]);
+    }
 
     res.json({ message: 'Account deleted' });
   } catch (error) {
@@ -363,12 +423,13 @@ router.get('/:id/access', async (req: Request, res: Response) => {
       return;
     }
 
+    // Use whatsapp_account_id for backward compatibility
     const accessList = await query(
       `SELECT aa.id, aa.agent_id, aa.permission, aa.granted_at,
               u.name as agent_name, u.email as agent_email
        FROM account_access aa
        JOIN users u ON aa.agent_id = u.id
-       WHERE aa.account_id = $1
+       WHERE aa.whatsapp_account_id = $1
        ORDER BY aa.granted_at DESC`,
       [req.params.id]
     );
@@ -421,11 +482,11 @@ router.post('/:id/access', async (req: Request, res: Response) => {
       return;
     }
 
-    // Grant or update access
+    // Grant or update access (use whatsapp_account_id for backward compatibility)
     const accessRecord = await queryOne(
-      `INSERT INTO account_access (account_id, agent_id, permission, granted_by)
+      `INSERT INTO account_access (whatsapp_account_id, agent_id, permission, granted_by)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (account_id, agent_id)
+       ON CONFLICT (whatsapp_account_id, agent_id)
        DO UPDATE SET permission = $3, granted_at = NOW()
        RETURNING *`,
       [req.params.id, agent.id, permission, req.user!.userId]
@@ -456,7 +517,7 @@ router.delete('/:id/access/:agentId', async (req: Request, res: Response) => {
     }
 
     const deletedCount = await execute(
-      'DELETE FROM account_access WHERE account_id = $1 AND agent_id = $2',
+      'DELETE FROM account_access WHERE whatsapp_account_id = $1 AND agent_id = $2',
       [req.params.id, req.params.agentId]
     );
 

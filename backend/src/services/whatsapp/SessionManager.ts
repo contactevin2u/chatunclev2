@@ -167,7 +167,7 @@ class SessionManager {
     healthMonitor.setReconnectCallback(async (accountId: string, reason: string) => {
       console.log(`[WA] Health monitor triggered reconnect for ${accountId}: ${reason}`);
       const account = await queryOne<{ user_id: string }>(
-        'SELECT user_id FROM accounts WHERE id = $1',
+        'SELECT user_id FROM whatsapp_accounts WHERE id = $1',
         [accountId]
       );
       if (account) {
@@ -233,9 +233,9 @@ class SessionManager {
   async createSession(accountId: string, userId: string): Promise<void> {
     console.log(`[WA] Creating session for account ${accountId}, user ${userId}`);
 
-    // Fetch account settings for incognito mode
+    // Fetch account settings for incognito mode (backward compatible)
     const accountSettings = await queryOne<{ incognito_mode: boolean }>(
-      `SELECT incognito_mode FROM accounts WHERE id = $1`,
+      `SELECT COALESCE(incognito_mode, FALSE) as incognito_mode FROM whatsapp_accounts WHERE id = $1`,
       [accountId]
     );
     const incognitoMode = accountSettings?.incognito_mode || false;
@@ -2966,8 +2966,9 @@ class SessionManager {
 
       // Restore ALL accounts that have session data (not just 'connected' ones)
       // This handles cases where server restarted while accounts were temporarily disconnected
+      // Backward-compatible: uses whatsapp_accounts directly
       const accounts = await query<{ id: string; user_id: string; status: string }>(
-        "SELECT id, user_id, status FROM accounts WHERE session_data IS NOT NULL"
+        "SELECT id, user_id, status FROM whatsapp_accounts WHERE session_data IS NOT NULL"
       );
 
       console.log(`[WA] Found ${accounts.length} WhatsApp accounts with session data to restore...`);

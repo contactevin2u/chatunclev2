@@ -1239,9 +1239,14 @@ SELECT
   user_id,
   'whatsapp' as channel_type,
   phone_number as channel_identifier,
+  phone_number,
   name as account_name,
+  name,
   session_data as credentials,
   status,
+  incognito_mode,
+  show_channel_name,
+  channel_display_name,
   created_at,
   updated_at
 FROM whatsapp_accounts
@@ -1251,9 +1256,14 @@ SELECT
   user_id,
   channel_type,
   channel_identifier,
+  NULL as phone_number,
   account_name,
+  account_name as name,
   credentials,
   status,
+  FALSE as incognito_mode,
+  FALSE as show_channel_name,
+  NULL as channel_display_name,
   created_at,
   updated_at
 FROM channel_accounts;
@@ -1279,6 +1289,31 @@ SELECT
   NULL as granted_by,
   created_at as granted_at
 FROM channel_account_access;
+
+-- ============================================================
+-- UNIFIED ACCOUNT_ID IN ACCOUNT_ACCESS
+-- ============================================================
+-- Add account_id column for unified access (same as conversations/contacts)
+
+ALTER TABLE account_access ADD COLUMN IF NOT EXISTS account_id UUID;
+
+-- Populate from whatsapp_account_id
+UPDATE account_access
+SET account_id = whatsapp_account_id
+WHERE account_id IS NULL AND whatsapp_account_id IS NOT NULL;
+
+-- Create index
+CREATE INDEX IF NOT EXISTS idx_account_access_account_id ON account_access(account_id);
+
+-- Add unique constraint on account_id + agent_id (complementary to whatsapp_account_id unique)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_access_account_agent_unique
+  ON account_access(account_id, agent_id)
+  WHERE account_id IS NOT NULL;
+
+-- ============================================================
+-- INCOGNITO MODE FOR WHATSAPP ACCOUNTS
+-- ============================================================
+ALTER TABLE whatsapp_accounts ADD COLUMN IF NOT EXISTS incognito_mode BOOLEAN DEFAULT FALSE;
 `;
 
 async function runMigrations() {
