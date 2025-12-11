@@ -4,10 +4,6 @@ import { generateResponse, getAISettings } from './ai';
 import { getIO } from './socket';
 import { getRandomDelay, sleep, isInWarmupPeriod } from './antiBan';
 
-// Legacy function for backward compatibility
-async function generateAIResponse(conversationId: string, content: string, aiPrompt?: string) {
-  return { content: '' };
-}
 function isAIConfigured() { return !!process.env.OPENAI_API_KEY; }
 
 interface IncomingMessage {
@@ -69,9 +65,28 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
 
       // Determine response content
       if (rule.use_ai && isAIConfigured()) {
+        // === FIXED: Use unified generateResponse with custom prompt ===
+        // Now properly integrates with knowledge bank and uses rule's ai_prompt
         try {
-          const aiResponse = await generateAIResponse(conversationId, content, rule.ai_prompt);
-          responseContent = aiResponse.content;
+          console.log(`[AutoReply] Using AI with custom prompt for rule ${rule.name}`);
+          const aiResponse = await generateResponse(
+            accountId,
+            conversationId,
+            content,
+            {
+              customPrompt: rule.ai_prompt,      // Rule's custom AI prompt
+              skipSettingsCheck: true,           // Rules bypass account AI settings
+            }
+          );
+
+          if (aiResponse) {
+            responseContent = aiResponse;
+            console.log(`[AutoReply] AI generated response: ${aiResponse.substring(0, 50)}...`);
+          } else {
+            console.log(`[AutoReply] AI returned null (rate limited or other check failed)`);
+            // Fall back to static response if available
+            responseContent = rule.response_content || rule.template_content || '';
+          }
         } catch (error) {
           console.error(`[AutoReply] AI generation failed:`, error);
           // Fall back to static response if available
@@ -84,7 +99,7 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       }
 
       if (!responseContent) {
-        console.log(`[AutoReply] No response content for rule ${rule.id}`);
+        console.log(`[AutoReply] No response content for rule ${rule.id}, trying next rule`);
         continue;
       }
 
@@ -93,77 +108,20 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
         contact_message: content,
       });
 
-      try {
-        // === ANTI-BAN: Add delay before auto-reply to simulate human reading ===
-        // Research: 30-60s recommended, but we balance with UX (5-15s normal, 10-25s warmup)
-        // This makes the bot appear more human-like
-        const isWarmup = await isInWarmupPeriod(accountId);
-        const baseDelay = isWarmup ? 10000 : 5000; // 10s warmup, 5s normal (min)
-        const maxDelay = isWarmup ? 25000 : 15000; // 25s warmup, 15s normal (max)
-        const readingDelay = getRandomDelay(baseDelay, maxDelay);
-        console.log(`[AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup})`);
-        await sleep(readingDelay);
+      // Send the response
+      const sent = await sendAutoReply(
+        accountId,
+        conversationId,
+        contactWaId,
+        jidType,
+        responseContent,
+        userId,
+        rule.name,
+        rule.use_ai ? 'ai_rule' : 'static_rule'
+      );
 
-        // Send the auto-reply (anti-ban measures are built into sendMessage)
-        const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
-          type: 'text',
-          content: responseContent,
-        }, {
-          jidType: jidType || 'pn',  // Use stored JID type for correct format
-        });
-
-        // Get last contact message timestamp for response time calculation
-        const lastContactMessage = await queryOne(`
-          SELECT created_at FROM messages
-          WHERE conversation_id = $1 AND sender_type = 'contact'
-          ORDER BY created_at DESC
-          LIMIT 1
-        `, [conversationId]);
-
-        const responseTimeMs = lastContactMessage
-          ? Date.now() - new Date(lastContactMessage.created_at).getTime()
-          : null;
-
-        // Save to messages table with is_auto_reply flag
-        const savedMessage = await queryOne(`
-          INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, status, is_auto_reply, response_time_ms)
-          VALUES ($1, $2, 'agent', 'text', $3, 'sent', TRUE, $4)
-          RETURNING *
-        `, [conversationId, waMessageId, responseContent, responseTimeMs]);
-
-        // Update conversation
-        await execute(`
-          UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1
-        `, [conversationId]);
-
-        // Track first response time if not set
-        await execute(`
-          UPDATE conversations
-          SET first_response_at = COALESCE(first_response_at, NOW())
-          WHERE id = $1
-        `, [conversationId]);
-
-        // Notify frontend (emit to account room for multi-agent sync)
-        const io = getIO();
-        io.to(`account:${accountId}`).emit('message:new', {
-          accountId,
-          conversationId,
-          message: savedMessage,
-          isAutoReply: true,
-          ruleName: rule.name,
-        });
-
-        console.log(`[AutoReply] Auto-reply sent for rule ${rule.name}`);
-
-        // Log activity
-        await execute(`
-          INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
-          VALUES ($1, 'auto_reply_triggered', 'conversation', $2, $3)
-        `, [userId, conversationId, JSON.stringify({ rule_id: rule.id, rule_name: rule.name })]);
-
-        return true; // Stop processing after first match
-      } catch (error) {
-        console.error(`[AutoReply] Failed to send auto-reply:`, error);
+      if (sent) {
+        return true; // Stop processing after first successful match
       }
     }
 
@@ -176,69 +134,29 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
         WHERE conv.id = $1
       `, [conversationId]);
 
+      // Use unified generateResponse (checks ai_settings.enabled and auto_reply)
       const aiResponse = await generateResponse(
         accountId,
         conversationId,
         content,
-        contact?.name
+        {
+          contactName: contact?.name,
+          // Don't skip settings check - respect account AI enable/disable
+        }
       );
 
       if (aiResponse) {
-        // Add delay to seem human (5-15s normal, 10-25s warmup)
-        const isWarmup = await isInWarmupPeriod(accountId);
-        const baseDelay = isWarmup ? 10000 : 5000;
-        const maxDelay = isWarmup ? 25000 : 15000;
-        const readingDelay = getRandomDelay(baseDelay, maxDelay);
-        console.log(`[AI AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup})`);
-        await sleep(readingDelay);
-
-        // Send AI response
-        const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
-          type: 'text',
-          content: aiResponse,
-        }, {
-          jidType: jidType || 'pn',
-        });
-
-        // Calculate response time
-        const lastContactMessage = await queryOne(`
-          SELECT created_at FROM messages
-          WHERE conversation_id = $1 AND sender_type = 'contact'
-          ORDER BY created_at DESC LIMIT 1
-        `, [conversationId]);
-
-        const responseTimeMs = lastContactMessage
-          ? Date.now() - new Date(lastContactMessage.created_at).getTime()
-          : null;
-
-        // Save message
-        const savedMessage = await queryOne(`
-          INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, status, is_auto_reply, response_time_ms)
-          VALUES ($1, $2, 'agent', 'text', $3, 'sent', TRUE, $4)
-          RETURNING *
-        `, [conversationId, waMessageId, aiResponse, responseTimeMs]);
-
-        // Update conversation
-        await execute(`
-          UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1
-        `, [conversationId]);
-
-        await execute(`
-          UPDATE conversations SET first_response_at = COALESCE(first_response_at, NOW()) WHERE id = $1
-        `, [conversationId]);
-
-        // Notify frontend (emit to account room for multi-agent sync)
-        const io = getIO();
-        io.to(`account:${accountId}`).emit('message:new', {
+        const sent = await sendAutoReply(
           accountId,
           conversationId,
-          message: savedMessage,
-          isAutoReply: true,
-          ruleName: 'AI Assistant',
-        });
-
-        console.log(`[AI AutoReply] Sent AI response: ${aiResponse.substring(0, 50)}...`);
-        return true;
+          contactWaId,
+          jidType,
+          aiResponse,
+          userId,
+          'AI Assistant',
+          'ai_fallback'
+        );
+        return sent;
       }
     } catch (error) {
       console.error('[AI AutoReply] Error:', error);
@@ -247,6 +165,94 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
     return false;
   } catch (error) {
     console.error('[AutoReply] Error processing auto-reply:', error);
+    return false;
+  }
+}
+
+/**
+ * Send an auto-reply message with proper anti-ban delays and logging
+ */
+async function sendAutoReply(
+  accountId: string,
+  conversationId: string,
+  contactWaId: string,
+  jidType: 'lid' | 'pn' | undefined,
+  responseContent: string,
+  userId: string,
+  ruleName: string,
+  responseType: 'static_rule' | 'ai_rule' | 'ai_fallback'
+): Promise<boolean> {
+  try {
+    // === ANTI-BAN: Add delay before auto-reply to simulate human reading ===
+    // Research: 30-60s recommended, but we balance with UX (5-15s normal, 10-25s warmup)
+    const isWarmup = await isInWarmupPeriod(accountId);
+    const baseDelay = isWarmup ? 10000 : 5000; // 10s warmup, 5s normal (min)
+    const maxDelay = isWarmup ? 25000 : 15000; // 25s warmup, 15s normal (max)
+    const readingDelay = getRandomDelay(baseDelay, maxDelay);
+    console.log(`[AutoReply] Waiting ${readingDelay}ms before responding (warmup: ${isWarmup}, type: ${responseType})`);
+    await sleep(readingDelay);
+
+    // Send the auto-reply (anti-ban measures are built into sendMessage)
+    const waMessageId = await sessionManager.sendMessage(accountId, contactWaId, {
+      type: 'text',
+      content: responseContent,
+    }, {
+      jidType: jidType || 'pn',  // Use stored JID type for correct format
+    });
+
+    // Get last contact message timestamp for response time calculation
+    const lastContactMessage = await queryOne(`
+      SELECT created_at FROM messages
+      WHERE conversation_id = $1 AND sender_type = 'contact'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [conversationId]);
+
+    const responseTimeMs = lastContactMessage
+      ? Date.now() - new Date(lastContactMessage.created_at).getTime()
+      : null;
+
+    // Save to messages table with is_auto_reply flag
+    const savedMessage = await queryOne(`
+      INSERT INTO messages (conversation_id, wa_message_id, sender_type, content_type, content, status, is_auto_reply, response_time_ms)
+      VALUES ($1, $2, 'agent', 'text', $3, 'sent', TRUE, $4)
+      RETURNING *
+    `, [conversationId, waMessageId, responseContent, responseTimeMs]);
+
+    // Update conversation
+    await execute(`
+      UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1
+    `, [conversationId]);
+
+    // Track first response time if not set
+    await execute(`
+      UPDATE conversations
+      SET first_response_at = COALESCE(first_response_at, NOW())
+      WHERE id = $1
+    `, [conversationId]);
+
+    // Notify frontend (emit to account room for multi-agent sync)
+    const io = getIO();
+    io.to(`account:${accountId}`).emit('message:new', {
+      accountId,
+      conversationId,
+      message: savedMessage,
+      isAutoReply: true,
+      ruleName,
+      responseType,
+    });
+
+    console.log(`[AutoReply] Sent (${responseType}): ${ruleName} - ${responseContent.substring(0, 50)}...`);
+
+    // Log activity
+    await execute(`
+      INSERT INTO agent_activity_logs (agent_id, action_type, entity_type, entity_id, details)
+      VALUES ($1, 'auto_reply_triggered', 'conversation', $2, $3)
+    `, [userId, conversationId, JSON.stringify({ rule_name: ruleName, response_type: responseType })]);
+
+    return true;
+  } catch (error) {
+    console.error(`[AutoReply] Failed to send auto-reply:`, error);
     return false;
   }
 }

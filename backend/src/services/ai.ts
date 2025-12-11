@@ -1,13 +1,12 @@
 import OpenAI from 'openai';
-import { query, queryOne } from '../config/database';
+import { query, queryOne, execute } from '../config/database';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Bahasa Melayu sales assistant - medical equipment (hospital bed, wheelchair, oxygen)
-// Fokus: Empati, kepercayaan, jaga orang tersayang
-const MALAYSIAN_STYLE_PROMPT = `Anda adalah pembantu jualan peralatan perubatan untuk keluarga Malaysia.
+// Default Bahasa Melayu sales assistant prompt - used when no custom_prompt set
+const DEFAULT_PROMPT = `Anda adalah pembantu jualan peralatan perubatan untuk keluarga Malaysia.
 Produk: Katil hospital, kerusi roda, oxygen concentrator (sewa atau ansuran ada).
 
 Balas dalam Bahasa Melayu yang santai, penuh empati macam kawan yang faham.
@@ -62,15 +61,9 @@ NADA YANG BETUL:
 PENTING: Guna maklumat dari knowledge bank untuk harga dan spesifikasi.
 Kalau tak pasti, jujur cakap "Saya check dengan team dulu ye".`;
 
-// Rate limiting per conversation - IMPORTANT for ban prevention
-// Research: https://waha.devlike.pro/docs/overview/how-to-avoid-blocking/
-// - Max 4 messages per hour per contact
-// - 30-60 second delays for auto-replies
-// - Never initiate, only reply
-const conversationCooldowns = new Map<string, number>();
-const conversationHourlyCount = new Map<string, { count: number; resetTime: number }>();
-const COOLDOWN_MS = 10000; // 10 second minimum between AI replies (increased from 5s)
-const MAX_REPLIES_PER_HOUR = 4; // Max 4 AI messages per hour per contact
+// Rate limiting defaults - can be overridden by ai_settings
+const DEFAULT_COOLDOWN_MS = 10000; // 10 second minimum between AI replies
+const DEFAULT_MAX_REPLIES_PER_HOUR = 4; // Max 4 AI messages per hour per contact
 
 // Check if human agent recently replied (human takeover)
 async function isHumanTakeover(conversationId: string, minutesThreshold: number = 30): Promise<boolean> {
@@ -114,74 +107,127 @@ async function getConsecutiveAIReplies(conversationId: string): Promise<number> 
   }
 }
 
-// Check rate limit (prevent rapid fire)
-function isRateLimited(conversationId: string): boolean {
-  const lastReply = conversationCooldowns.get(conversationId);
-  if (lastReply && Date.now() - lastReply < COOLDOWN_MS) {
-    return true;
-  }
-  return false;
-}
-
-// Check hourly rate limit (max 4 per hour per contact)
-function isHourlyLimitReached(conversationId: string): boolean {
-  const now = Date.now();
-  const hourData = conversationHourlyCount.get(conversationId);
-
-  if (!hourData || now > hourData.resetTime) {
-    // Reset counter for new hour
-    return false;
-  }
-
-  return hourData.count >= MAX_REPLIES_PER_HOUR;
-}
-
-function setRateLimit(conversationId: string): void {
-  const now = Date.now();
-
-  // Set cooldown
-  conversationCooldowns.set(conversationId, now);
-
-  // Update hourly count
-  const hourData = conversationHourlyCount.get(conversationId);
-  if (!hourData || now > hourData.resetTime) {
-    conversationHourlyCount.set(conversationId, {
-      count: 1,
-      resetTime: now + 3600000, // 1 hour from now
-    });
-  } else {
-    hourData.count++;
-  }
-
-  // Cleanup old entries
-  if (conversationCooldowns.size > 1000) {
-    const cutoff = Date.now() - 60000;
-    for (const [key, time] of conversationCooldowns) {
-      if (time < cutoff) conversationCooldowns.delete(key);
-    }
-  }
-  if (conversationHourlyCount.size > 1000) {
-    for (const [key, data] of conversationHourlyCount) {
-      if (now > data.resetTime) conversationHourlyCount.delete(key);
-    }
-  }
-}
-
-// Search knowledge base
-async function searchKnowledge(accountId: string, searchQuery: string): Promise<any[]> {
+// Database-backed rate limiting (persists across restarts)
+async function checkRateLimits(
+  conversationId: string,
+  settings: any
+): Promise<{ limited: boolean; reason?: string }> {
   try {
-    const words = searchQuery.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const cooldownMs = settings.cooldown_seconds ? settings.cooldown_seconds * 1000 : DEFAULT_COOLDOWN_MS;
+    const maxPerHour = settings.hourly_limit || DEFAULT_MAX_REPLIES_PER_HOUR;
+
+    // Get or create rate limit record
+    const limits = await queryOne(`
+      SELECT last_reply_at, hourly_count, hourly_reset_at
+      FROM ai_rate_limits WHERE conversation_id = $1
+    `, [conversationId]);
+
+    const now = new Date();
+
+    if (!limits) {
+      // No limits record yet - not rate limited
+      return { limited: false };
+    }
+
+    // Check cooldown (time since last reply)
+    if (limits.last_reply_at) {
+      const msSinceLastReply = now.getTime() - new Date(limits.last_reply_at).getTime();
+      if (msSinceLastReply < cooldownMs) {
+        return { limited: true, reason: `cooldown (${Math.ceil((cooldownMs - msSinceLastReply) / 1000)}s remaining)` };
+      }
+    }
+
+    // Check hourly limit
+    if (limits.hourly_reset_at && now < new Date(limits.hourly_reset_at)) {
+      if (limits.hourly_count >= maxPerHour) {
+        const minsRemaining = Math.ceil((new Date(limits.hourly_reset_at).getTime() - now.getTime()) / 60000);
+        return { limited: true, reason: `hourly limit ${maxPerHour}/hr (resets in ${minsRemaining}min)` };
+      }
+    }
+
+    return { limited: false };
+  } catch (error) {
+    console.error('[AI] Rate limit check error:', error);
+    return { limited: false }; // Fail open to avoid blocking
+  }
+}
+
+// Record that we sent an AI reply (updates rate limits)
+async function recordAIReply(conversationId: string): Promise<void> {
+  try {
+    const now = new Date();
+    const hourFromNow = new Date(now.getTime() + 3600000);
+
+    await execute(`
+      INSERT INTO ai_rate_limits (conversation_id, last_reply_at, hourly_count, hourly_reset_at)
+      VALUES ($1, $2, 1, $3)
+      ON CONFLICT (conversation_id) DO UPDATE SET
+        last_reply_at = $2,
+        hourly_count = CASE
+          WHEN ai_rate_limits.hourly_reset_at IS NULL OR ai_rate_limits.hourly_reset_at < $2
+          THEN 1
+          ELSE ai_rate_limits.hourly_count + 1
+        END,
+        hourly_reset_at = CASE
+          WHEN ai_rate_limits.hourly_reset_at IS NULL OR ai_rate_limits.hourly_reset_at < $2
+          THEN $3
+          ELSE ai_rate_limits.hourly_reset_at
+        END,
+        updated_at = NOW()
+    `, [conversationId, now, hourFromNow]);
+  } catch (error) {
+    console.error('[AI] Record rate limit error:', error);
+  }
+}
+
+// Search knowledge base with improved full-text search
+export async function searchKnowledge(accountId: string, searchQuery: string): Promise<any[]> {
+  try {
+    // Clean search query
+    const cleanQuery = searchQuery
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .slice(0, 10) // Limit to 10 words
+      .join(' ');
+
+    if (!cleanQuery) return [];
+
+    // Try PostgreSQL full-text search first (faster and better ranking)
+    try {
+      const ftsResults = await query(`
+        SELECT content, document_name,
+          ts_rank(to_tsvector('simple', content), plainto_tsquery('simple', $2)) as rank
+        FROM knowledge_chunks
+        WHERE whatsapp_account_id = $1
+          AND to_tsvector('simple', content) @@ plainto_tsquery('simple', $2)
+        ORDER BY rank DESC
+        LIMIT 5
+      `, [accountId, cleanQuery]);
+
+      if (ftsResults && ftsResults.length > 0) {
+        return ftsResults;
+      }
+    } catch (ftsError) {
+      // FTS might fail if index doesn't exist yet, fall back to LIKE
+      console.log('[AI] FTS search failed, falling back to LIKE:', ftsError);
+    }
+
+    // Fallback to LIKE-based search
+    const words = cleanQuery.split(/\s+/).filter(w => w.length > 2);
     if (words.length === 0) return [];
 
     const placeholders = words.map((_, i) => `LOWER(content) LIKE $${i + 2}`).join(' OR ');
     const results = await query(`
       SELECT content, document_name FROM knowledge_chunks
       WHERE whatsapp_account_id = $1 AND (${placeholders})
-      LIMIT 3
+      LIMIT 5
     `, [accountId, ...words.map(w => `%${w}%`)]);
 
     return results || [];
-  } catch {
+  } catch (error) {
+    console.error('[AI] Knowledge search error:', error);
     return [];
   }
 }
@@ -225,35 +271,54 @@ export async function getAISettings(accountId: string): Promise<any> {
   }
 }
 
-// Main function to generate AI response
+/**
+ * Unified AI response generator
+ * Handles both:
+ * - General AI auto-reply (when no rules match)
+ * - Rule-based AI with custom prompts
+ *
+ * @param accountId - WhatsApp account ID
+ * @param conversationId - Conversation ID
+ * @param customerMessage - The customer's message
+ * @param options - Optional settings
+ *   - customPrompt: Override system prompt (for rule-based AI)
+ *   - contactName: Customer name for personalization
+ *   - skipSettingsCheck: Skip enabled/auto_reply check (for rule-based AI)
+ */
 export async function generateResponse(
   accountId: string,
   conversationId: string,
   customerMessage: string,
-  contactName?: string
+  options?: {
+    customPrompt?: string;
+    contactName?: string;
+    skipSettingsCheck?: boolean;
+  }
 ): Promise<string | null> {
+  const { customPrompt, contactName, skipSettingsCheck } = options || {};
+
   try {
-    // 1. Check if AI is enabled
+    // 1. Get AI settings
     const settings = await getAISettings(accountId);
-    if (!settings.enabled || !settings.auto_reply) {
-      return null;
+
+    // 2. Check if AI is enabled (skip for rule-based AI which has its own checks)
+    if (!skipSettingsCheck) {
+      if (!settings.enabled || !settings.auto_reply) {
+        console.log('[AI] Not enabled for account');
+        return null;
+      }
     }
 
-    // 2. Check rate limit (prevent rapid fire - BAN PREVENTION)
-    if (isRateLimited(conversationId)) {
-      console.log('[AI] Rate limited (cooldown), skipping');
-      return null;
-    }
-
-    // 3. Check hourly limit (max 4 per hour per contact - BAN PREVENTION)
-    if (isHourlyLimitReached(conversationId)) {
-      console.log('[AI] Hourly limit reached (4/hour), skipping to prevent spam');
+    // 3. Check rate limits (database-backed, persists across restarts)
+    const rateLimitResult = await checkRateLimits(conversationId, settings);
+    if (rateLimitResult.limited) {
+      console.log(`[AI] Rate limited: ${rateLimitResult.reason}`);
       return null;
     }
 
     // 4. Check for human takeover
     if (await isHumanTakeover(conversationId)) {
-      console.log('[AI] Human takeover active');
+      console.log('[AI] Human takeover active, skipping');
       return null;
     }
 
@@ -261,31 +326,52 @@ export async function generateResponse(
     const consecutiveReplies = await getConsecutiveAIReplies(conversationId);
     const maxReplies = settings.max_consecutive_replies || 2;
     if (consecutiveReplies >= maxReplies) {
-      console.log('[AI] Max consecutive replies reached:', consecutiveReplies);
+      console.log(`[AI] Max consecutive replies reached: ${consecutiveReplies}/${maxReplies}`);
       return null;
     }
 
     // 6. Check API key
     if (!process.env.OPENAI_API_KEY) {
-      console.error('[AI] No OpenAI API key');
+      console.error('[AI] No OpenAI API key configured');
       return null;
     }
 
-    // Get knowledge and context
+    // 7. Search knowledge bank for context
     const knowledge = await searchKnowledge(accountId, customerMessage);
     const knowledgeContext = knowledge.length > 0
-      ? '\n\nBusiness info:\n' + knowledge.map(k => '- ' + k.content.substring(0, 150)).join('\n')
+      ? '\n\nBusiness info from knowledge bank:\n' + knowledge.map(k => '- ' + k.content.substring(0, 200)).join('\n')
       : '';
 
-    const history = await getConversationContext(conversationId);
-    const systemPrompt = MALAYSIAN_STYLE_PROMPT + knowledgeContext;
+    // 8. Determine base prompt (priority: customPrompt > settings.custom_prompt > DEFAULT_PROMPT)
+    let basePrompt: string;
+    if (customPrompt) {
+      // Rule-based AI with custom prompt
+      basePrompt = customPrompt;
+      console.log('[AI] Using rule custom prompt');
+    } else if (settings.custom_prompt) {
+      // Account-level custom prompt
+      basePrompt = settings.custom_prompt;
+      console.log('[AI] Using account custom prompt');
+    } else {
+      // Default prompt
+      basePrompt = DEFAULT_PROMPT;
+    }
 
+    const systemPrompt = basePrompt + knowledgeContext;
+
+    // 9. Get conversation history for context
+    const history = await getConversationContext(conversationId);
+
+    // 10. Build messages array
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt }
     ];
 
     if (history) {
-      messages.push({ role: 'user', content: `Recent chat:\n${history}\n\nReply to the latest message only. Keep it short.` });
+      messages.push({
+        role: 'user',
+        content: `Recent conversation:\n${history}\n\nReply to the latest message only. Keep it short and natural.`
+      });
     }
 
     messages.push({
@@ -293,8 +379,9 @@ export async function generateResponse(
       content: (contactName ? `${contactName}: ` : '') + customerMessage
     });
 
-    console.log('[AI] Generating for:', customerMessage.substring(0, 40));
+    console.log('[AI] Generating response for:', customerMessage.substring(0, 50));
 
+    // 11. Call OpenAI API
     const completion = await openai.chat.completions.create({
       model: settings.model || 'gpt-4o-mini',
       messages,
@@ -305,12 +392,12 @@ export async function generateResponse(
     const response = completion.choices[0]?.message?.content;
 
     if (response) {
-      // Set rate limit AFTER successful response (not before)
-      setRateLimit(conversationId);
+      // 12. Record rate limit AFTER successful response
+      await recordAIReply(conversationId);
 
-      console.log('[AI] Response:', response.substring(0, 40));
+      console.log('[AI] Generated:', response.substring(0, 50));
 
-      // Log the interaction
+      // 13. Log the interaction for analytics
       try {
         await query(`
           INSERT INTO ai_logs (whatsapp_account_id, conversation_id, customer_message, ai_response, model, tokens_used)
@@ -321,11 +408,21 @@ export async function generateResponse(
       }
     }
 
-    return response;
+    return response || null;
   } catch (error: any) {
-    console.error('[AI] Error:', error.message);
+    console.error('[AI] Error generating response:', error.message);
     return null;
   }
+}
+
+// Legacy compatibility wrapper (for existing callers using positional contactName)
+export async function generateResponseLegacy(
+  accountId: string,
+  conversationId: string,
+  customerMessage: string,
+  contactName?: string
+): Promise<string | null> {
+  return generateResponse(accountId, conversationId, customerMessage, { contactName });
 }
 
 // Process uploaded document for knowledge base
@@ -392,4 +489,4 @@ function splitIntoChunks(text: string, maxSize: number): string[] {
   return chunks.filter(c => c.length > 10);
 }
 
-export default { generateResponse, processDocument, getAISettings, searchKnowledge };
+export default { generateResponse, generateResponseLegacy, processDocument, getAISettings, searchKnowledge };

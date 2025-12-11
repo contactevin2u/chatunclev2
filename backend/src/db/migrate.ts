@@ -933,6 +933,44 @@ SET whatsapp_account_id = (
   SELECT wa.id FROM whatsapp_accounts wa WHERE wa.user_id = ts.user_id LIMIT 1
 )
 WHERE ts.whatsapp_account_id IS NULL AND ts.user_id IS NOT NULL;
+
+-- ============================================================
+-- AI RATE LIMITS (Persistent across server restarts)
+-- ============================================================
+-- Stores rate limiting state for AI auto-replies per conversation
+-- Replaces memory-based rate limiting which was lost on server restart
+
+CREATE TABLE IF NOT EXISTS ai_rate_limits (
+  conversation_id UUID PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  last_reply_at TIMESTAMPTZ,
+  hourly_count INT DEFAULT 0,
+  hourly_reset_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index for cleanup of old entries
+CREATE INDEX IF NOT EXISTS idx_ai_rate_limits_updated ON ai_rate_limits(updated_at);
+
+-- Add configurable rate limit settings to ai_settings
+ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS cooldown_seconds INT DEFAULT 10;
+ALTER TABLE ai_settings ADD COLUMN IF NOT EXISTS hourly_limit INT DEFAULT 4;
+
+-- ============================================================
+-- KNOWLEDGE BANK FULL-TEXT SEARCH
+-- ============================================================
+-- Adds PostgreSQL full-text search index for faster knowledge retrieval
+-- Falls back to LIKE search if FTS fails
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_fts
+  ON knowledge_chunks USING GIN (to_tsvector('simple', content));
+
+-- Also add index for accountId + content searches
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_account_content
+  ON knowledge_chunks(whatsapp_account_id);
+
+-- Cleanup old rate limit entries (older than 24 hours)
+-- Run periodically to prevent table bloat
+DELETE FROM ai_rate_limits WHERE updated_at < NOW() - INTERVAL '24 hours';
 `;
 
 async function runMigrations() {

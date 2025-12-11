@@ -50,6 +50,7 @@ async function refreshToken(): Promise<string> {
     throw new Error('OrderOps credentials not configured. Set ORDEROPS_USERNAME and ORDEROPS_PASSWORD env variables.');
   }
 
+  const loginStart = Date.now();
   console.log('[OrderOps] Logging in to get fresh token...');
 
   const response = await fetch(`${ORDEROPS_API_URL}/auth/login`, {
@@ -61,9 +62,11 @@ async function refreshToken(): Promise<string> {
     }),
   });
 
+  const loginTime = Date.now() - loginStart;
+
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[OrderOps] Login failed:', response.status, errorText);
+    console.error(`[OrderOps] Login failed after ${loginTime}ms:`, response.status, errorText);
     throw new Error(`OrderOps login failed: ${errorText}`);
   }
 
@@ -84,7 +87,7 @@ async function refreshToken(): Promise<string> {
   // Default to 1 hour expiry
   tokenExpiry = Date.now() + 3600 * 1000;
 
-  console.log('[OrderOps] Login successful, token cached');
+  console.log(`[OrderOps] Login successful in ${loginTime}ms, token cached for 1 hour`);
   return cachedToken;
 }
 
@@ -101,10 +104,19 @@ function clearCachedToken() {
  * Returns the fetch Response (not Express Response)
  */
 async function orderOpsRequest(path: string, options: RequestInit = {}): Promise<globalThis.Response> {
+  const reqStart = Date.now();
+
+  // Step 1: Get token
+  const tokenStart = Date.now();
   let token = await getOrderOpsToken();
+  const tokenTime = Date.now() - tokenStart;
+  if (tokenTime > 100) {
+    console.log(`[OrderOps] Token fetch took ${tokenTime}ms`);
+  }
 
   const makeRequest = async (authToken: string): Promise<globalThis.Response> => {
-    return fetch(`${ORDEROPS_API_URL}${path}`, {
+    const fetchStart = Date.now();
+    const response = await fetch(`${ORDEROPS_API_URL}${path}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -112,6 +124,8 @@ async function orderOpsRequest(path: string, options: RequestInit = {}): Promise
         ...options.headers,
       },
     });
+    console.log(`[OrderOps] API ${path} responded in ${Date.now() - fetchStart}ms (status: ${response.status})`);
+    return response;
   };
 
   let fetchResponse = await makeRequest(token);
@@ -124,6 +138,7 @@ async function orderOpsRequest(path: string, options: RequestInit = {}): Promise
     fetchResponse = await makeRequest(token);
   }
 
+  console.log(`[OrderOps] Total request time for ${path}: ${Date.now() - reqStart}ms`);
   return fetchResponse;
 }
 
