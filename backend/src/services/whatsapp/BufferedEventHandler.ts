@@ -439,7 +439,7 @@ async function processHistorySync(
               await execute(
                 `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
                  VALUES ($1, $2, TRUE, COALESCE($3, NOW()))
-                 ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING`,
+                 ON CONFLICT (account_id, group_id) WHERE account_id IS NOT NULL AND group_id IS NOT NULL DO NOTHING`,
                 [accountId, group.id, chat.conversationTimestamp ? new Date(Number(chat.conversationTimestamp) * 1000) : null]
               );
               processed++;

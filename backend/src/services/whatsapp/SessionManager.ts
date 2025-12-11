@@ -1860,7 +1860,7 @@ class SessionManager {
     let conversation = await queryOne(
       `INSERT INTO conversations (account_id, group_id, is_group, unread_count, last_message_at)
        VALUES ($1, $2, TRUE, $3, NOW())
-       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL
+       ON CONFLICT (account_id, group_id) WHERE account_id IS NOT NULL AND group_id IS NOT NULL
        DO UPDATE SET
          unread_count = CASE WHEN $3 > 0 THEN conversations.unread_count + 1 ELSE conversations.unread_count END,
          last_message_at = NOW(),
@@ -2219,7 +2219,7 @@ class SessionManager {
     let conversation = await queryOne(
       `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
        VALUES ($1, $2, TRUE, NOW())
-       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL
+       ON CONFLICT (account_id, group_id) WHERE account_id IS NOT NULL AND group_id IS NOT NULL
        DO UPDATE SET last_message_at = NOW(), updated_at = NOW()
        RETURNING *`,
       [accountId, group.id]
@@ -2537,7 +2537,7 @@ class SessionManager {
     await queryOne(
       `INSERT INTO conversations (account_id, group_id, is_group, last_message_at)
        VALUES ($1, $2, TRUE, NOW())
-       ON CONFLICT (account_id, group_id) WHERE group_id IS NOT NULL DO NOTHING
+       ON CONFLICT (account_id, group_id) WHERE account_id IS NOT NULL AND group_id IS NOT NULL DO NOTHING
        RETURNING *`,
       [accountId, group.id]
     );
