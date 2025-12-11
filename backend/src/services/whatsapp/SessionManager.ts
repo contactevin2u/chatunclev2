@@ -252,11 +252,13 @@ class SessionManager {
 
     // Create socket with proper configuration based on latest Baileys documentation
     // Reference: https://baileys.wiki/docs/api/type-aliases/SocketConfig/
+    // NOTE: Using raw keys from PostgreSQL without in-memory cache
+    // makeCacheableSignalKeyStore can cause stale key issues with external DB storage
     const sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: state.keys,  // Direct PostgreSQL keys, no cache layer
       },
       logger,
       // Use Desktop browser to get full history sync (per Baileys docs)
