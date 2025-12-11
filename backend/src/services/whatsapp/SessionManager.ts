@@ -122,6 +122,20 @@ function extractGroupId(groupJid: string): string {
   return groupJid.replace('@g.us', '');
 }
 
+/**
+ * Parse mentions from message content (@phonenumber patterns)
+ */
+function parseMentions(content: string): string[] {
+  const mentionRegex = /@\+?(\d{10,15})/g;
+  const mentions: string[] = [];
+  let match;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    mentions.push(`${match[1]}@s.whatsapp.net`);
+  }
+  return mentions;
+}
+
+
 // Create logger - use info level to see important logs
 const logger = pino({
   level: process.env.NODE_ENV === 'development' ? 'debug' : 'info',
@@ -1689,7 +1703,15 @@ class SessionManager {
           if (!payload.content) {
             throw new Error('Text content is required');
           }
-          result = await sock.sendMessage(groupJid, { text: payload.content }, { quoted: quotedMsg });
+          // Parse @mentions from content for tagging group members
+          const groupMentions = parseMentions(payload.content);
+          if (groupMentions.length > 0) {
+            console.log(`[WA][Group] Found ${groupMentions.length} mentions:`, groupMentions);
+          }
+          result = await sock.sendMessage(groupJid, {
+            text: payload.content,
+            mentions: groupMentions.length > 0 ? groupMentions : undefined,
+          }, { quoted: quotedMsg });
           break;
 
         case 'image': {
