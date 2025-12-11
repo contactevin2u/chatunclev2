@@ -1523,6 +1523,28 @@ class SessionManager {
           console.log(`[WA] Sender LID (me.lid): ${sock.authState?.creds?.me?.lid || 'none'}`);
           console.log(`[WA] Media URL: ${payload.mediaUrl}`);
 
+          // Check LID mapping for recipient
+          try {
+            const recipientPn = jid.replace('@s.whatsapp.net', '');
+            const lidMapping = await sock.signalRepository?.lidMapping?.getLIDsForPNs([jid]);
+            if (lidMapping && lidMapping.length > 0) {
+              console.log(`[WA] LID mapping for recipient:`, lidMapping.map((m: any) => `PN:${m.pn} -> LID:${m.lid}`).join(', '));
+            } else {
+              console.log(`[WA] No LID mapping found for recipient ${recipientPn}`);
+            }
+
+            // Also check reverse - what PNs map to any LID we might have
+            const dbMapping = await queryOne(
+              `SELECT lid, pn FROM lid_pn_mappings WHERE account_id = $1 AND pn = $2`,
+              [accountId, recipientPn]
+            );
+            if (dbMapping) {
+              console.log(`[WA] DB LID mapping: PN ${dbMapping.pn} -> LID ${dbMapping.lid}`);
+            }
+          } catch (mapErr) {
+            console.log(`[WA] LID mapping check error:`, mapErr);
+          }
+
           // Check if media URL is accessible
           try {
             const headResp = await fetch(payload.mediaUrl, { method: 'HEAD' });
@@ -1542,12 +1564,34 @@ class SessionManager {
             console.error(`[WA] Session refresh failed:`, sessErr);
           }
 
-          // Get device list for recipient
+          // Get device list for recipient (force fresh fetch, no cache)
           try {
+            // useCache=false to force fresh device list from WhatsApp servers
             const devices = await sock.getUSyncDevices([jid], false, false);
-            console.log(`[WA] Recipient devices (${devices.length}):`, devices.map(d => `${d.user}:${d.device}`).join(', '));
+            console.log(`[WA] Recipient devices (${devices.length}):`, devices.map(d => `${d.user}:${d.device}@${d.jid}`).join(', '));
+
+            // If only device 0, try to get more info
+            if (devices.length === 1) {
+              console.log(`[WA] WARNING: Only 1 device found. Recipient may have more devices not synced.`);
+            }
           } catch (devErr) {
             console.log(`[WA] Could not fetch devices:`, devErr);
+          }
+
+          // Clear any cached participant nodes to force fresh encryption
+          // This ensures message goes to ALL devices, not just cached ones
+          console.log(`[WA] Clearing user device cache for fresh encryption...`);
+          try {
+            // Force clear cached sessions for this recipient
+            await sock.assertSessions([jid], true);
+
+            // Also try to refresh the sender's own device list
+            const myJid = sock.user?.id;
+            if (myJid) {
+              await sock.assertSessions([myJid], true);
+            }
+          } catch (cacheErr) {
+            console.log(`[WA] Cache clear note:`, cacheErr);
           }
 
           console.log(`[WA] ============================================`);
