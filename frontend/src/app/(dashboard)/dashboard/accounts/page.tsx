@@ -238,7 +238,7 @@ export default function AccountsPage() {
     setIsConnecting(true);
     setConnectError(null);
     try {
-      const { account } = await tiktok.addShop(token, {
+      const { account } = await tiktok.addAccount(token, {
         appKey: connectForm.appKey,
         appSecret: connectForm.appSecret,
         accessToken: connectForm.accessToken,
