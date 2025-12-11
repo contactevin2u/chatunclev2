@@ -486,7 +486,7 @@ router.post('/:id/access', async (req: Request, res: Response) => {
     const accessRecord = await queryOne(
       `INSERT INTO account_access (account_id, agent_id, permission, granted_by)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (account_id, agent_id)
+       ON CONFLICT (account_id, agent_id) WHERE account_id IS NOT NULL
        DO UPDATE SET permission = $3, granted_at = NOW()
        RETURNING *`,
       [req.params.id, agent.id, permission, req.user!.userId]

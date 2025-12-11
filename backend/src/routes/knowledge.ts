@@ -73,9 +73,9 @@ router.put('/settings/:accountId', async (req: Request, res: Response) => {
 
     // Upsert settings
     const settings = await queryOne(`
-      INSERT INTO ai_settings (account_id, enabled, auto_reply, model, temperature, max_tokens, max_consecutive_replies, custom_prompt)
+      INSERT INTO ai_settings (whatsapp_account_id, enabled, auto_reply, model, temperature, max_tokens, max_consecutive_replies, custom_prompt)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (account_id)
+      ON CONFLICT (whatsapp_account_id)
       DO UPDATE SET
         enabled = $2,
         auto_reply = $3,
@@ -124,7 +124,7 @@ router.get('/documents/:accountId', async (req: Request, res: Response) => {
       SELECT id, name, mime_type, content_length, created_at,
         (SELECT COUNT(*) FROM knowledge_chunks WHERE document_id = knowledge_documents.id) as chunk_count
       FROM knowledge_documents
-      WHERE account_id = $1
+      WHERE whatsapp_account_id = $1
       ORDER BY created_at DESC
     `, [accountId]);
 
@@ -236,7 +236,7 @@ router.delete('/documents/:accountId/:documentId', async (req: Request, res: Res
 
     // Delete document (chunks will cascade delete)
     await execute(`
-      DELETE FROM knowledge_documents WHERE id = $1 AND account_id = $2
+      DELETE FROM knowledge_documents WHERE id = $1 AND whatsapp_account_id = $2
     `, [documentId, accountId]);
 
     res.json({ message: 'Document deleted' });
@@ -266,7 +266,7 @@ router.get('/logs/:accountId', async (req: Request, res: Response) => {
     const logs = await query(`
       SELECT id, customer_message, ai_response, model, tokens_used, created_at
       FROM ai_logs
-      WHERE account_id = $1
+      WHERE whatsapp_account_id = $1
       ORDER BY created_at DESC
       LIMIT $2
     `, [accountId, parseInt(limit as string)]);
