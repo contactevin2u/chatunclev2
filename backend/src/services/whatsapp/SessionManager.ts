@@ -1759,26 +1759,23 @@ class SessionManager {
       }
     }
 
-    // Get or create group conversation
+    // Get or create group conversation (use ON CONFLICT to handle race conditions)
     let conversation = await queryOne(
-      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
-      [accountId, group.id]
+      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, unread_count, last_message_at)
+       VALUES ($1, $2, TRUE, $3, NOW())
+       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL
+       DO UPDATE SET
+         unread_count = CASE WHEN $3 > 0 THEN conversations.unread_count + 1 ELSE conversations.unread_count END,
+         last_message_at = NOW(),
+         updated_at = NOW()
+       RETURNING *`,
+      [accountId, group.id, isRealTime ? 1 : 0]
     );
-
     if (!conversation) {
+      // Fallback query if RETURNING didn't work
       conversation = await queryOne(
-        `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, unread_count, last_message_at)
-         VALUES ($1, $2, TRUE, $3, NOW())
-         RETURNING *`,
-        [accountId, group.id, isRealTime ? 1 : 0]
-      );
-      console.log(`[WA][Group] Created new group conversation: ${conversation.id}`);
-    } else if (isRealTime) {
-      await execute(
-        `UPDATE conversations
-         SET unread_count = unread_count + 1, last_message_at = NOW(), updated_at = NOW()
-         WHERE id = $1`,
-        [conversation.id]
+        'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+        [accountId, group.id]
       );
     }
 
@@ -2120,23 +2117,19 @@ class SessionManager {
       }
     }
 
-    // Get or create group conversation
+    // Get or create group conversation (use ON CONFLICT to handle race conditions)
     let conversation = await queryOne(
-      'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
+      `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
+       VALUES ($1, $2, TRUE, NOW())
+       ON CONFLICT (whatsapp_account_id, group_id) WHERE group_id IS NOT NULL
+       DO UPDATE SET last_message_at = NOW(), updated_at = NOW()
+       RETURNING *`,
       [accountId, group.id]
     );
-
     if (!conversation) {
       conversation = await queryOne(
-        `INSERT INTO conversations (whatsapp_account_id, group_id, is_group, last_message_at)
-         VALUES ($1, $2, TRUE, NOW())
-         RETURNING *`,
+        'SELECT * FROM conversations WHERE whatsapp_account_id = $1 AND group_id = $2',
         [accountId, group.id]
-      );
-    } else {
-      await execute(
-        `UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1`,
-        [conversation.id]
       );
     }
 

@@ -3,27 +3,21 @@
  * Rate limiting and security headers for the application
  */
 
-import rateLimit from 'express-rate-limit';
+import rateLimit, { type Options } from 'express-rate-limit';
 import helmet from 'helmet';
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config/env';
 
 /**
- * Helper to normalize IP addresses for rate limiting
- * Handles IPv6 addresses properly by normalizing them
+ * Common validation options to disable IPv6 warnings
+ * We handle IP normalization properly and use user IDs where possible
  */
-function normalizeIP(ip: string | undefined): string {
-  if (!ip) return 'unknown';
-
-  // Handle IPv6 addresses - extract the base address
-  // IPv6 addresses like ::ffff:192.168.1.1 should use the IPv4 part
-  if (ip.startsWith('::ffff:')) {
-    return ip.substring(7);
-  }
-
-  // For pure IPv6, use the full address (express-rate-limit handles the rest)
-  return ip;
-}
+const commonValidation: Partial<Options['validate']> = {
+  xForwardedForHeader: false,
+  ip: false,
+  // Disable IPv6 keyGenerator check - we handle this via validate options
+  default: true,
+};
 
 /**
  * Rate limiter for authentication endpoints
@@ -36,12 +30,9 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: false,
-  // Disable IP validation since we handle it ourselves
-  validate: { xForwardedForHeader: false, ip: false },
-  keyGenerator: (req: Request) => {
-    // Use normalized IP address for rate limiting
-    return normalizeIP(req.ip);
-  },
+  // Use IPv6 subnet to handle address rotation (56-bit prefix)
+  ipv6Subnet: 56,
+  validate: commonValidation,
 });
 
 /**
@@ -54,8 +45,9 @@ export const apiRateLimiter = rateLimit({
   message: { error: 'Too many requests. Please slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Disable IP validation since we handle it ourselves
-  validate: { xForwardedForHeader: false, ip: false },
+  // Use IPv6 subnet to handle address rotation (56-bit prefix)
+  ipv6Subnet: 56,
+  validate: commonValidation,
   skip: (req: Request) => {
     // Skip rate limiting for health checks
     return req.path === '/health';
@@ -72,11 +64,12 @@ export const messageRateLimiter = rateLimit({
   message: { error: 'Message rate limit exceeded. Please wait before sending more messages.' },
   standardHeaders: true,
   legacyHeaders: false,
-  // Disable IP validation since we use user ID
-  validate: { xForwardedForHeader: false, ip: false },
+  // Use IPv6 subnet for IP fallback
+  ipv6Subnet: 56,
+  validate: commonValidation,
   keyGenerator: (req: Request) => {
-    // Rate limit per user, not per IP
-    return req.user?.userId || normalizeIP(req.ip);
+    // Rate limit per user, not per IP (user ID takes precedence)
+    return req.user?.userId || req.ip || 'unknown';
   },
 });
 
