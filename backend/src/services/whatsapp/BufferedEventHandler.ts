@@ -755,6 +755,15 @@ export function setupBufferedEventProcessing(
     if (events['contacts.update']) {
       console.log(`[WA][Buffered] contacts.update: ${events['contacts.update'].length}`);
     }
+
+    // ============ DEBUG: Signal/Session Events ============
+    // These events help diagnose encryption/session issues
+    if ((events as any)['CB:call']) {
+      console.log(`[WA][Buffered] CB:call event received`);
+    }
+    if ((events as any)['message-receipt.update']) {
+      console.log(`[WA][Buffered] message-receipt.update:`, JSON.stringify((events as any)['message-receipt.update'], null, 2));
+    }
   });
 
   console.log(`[WA][Buffered] Event processing setup complete for ${accountId}`);

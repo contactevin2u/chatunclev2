@@ -1514,12 +1514,60 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          console.log(`[WA] Sending image from URL: ${payload.mediaUrl}`);
 
-          // Use URL-based approach like video - simpler and works with Baileys
+          // === DIAGNOSTIC LOGGING FOR IMAGE SEND DEBUGGING ===
+          console.log(`[WA] ========== IMAGE SEND DIAGNOSTICS ==========`);
+          console.log(`[WA] Recipient JID: ${jid}`);
+          console.log(`[WA] JID Type: ${isLidUser(jid) ? 'LID' : 'PN (phone number)'}`);
+          console.log(`[WA] Sender ID (me.id): ${sock.user?.id}`);
+          console.log(`[WA] Sender LID (me.lid): ${sock.authState?.creds?.me?.lid || 'none'}`);
+          console.log(`[WA] Media URL: ${payload.mediaUrl}`);
+
+          // Check if media URL is accessible
+          try {
+            const headResp = await fetch(payload.mediaUrl, { method: 'HEAD' });
+            console.log(`[WA] Media URL accessible: ${headResp.ok} (status: ${headResp.status})`);
+            console.log(`[WA] Media Content-Type: ${headResp.headers.get('content-type')}`);
+            console.log(`[WA] Media Content-Length: ${headResp.headers.get('content-length')} bytes`);
+          } catch (urlErr) {
+            console.error(`[WA] Media URL check FAILED:`, urlErr);
+          }
+
+          // Force refresh Signal session before media send to ensure fresh keys
+          console.log(`[WA] Forcing Signal session refresh for ${jid}...`);
+          try {
+            const didFetch = await sock.assertSessions([jid], true); // force=true
+            console.log(`[WA] Session refresh result: ${didFetch ? 'FETCHED NEW SESSION' : 'SESSION EXISTS'}`);
+          } catch (sessErr) {
+            console.error(`[WA] Session refresh failed:`, sessErr);
+          }
+
+          // Get device list for recipient
+          try {
+            const devices = await sock.getUSyncDevices([jid], false, false);
+            console.log(`[WA] Recipient devices (${devices.length}):`, devices.map(d => `${d.user}:${d.device}`).join(', '));
+          } catch (devErr) {
+            console.log(`[WA] Could not fetch devices:`, devErr);
+          }
+
+          console.log(`[WA] ============================================`);
+          console.log(`[WA] Downloading image to buffer first...`);
+
+          // Download image to buffer first for reliability
+          // This ensures we control the fetch and can diagnose issues
+          const imageResponse = await fetch(payload.mediaUrl);
+          if (!imageResponse.ok) {
+            throw new Error(`Failed to fetch image: ${imageResponse.status} ${imageResponse.statusText}`);
+          }
+          const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+          console.log(`[WA] Image downloaded: ${imageBuffer.length} bytes, type: ${imageResponse.headers.get('content-type')}`);
+
+          // Send using buffer (more reliable than URL)
+          console.log(`[WA] Sending image as buffer to ${jid}...`);
           result = await sock.sendMessage(jid, {
-            image: { url: payload.mediaUrl },
+            image: imageBuffer,
             caption: payload.content || undefined,
+            mimetype: imageResponse.headers.get('content-type') || 'image/jpeg',
           }, { quoted: quotedMsg });
           console.log(`[WA] Image send result:`, JSON.stringify(result, null, 2));
           break;
