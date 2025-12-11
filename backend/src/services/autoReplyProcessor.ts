@@ -24,6 +24,14 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
       return false;
     }
 
+    // ============================================================
+    // RULE-BASED AUTO-REPLY (DISABLED)
+    // ============================================================
+    // Commented out to use only General AI for more natural, open-ended responses.
+    // Rules are rigid (keyword/regex matching) while General AI understands context.
+    // Uncomment this section if you need specific keyword triggers in the future.
+    // ============================================================
+    /*
     // Get active auto-reply rules for this account (or global rules)
     const rules = await query(`
       SELECT ar.*, t.content as template_content
@@ -124,8 +132,12 @@ export async function processAutoReply(message: IncomingMessage): Promise<boolea
         return true; // Stop processing after first successful match
       }
     }
+    */
+    // ============================================================
+    // END RULE-BASED AUTO-REPLY (DISABLED)
+    // ============================================================
 
-    // === AI AUTO-REPLY (when no rules matched) ===
+    // === GENERAL AI AUTO-REPLY (Natural Language) ===
     // Try AI-powered response using GPT if enabled for this account
     try {
       const contact = await queryOne(`
