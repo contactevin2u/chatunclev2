@@ -1322,6 +1322,26 @@ WHERE id IN (
 -- merge them into the PN contact (more reliable identifier)
 -- This happens when messages arrive via different WhatsApp formats
 
+-- Step 0: Find and create missing lid_pn_mappings from contacts with matching phone_number
+-- This catches cases where the mapping wasn't saved due to earlier ON CONFLICT bugs
+INSERT INTO lid_pn_mappings (account_id, lid, pn)
+SELECT DISTINCT
+  lid_c.account_id,
+  lid_c.wa_id as lid,
+  pn_c.wa_id as pn
+FROM contacts lid_c
+JOIN contacts pn_c ON lid_c.account_id = pn_c.account_id
+  AND lid_c.phone_number = pn_c.wa_id
+  AND lid_c.jid_type = 'lid'
+  AND pn_c.jid_type = 'pn'
+  AND lid_c.id != pn_c.id
+WHERE lid_c.account_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM lid_pn_mappings m
+    WHERE m.account_id = lid_c.account_id AND m.lid = lid_c.wa_id
+  )
+ON CONFLICT (account_id, lid) WHERE account_id IS NOT NULL DO NOTHING;
+
 -- Step 1: Move messages from LID conversations to PN conversations
 UPDATE messages m
 SET conversation_id = pn_conv.id
@@ -1351,7 +1371,23 @@ WHERE id IN (
   )
 );
 
--- Step 3: For LID conversations with remaining messages, update contact_id to PN contact
+-- Step 3a: For LID contacts where NO PN contact exists, convert LID contact to PN
+-- This handles the case where we only have the LID record
+UPDATE contacts lid_c
+SET wa_id = map.pn,
+    phone_number = map.pn,
+    jid_type = 'pn',
+    updated_at = NOW()
+FROM lid_pn_mappings map
+WHERE lid_c.account_id = map.account_id
+  AND lid_c.wa_id = map.lid
+  AND lid_c.jid_type = 'lid'
+  AND NOT EXISTS (
+    SELECT 1 FROM contacts pn_c
+    WHERE pn_c.account_id = map.account_id AND pn_c.wa_id = map.pn
+  );
+
+-- Step 3b: For LID conversations with remaining messages, update contact_id to PN contact
 UPDATE conversations conv
 SET contact_id = pn_c.id
 FROM contacts lid_c
