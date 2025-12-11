@@ -1009,20 +1009,99 @@ class SessionManager {
 
     console.log(`[WA] Processing outgoing message to ${waId} (${jidType}), realtime: ${isRealTime}`);
 
-    // Get or create contact
+    // Try to get PN from Baileys' internal LID mapping store if this is a LID
+    let resolvedPn: string | null = null;
+    if (jidType === 'lid') {
+      try {
+        const session = this.sessions.get(accountId);
+        if (session?.socket?.signalRepository?.lidMapping) {
+          const pnJid = await session.socket.signalRepository.lidMapping.getPNForLID(remoteJid);
+          if (pnJid) {
+            resolvedPn = extractUserIdFromJid(pnJid);
+            console.log(`[WA][Outgoing] Baileys lidMapping resolved LID ${waId} -> PN ${resolvedPn}`);
+            // Store this mapping in our database for future use
+            await execute(
+              `INSERT INTO lid_pn_mappings (account_id, lid, pn)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (account_id, lid) DO UPDATE SET pn = $3, updated_at = NOW()`,
+              [accountId, waId, resolvedPn]
+            );
+          }
+        }
+      } catch (err) {
+        console.log(`[WA][Outgoing] Could not resolve LID via Baileys lidMapping:`, err);
+      }
+    }
+
+    // Get or create contact with LID/PN deduplication
     let contact = await queryOne(
       'SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2',
       [accountId, waId]
     );
 
     if (!contact) {
-      const phoneNumber = jidType === 'pn' ? waId : null;
-      contact = await queryOne(
-        `INSERT INTO contacts (account_id, wa_id, phone_number, jid_type)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [accountId, waId, phoneNumber, jidType]
-      );
+      // Before creating a new contact, check if we have a LID/PN mapping
+      // that points to an existing contact (prevents duplicates)
+      let mappedContact = null;
+
+      if (jidType === 'lid') {
+        // This is a LID - first try Baileys-resolved PN, then our DB mapping
+        let pnToLookup = resolvedPn;
+        if (!pnToLookup) {
+          const mapping = await queryOne(
+            `SELECT pn FROM lid_pn_mappings WHERE account_id = $1 AND lid = $2`,
+            [accountId, waId]
+          );
+          pnToLookup = mapping?.pn || null;
+        }
+        if (pnToLookup) {
+          mappedContact = await queryOne(
+            `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
+            [accountId, pnToLookup]
+          );
+          if (mappedContact) {
+            console.log(`[WA][Outgoing] Found existing PN contact ${mappedContact.id} for LID ${waId} via mapping`);
+          }
+        }
+      } else if (jidType === 'pn') {
+        // This is a PN - check if we have a mapping from a LID contact
+        const mapping = await queryOne(
+          `SELECT lid FROM lid_pn_mappings WHERE account_id = $1 AND pn = $2`,
+          [accountId, waId]
+        );
+        if (mapping?.lid) {
+          mappedContact = await queryOne(
+            `SELECT * FROM contacts WHERE account_id = $1 AND wa_id = $2`,
+            [accountId, mapping.lid]
+          );
+          if (mappedContact) {
+            console.log(`[WA][Outgoing] Found existing LID contact ${mappedContact.id} for PN ${waId} via mapping`);
+            // Update the existing contact to use the PN as wa_id (more reliable)
+            await execute(
+              `UPDATE contacts SET wa_id = $1, phone_number = $1, jid_type = 'pn', updated_at = NOW()
+               WHERE id = $2`,
+              [waId, mappedContact.id]
+            );
+            mappedContact.wa_id = waId;
+            mappedContact.phone_number = waId;
+            mappedContact.jid_type = 'pn';
+          }
+        }
+      }
+
+      if (mappedContact) {
+        contact = mappedContact;
+      } else {
+        // No mapping found - create new contact
+        const phoneNumber = jidType === 'pn' ? waId : resolvedPn;
+        contact = await queryOne(
+          `INSERT INTO contacts (account_id, wa_id, phone_number, jid_type)
+           VALUES ($1, $2, $3, $4)
+           RETURNING *`,
+          [accountId, waId, phoneNumber, jidType]
+        );
+        console.log(`[WA][Outgoing] Created new contact: ${contact.id}, jid_type: ${jidType}, phone: ${phoneNumber}`);
+      }
     } else if (contact.jid_type !== jidType) {
       // Update jid_type if it changed
       await execute(
