@@ -260,7 +260,7 @@ export function broadcastHistorySyncProgress(
   const server = getIO();
   server.to(`${SOCKET_CONFIG.ROOM_ACCOUNT}${accountId}`).emit('sync:progress', {
     accountId,
-    type: phase === 'complete' ? 'history' : phase,
+    type: (phase === 'complete' ? 'history' : phase) as 'contacts' | 'groups' | 'history',
     progress: percentage,
     total,
     processed,
@@ -280,7 +280,7 @@ export function broadcastMetadataSyncProgress(
   const server = getIO();
   server.to(`${SOCKET_CONFIG.ROOM_ACCOUNT}${accountId}`).emit('sync:progress', {
     accountId,
-    type,
+    type: type as 'contacts' | 'groups' | 'history',
     progress: percentage,
     total,
     processed,

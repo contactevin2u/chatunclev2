@@ -241,24 +241,24 @@ export class ErrorMapperService {
    * Check if an error should trigger account disconnection
    */
   shouldDisconnect(errorCode: ErrorCodeDefinition): boolean {
-    return [
+    return ([
       ERROR_CODES.SESSION_INVALID.code,
       ERROR_CODES.AUTH_EXPIRED.code,
       ERROR_CODES.ACCOUNT_BANNED.code,
       ERROR_CODES.ACCOUNT_DISCONNECTED.code,
       ERROR_CODES.ACCOUNT_SUSPENDED.code,
-    ].includes(errorCode.code);
+    ] as number[]).includes(errorCode.code);
   }
 
   /**
    * Check if an error should disable the conversation
    */
   shouldDisableConversation(errorCode: ErrorCodeDefinition): boolean {
-    return [
+    return ([
       ERROR_CODES.NUMBER_BLOCKED.code,
       ERROR_CODES.RECIPIENT_UNREGISTERED.code,
       ERROR_CODES.OPT_OUT.code,
-    ].includes(errorCode.code);
+    ] as number[]).includes(errorCode.code);
   }
 
   /**

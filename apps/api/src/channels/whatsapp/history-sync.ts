@@ -11,7 +11,7 @@
  * - Deduplication to avoid re-processing
  */
 
-import type { proto } from '@whiskeysockets/baileys';
+import type { proto, Contact } from '@whiskeysockets/baileys';
 import { BATCH_CONFIG } from '../../config/constants.js';
 import {
   batchInsertContacts,
@@ -71,7 +71,7 @@ export function processHistorySyncBackground(
   accountId: string,
   data: {
     messages?: proto.IWebMessageInfo[];
-    contacts?: proto.IContact[];
+    contacts?: Contact[];
     isLatest?: boolean;
   },
   options: HistorySyncOptions = {}
@@ -94,7 +94,7 @@ export async function processHistorySync(
   accountId: string,
   data: {
     messages?: proto.IWebMessageInfo[];
-    contacts?: proto.IContact[];
+    contacts?: Contact[];
     isLatest?: boolean;
   },
   options: HistorySyncOptions = {}
@@ -170,7 +170,7 @@ export async function processHistorySync(
       // Extract message IDs for deduplication
       const messageIds = messages
         .slice(0, maxMessages)
-        .map((m) => m.key.id)
+        .map((m) => m.key?.id)
         .filter((id): id is string => !!id);
 
       // Bulk filter to get only new messages
@@ -180,7 +180,7 @@ export async function processHistorySync(
       // Filter messages to only new ones
       const newMessages = messages
         .slice(0, maxMessages)
-        .filter((m) => m.key.id && newMessageIds.has(m.key.id));
+        .filter((m) => m.key?.id && newMessageIds.has(m.key.id));
 
       console.log(`[HistorySync] ${newMessages.length} new messages after dedup (${messagesDeduplicated} duplicates)`);
 
@@ -237,10 +237,10 @@ export async function processHistorySync(
  */
 async function processContactsBatch(
   accountId: string,
-  contacts: proto.IContact[],
+  contacts: Contact[],
   options: {
     onProgress?: (processed: number, total: number) => void;
-    onError?: (error: Error, contact: proto.IContact) => void;
+    onError?: (error: Error, contact: Contact) => void;
   }
 ): Promise<number> {
   const chunks = chunk(contacts, BATCH_CONFIG.HISTORY_CONTACT_BATCH_SIZE);
@@ -355,7 +355,7 @@ async function processMessagesBatch(
   for (const batch of chunks) {
     // Transform messages for insertion
     const messageInserts: MessageInsert[] = batch
-      .filter((m) => m.key.id && m.key.remoteJid && m.message)
+      .filter((m) => m.key?.id && m.key.remoteJid && m.message)
       .map((m) => transformMessageForInsert(accountId, m))
       .filter((m): m is MessageInsert => m !== null);
 
@@ -384,7 +384,7 @@ function transformMessageForInsert(
   accountId: string,
   msg: proto.IWebMessageInfo
 ): MessageInsert | null {
-  if (!msg.key.id || !msg.key.remoteJid || !msg.message) {
+  if (!msg.key || !msg.key.id || !msg.key.remoteJid || !msg.message) {
     return null;
   }
 
@@ -459,7 +459,7 @@ function extractGroupJids(messages: proto.IWebMessageInfo[]): string[] {
   const groupJids = new Set<string>();
 
   for (const msg of messages) {
-    if (msg.key.remoteJid?.endsWith('@g.us')) {
+    if (msg.key?.remoteJid?.endsWith('@g.us')) {
       groupJids.add(msg.key.remoteJid);
     }
   }

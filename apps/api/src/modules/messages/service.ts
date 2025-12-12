@@ -224,7 +224,7 @@ export async function sendMessage(params: SendMessageParams): Promise<{
           mediaUrl,
           timestamp: updatedMessage!.createdAt.toISOString(),
           status: 'sent',
-          senderName: null, // Could fetch agent name
+          senderName: undefined, // Could fetch agent name
         },
         _source: 'other',
       });

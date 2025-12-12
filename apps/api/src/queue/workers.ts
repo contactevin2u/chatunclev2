@@ -19,9 +19,9 @@ import { validityService } from '../services/validity.js';
 import { idempotencyService } from '../services/idempotency.js';
 import { conversationStateService } from '../services/conversation-state.js';
 
-const connection = config.redis.isConfigured
+const connection = config.redis.isConfigured && config.redis.url
   ? { url: config.redis.url }
-  : undefined;
+  : null;
 
 let workers: Worker[] = [];
 
@@ -255,7 +255,7 @@ async function processConversationTimers(job: Job<ConversationTimerJobData>): Pr
 // ============================================
 
 export function initializeWorkers(): void {
-  if (!config.redis.isConfigured) {
+  if (!connection) {
     console.log('[Workers] Redis not configured, workers disabled');
     return;
   }

@@ -13,7 +13,7 @@ import { Boom } from '@hapi/boom';
 import NodeCache from 'node-cache';
 import P from 'pino';
 import { db, messages } from '../../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type {
   ChannelConfig,
   ConnectionResult,
@@ -553,7 +553,8 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     if (!sock) return null;
 
     try {
-      return await sock.profilePictureUrl(jid, 'preview');
+      const url = await sock.profilePictureUrl(jid, 'preview');
+      return url ?? null;
     } catch {
       return null;
     }
@@ -823,8 +824,8 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     const messageCache = this.messageCaches.get(accountId);
 
     for (const msg of messages) {
-      // Skip status messages
-      if (msg.key.remoteJid === 'status@broadcast') continue;
+      // Skip if no key or status messages
+      if (!msg.key || msg.key.remoteJid === 'status@broadcast') continue;
 
       // Cache message for getMessage callback (critical for v7 retries)
       if (messageCache && msg.key.id && msg.message) {
@@ -861,19 +862,11 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
       }
 
       if (status) {
-        // Emit status update event
-        this.emitStatus({
-          accountId,
-          messageId: key.id,
-          status,
-          timestamp: new Date(),
-        });
-
-        // Update database
+        // Update database with message delivery status
         try {
           await db
             .update(messages)
-            .set({ status, updatedAt: new Date() })
+            .set({ status: sql`${status}` })
             .where(eq(messages.channelMessageId, key.id));
         } catch (error) {
           console.error('[WhatsApp] Failed to update message status:', error);
@@ -979,7 +972,7 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     accountId: string,
     msg: proto.IWebMessageInfo
   ): IncomingMessage | null {
-    if (!msg.key.remoteJid || !msg.message) return null;
+    if (!msg.key || !msg.key.remoteJid || !msg.message) return null;
 
     const messageContent = msg.message;
     let contentType: ContentType = 'text';
@@ -1021,7 +1014,7 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
       return null;
     }
 
-    const isGroup = isJidGroup(msg.key.remoteJid);
+    const isGroup = isJidGroup(msg.key.remoteJid) ?? false;
     const senderId = msg.key.participant || msg.key.remoteJid;
 
     return {

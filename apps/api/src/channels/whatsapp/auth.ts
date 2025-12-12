@@ -4,7 +4,7 @@ import type {
   AuthenticationCreds,
 } from '@whiskeysockets/baileys';
 import { initAuthCreds, proto, BufferJSON } from '@whiskeysockets/baileys';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db, whatsappAuthState } from '../../db/index.js';
 
 /**
@@ -77,7 +77,7 @@ export class PostgresAuthState {
           target: [whatsappAuthState.accountId, whatsappAuthState.dataType, whatsappAuthState.dataKey],
           set: {
             dataValue: serialized,
-            updatedAt: new Date(),
+            updatedAt: sql`now()`,
           },
         });
 
@@ -163,7 +163,7 @@ export class PostgresAuthState {
               target: [whatsappAuthState.accountId, whatsappAuthState.dataType, whatsappAuthState.dataKey],
               set: {
                 dataValue: op.dataValue,
-                updatedAt: new Date(),
+                updatedAt: sql`now()`,
               },
             });
         }

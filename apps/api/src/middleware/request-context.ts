@@ -59,7 +59,7 @@ export function requestContext() {
     const originalWriteHead = res.writeHead.bind(res);
     let headersWritten = false;
 
-    res.writeHead = function(
+    (res as any).writeHead = function(
       statusCode: number,
       statusMessage?: string | Record<string, unknown>,
       headers?: Record<string, unknown>
@@ -72,7 +72,7 @@ export function requestContext() {
       }
 
       if (typeof statusMessage === 'object') {
-        return originalWriteHead(statusCode, statusMessage);
+        return originalWriteHead(statusCode, statusMessage as any);
       }
       return originalWriteHead(statusCode, statusMessage, headers as any);
     };

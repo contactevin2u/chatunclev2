@@ -319,14 +319,19 @@ export async function updateConversationOnNewMessage(
   conversationId: string,
   fromContact: boolean
 ): Promise<void> {
+  const updateData = fromContact
+    ? {
+        lastMessageAt: new Date(),
+        unreadCount: sql`${conversations.unreadCount} + 1`,
+        updatedAt: new Date(),
+      }
+    : {
+        lastMessageAt: new Date(),
+        updatedAt: new Date(),
+      };
+
   await db
     .update(conversations)
-    .set({
-      lastMessageAt: new Date(),
-      unreadCount: fromContact
-        ? sql`${conversations.unreadCount} + 1`
-        : conversations.unreadCount,
-      updatedAt: new Date(),
-    })
+    .set(updateData)
     .where(eq(conversations.id, conversationId));
 }

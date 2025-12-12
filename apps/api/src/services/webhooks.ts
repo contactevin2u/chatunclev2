@@ -277,7 +277,7 @@ export class WebhookService {
 
       const response = await fetch(config.url, {
         method: 'POST',
-        headers,
+        headers: headers as unknown as Record<string, string>,
         body: JSON.stringify(delivery.payload),
         signal: controller.signal,
       });
@@ -499,8 +499,7 @@ export class WebhookService {
       data: {
         messageSid: 'test_message_id',
         status: 'sent',
-        test: true,
-      },
+      } as any,
     };
 
     const timestamp = Math.floor(Date.now() / 1000);

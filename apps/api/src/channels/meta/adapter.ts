@@ -360,7 +360,7 @@ export class MetaAdapterImpl extends BaseChannelAdapter implements MetaAdapter {
         this.getMessagesEndpoint(session),
         messagePayload,
         params.accountId
-      );
+      ) as { message_id?: string; error?: { message?: string } };
 
       if (result.message_id) {
         console.log(`[Meta] ${session.platform} message sent: ${result.message_id}`);
@@ -419,7 +419,7 @@ export class MetaAdapterImpl extends BaseChannelAdapter implements MetaAdapter {
         this.getMessagesEndpoint(session),
         messageData,
         accountId
-      );
+      ) as { message_id?: string };
 
       return {
         success: true,
@@ -480,7 +480,7 @@ export class MetaAdapterImpl extends BaseChannelAdapter implements MetaAdapter {
         this.getMessagesEndpoint(session),
         messageData,
         accountId
-      );
+      ) as { message_id?: string };
 
       return {
         success: true,
@@ -633,7 +633,7 @@ export class MetaAdapterImpl extends BaseChannelAdapter implements MetaAdapter {
         contactId,
         { fields },
         accountId
-      );
+      ) as { name?: string; username?: string; first_name?: string; last_name?: string; profile_pic?: string };
 
       return {
         displayName:
@@ -673,13 +673,13 @@ export class MetaAdapterImpl extends BaseChannelAdapter implements MetaAdapter {
     accessToken: string,
     pageId: string
   ): Promise<{ name: string; id: string }> {
-    const response = await this.graphApiRequest(accessToken, 'GET', pageId, { fields: 'id,name' });
+    const response = await this.graphApiRequest(accessToken, 'GET', pageId, { fields: 'id,name' }) as { name?: string; id?: string };
 
     if (!response.id) {
       throw new Error('Invalid page access token or page ID');
     }
 
-    return response;
+    return { name: response.name || '', id: response.id };
   }
 
   /**

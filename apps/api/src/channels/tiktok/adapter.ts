@@ -253,7 +253,7 @@ export class TikTokAdapterImpl extends BaseChannelAdapter implements TikTokAdapt
           conversation_id: params.recipientId,
           ...messagePayload,
         }
-      );
+      ) as { code?: number; data?: { message_id?: string }; message?: string };
 
       if (response.code === 0 && response.data?.message_id) {
         console.log(`[TikTok] Message sent: ${response.data.message_id}`);
@@ -388,7 +388,7 @@ export class TikTokAdapterImpl extends BaseChannelAdapter implements TikTokAdapt
 
     const response = await this.apiRequest(session, 'GET', '/api/customer_service/conversations', {
       page_size: pageSize,
-    });
+    }) as { code?: number; data?: { conversations?: TikTokConversation[] } };
 
     if (response.code === 0 && response.data?.conversations) {
       return response.data.conversations;
@@ -417,7 +417,7 @@ export class TikTokAdapterImpl extends BaseChannelAdapter implements TikTokAdapt
       'GET',
       `/api/customer_service/conversations/${encodeURIComponent(conversationId)}/messages`,
       { page_size: pageSize }
-    );
+    ) as { code?: number; data?: { messages?: TikTokMessage[] } };
 
     if (response.code === 0 && response.data?.messages) {
       return response.data.messages;
@@ -671,7 +671,7 @@ export class TikTokAdapterImpl extends BaseChannelAdapter implements TikTokAdapt
       content,
       mediaUrl,
       timestamp: messageTimestamp,
-      isFromMe: msg.sender_type === 'SELLER',
+      isFromMe: false, // We filter out SELLER messages above, so this is always from buyer
       rawMessage: msg,
     };
 

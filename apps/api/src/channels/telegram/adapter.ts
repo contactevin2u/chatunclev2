@@ -454,7 +454,7 @@ export class TelegramAdapterImpl extends BaseChannelAdapter implements TelegramA
     }
 
     try {
-      const photos = await session.bot.api.getUserProfilePhotos(userId, { limit });
+      const photos = await session.bot.api.getUserProfilePhotos(parseInt(userId, 10), { limit });
 
       if (photos.total_count === 0) {
         return [];
@@ -708,7 +708,7 @@ export class TelegramAdapterImpl extends BaseChannelAdapter implements TelegramA
       content: content || caption,
       mediaUrl,
       mediaMimeType,
-      fileName,
+      mediaFileName: fileName,
       replyToMessageId,
       replyToContent,
       replyToSenderName,

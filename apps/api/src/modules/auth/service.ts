@@ -41,9 +41,9 @@ export async function comparePassword(password: string, hash: string): Promise<b
  * Generate JWT token
  */
 export function generateToken(payload: TokenPayload): string {
-  return jwt.sign(payload, config.jwtSecret, {
+  return jwt.sign(payload as object, config.jwtSecret, {
     expiresIn: config.jwtExpiresIn,
-  });
+  } as jwt.SignOptions);
 }
 
 /**

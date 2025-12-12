@@ -5,10 +5,11 @@
     "rootDir": "./src",
     "lib": ["ES2022"],
     "types": ["node"],
-    "strict": false,
-    "strictNullChecks": false,
+    "strict": true,
+    "strictNullChecks": true,
     "noUncheckedIndexedAccess": false,
-    "noImplicitAny": false
+    "noImplicitAny": true,
+    "skipLibCheck": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

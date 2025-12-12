@@ -3,27 +3,27 @@ import { config } from '../config/env.js';
 import { QUEUE_CONFIG } from '../config/constants.js';
 
 // Default connection (in-memory if Redis not configured)
-const connection = config.redis.isConfigured
+const connection = config.redis.isConfigured && config.redis.url
   ? { url: config.redis.url }
-  : undefined;
+  : null;
 
 // ============================================
 // QUEUE DEFINITIONS
 // ============================================
 
-export const scheduledMessageQueue = config.redis.isConfigured
+export const scheduledMessageQueue = connection
   ? new Queue('scheduled-messages', { connection })
   : null;
 
-export const historySyncQueue = config.redis.isConfigured
+export const historySyncQueue = connection
   ? new Queue('history-sync', { connection })
   : null;
 
-export const mediaProcessingQueue = config.redis.isConfigured
+export const mediaProcessingQueue = connection
   ? new Queue('media-processing', { connection })
   : null;
 
-export const notificationQueue = config.redis.isConfigured
+export const notificationQueue = connection
   ? new Queue('notifications', { connection })
   : null;
 
@@ -31,19 +31,19 @@ export const notificationQueue = config.redis.isConfigured
 // TWILIO-LIKE QUEUES
 // ============================================
 
-export const webhookDeliveryQueue = config.redis.isConfigured
+export const webhookDeliveryQueue = connection
   ? new Queue('webhook-delivery', { connection })
   : null;
 
-export const messageValidityQueue = config.redis.isConfigured
+export const messageValidityQueue = connection
   ? new Queue('message-validity', { connection })
   : null;
 
-export const idempotencyCleanupQueue = config.redis.isConfigured
+export const idempotencyCleanupQueue = connection
   ? new Queue('idempotency-cleanup', { connection })
   : null;
 
-export const conversationTimerQueue = config.redis.isConfigured
+export const conversationTimerQueue = connection
   ? new Queue('conversation-timers', { connection })
   : null;
 
