@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@chatuncle/shared": "workspace:*",
+    "@chatuncle/shared": "*",
     "next": "14.2.15",
     "react": "18.3.1",
     "react-dom": "18.3.1",
