@@ -1515,45 +1515,20 @@ class SessionManager {
           result = await sock.sendMessage(jid, { text: payload.content }, { quoted: quotedMsg });
           break;
 
-        case 'image': {
+        case 'image':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          // Download image to buffer to avoid Sharp/thumbnail issues with URL fetch
-          console.log(`[WA] Downloading image from ${payload.mediaUrl}`);
-          const imgResp = await fetch(payload.mediaUrl);
-          if (!imgResp.ok) {
-            throw new Error(`Failed to fetch image: ${imgResp.status}`);
-          }
-          const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
-          const imgMime = imgResp.headers.get('content-type') || 'image/jpeg';
-          console.log(`[WA] Sending image to ${jid} (${imgBuffer.length} bytes, ${imgMime})`);
-          // Pre-assert sessions BEFORE sendMessage to prevent session corruption during media prep
-          // Baileys internally closes/reopens Signal sessions for media which corrupts encryption
-          try {
-            await sock.assertSessions([jid], false);
-            console.log(`[WA] Pre-asserted session for ${jid}`);
-          } catch (e) {
-            console.log(`[WA] Pre-assert session note:`, e);
-          }
+          // Simple URL-based sending - original working format (pre-Dec 11 2025)
           result = await sock.sendMessage(jid, {
-            image: imgBuffer,
-            mimetype: imgMime,
+            image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
           break;
-        }
 
         case 'video':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
-          }
-          // Pre-assert sessions BEFORE sendMessage to prevent session corruption during media prep
-          try {
-            await sock.assertSessions([jid], false);
-            console.log(`[WA] Pre-asserted session for video to ${jid}`);
-          } catch (e) {
-            console.log(`[WA] Pre-assert session note:`, e);
           }
           result = await sock.sendMessage(jid, {
             video: { url: payload.mediaUrl },
@@ -1742,52 +1717,26 @@ class SessionManager {
           }, { quoted: quotedMsg });
           break;
 
-        case 'image': {
+        case 'image':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          console.log(`[WA][Group] Sending image from URL: ${payload.mediaUrl}`);
-
-          // Fetch image as buffer - more reliable for WhatsApp media upload
-          const grpImgResponse = await fetch(payload.mediaUrl);
-          if (!grpImgResponse.ok) {
-            throw new Error(`Failed to fetch image: ${grpImgResponse.status} ${grpImgResponse.statusText}`);
-          }
-          const grpImgBuffer = Buffer.from(await grpImgResponse.arrayBuffer());
-          const grpContentType = grpImgResponse.headers.get('content-type') || 'image/jpeg';
-          console.log(`[WA][Group] Fetched image: ${grpImgBuffer.length} bytes, type: ${grpContentType}`);
-
+          // Simple URL-based sending - original working format (pre-Dec 11 2025)
           result = await sock.sendMessage(groupJid, {
-            image: grpImgBuffer,
-            mimetype: grpContentType,
+            image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
-          console.log(`[WA][Group] Image send result:`, JSON.stringify(result, null, 2));
           break;
-        }
 
-        case 'video': {
+        case 'video':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
           }
-          console.log(`[WA] Sending video from URL: ${payload.mediaUrl}`);
-
-          // Fetch video as buffer
-          const vidResponse = await fetch(payload.mediaUrl);
-          if (!vidResponse.ok) {
-            throw new Error(`Failed to fetch video: ${vidResponse.status} ${vidResponse.statusText}`);
-          }
-          const vidBuffer = Buffer.from(await vidResponse.arrayBuffer());
-          const vidContentType = vidResponse.headers.get('content-type') || 'video/mp4';
-          console.log(`[WA] Fetched video: ${vidBuffer.length} bytes, type: ${vidContentType}`);
-
           result = await sock.sendMessage(groupJid, {
-            video: vidBuffer,
-            mimetype: vidContentType,
+            video: { url: payload.mediaUrl },
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
           break;
-        }
 
         case 'audio':
           if (!payload.mediaUrl) {
