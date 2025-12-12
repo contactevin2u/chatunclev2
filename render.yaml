@@ -1,15 +1,14 @@
-# Render Blueprint for ChatUncle
-# Deploy: https://render.com/deploy
+# ChatUncle V2 Render Blueprint
+# Deploy to Singapore region
 
 services:
-  # Backend API Service
   - type: web
     name: chatuncle-api
     runtime: node
     region: singapore
     plan: starter
-    buildCommand: cd backend && npm install && npm run build && npm run migrate
-    startCommand: cd backend && npm start
+    buildCommand: npm install && npm run build --workspace=@chatuncle/api
+    startCommand: npm run start --workspace=@chatuncle/api
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -22,20 +21,43 @@ services:
           property: connectionString
       - key: JWT_SECRET
         generateValue: true
-      - key: JWT_EXPIRES_IN
-        value: 7d
+      - key: FRONTEND_URL
+        sync: false
       - key: CORS_ORIGIN
-        sync: false  # Set this to your Vercel frontend URL after deployment
-    disk:
-      name: whatsapp-sessions
-      mountPath: /opt/render/project/src/backend/sessions
-      sizeGB: 1
+        sync: false
+      # Cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # OrderOps
+      - key: ORDEROPS_API_URL
+        sync: false
+      - key: ORDEROPS_USERNAME
+        sync: false
+      - key: ORDEROPS_PASSWORD
+        sync: false
+      # OpenAI
+      - key: OPENAI_API_KEY
+        sync: false
+      # Meta
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_VERIFY_TOKEN
+        sync: false
+      # TikTok
+      - key: TIKTOK_APP_KEY
+        sync: false
+      - key: TIKTOK_APP_SECRET
+        sync: false
 
 databases:
-  # PostgreSQL Database
   - name: chatuncle-db
     region: singapore
-    plan: basic-256mb  # Options: free, basic-256mb, basic-1gb, basic-4gb, pro-4gb+
-    databaseName: chatuncle
-    user: chatuncle_user
+    plan: starter
     postgresMajorVersion: 16
+    ipAllowList: []

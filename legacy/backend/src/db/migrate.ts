@@ -1715,3 +1715,16 @@ async function runMigrations() {
 }
 
 runMigrations();
+
+// Clear corrupted Signal sessions (keeps credentials intact)
+export async function clearSignalSessions(accountId: string): Promise<void> {
+  // Only clear session keys, not credentials or identity keys
+  const result = await query(
+    `DELETE FROM whatsapp_auth_keys 
+     WHERE account_id = $1 
+     AND key_type IN ('session', 'sender-key', 'sender-key-memory')
+     RETURNING key_type, key_id`,
+    [accountId]
+  );
+  console.log(`[Migration] Cleared ${result.length} corrupted session keys for account ${accountId}`);
+}
