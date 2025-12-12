@@ -1523,6 +1523,14 @@ class SessionManager {
           const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
           const imgMime = imgResp.headers.get('content-type') || 'image/jpeg';
           console.log(`[WA] Sending image to ${jid} (${imgBuffer.length} bytes, ${imgMime})`);
+          // Pre-assert sessions BEFORE sendMessage to prevent session corruption during media prep
+          // Baileys internally closes/reopens Signal sessions for media which corrupts encryption
+          try {
+            await sock.assertSessions([jid], false);
+            console.log(`[WA] Pre-asserted session for ${jid}`);
+          } catch (e) {
+            console.log(`[WA] Pre-assert session note:`, e);
+          }
           result = await sock.sendMessage(jid, {
             image: imgBuffer,
             mimetype: imgMime,
@@ -1534,6 +1542,13 @@ class SessionManager {
         case 'video':
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for video');
+          }
+          // Pre-assert sessions BEFORE sendMessage to prevent session corruption during media prep
+          try {
+            await sock.assertSessions([jid], false);
+            console.log(`[WA] Pre-asserted session for video to ${jid}`);
+          } catch (e) {
+            console.log(`[WA] Pre-assert session note:`, e);
           }
           result = await sock.sendMessage(jid, {
             video: { url: payload.mediaUrl },
