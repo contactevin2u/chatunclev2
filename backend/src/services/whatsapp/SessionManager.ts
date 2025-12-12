@@ -1606,23 +1606,9 @@ class SessionManager {
           const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
           console.log(`[WA] Image downloaded: ${imageBuffer.length} bytes, type: ${imageResponse.headers.get('content-type')}`);
 
-          // EXPERIMENT: Try sending to LID instead of PN if mapping exists
-          let targetJid = jid;
-          try {
-            const lidMappings = await sock.signalRepository?.lidMapping?.getLIDsForPNs([jid]);
-            if (lidMappings && lidMappings.length > 0 && lidMappings[0].lid) {
-              // lidMappings[0].lid already contains @lid suffix (e.g., "59601412206606@lid")
-              const lidJid = lidMappings[0].lid.includes('@') ? lidMappings[0].lid : `${lidMappings[0].lid}@lid`;
-              console.log(`[WA] EXPERIMENT: Sending to LID ${lidJid} instead of PN ${jid}`);
-              targetJid = lidJid;
-            }
-          } catch (lidErr) {
-            console.log(`[WA] Could not get LID, using PN:`, lidErr);
-          }
-
-          // Send using buffer (more reliable than URL)
-          console.log(`[WA] Sending image as buffer to ${targetJid}...`);
-          result = await sock.sendMessage(targetJid, {
+          // Send using buffer to PN (LID sending has delivery issues per Baileys #1950)
+          console.log(`[WA] Sending image as buffer to ${jid}...`);
+          result = await sock.sendMessage(jid, {
             image: imageBuffer,
             caption: payload.content || undefined,
             mimetype: imageResponse.headers.get('content-type') || 'image/jpeg',
