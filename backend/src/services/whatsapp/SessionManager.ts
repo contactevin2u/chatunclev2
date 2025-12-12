@@ -1514,106 +1514,12 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-
-          // === DIAGNOSTIC LOGGING FOR IMAGE SEND DEBUGGING ===
-          console.log(`[WA] ========== IMAGE SEND DIAGNOSTICS ==========`);
-          console.log(`[WA] Recipient JID: ${jid}`);
-          console.log(`[WA] JID Type: ${isLidUser(jid) ? 'LID' : 'PN (phone number)'}`);
-          console.log(`[WA] Sender ID (me.id): ${sock.user?.id}`);
-          console.log(`[WA] Sender LID (me.lid): ${sock.authState?.creds?.me?.lid || 'none'}`);
-          console.log(`[WA] Media URL: ${payload.mediaUrl}`);
-
-          // Check LID mapping for recipient
-          try {
-            const recipientPn = jid.replace('@s.whatsapp.net', '');
-            const lidMapping = await sock.signalRepository?.lidMapping?.getLIDsForPNs([jid]);
-            if (lidMapping && lidMapping.length > 0) {
-              console.log(`[WA] LID mapping for recipient:`, lidMapping.map((m: any) => `PN:${m.pn} -> LID:${m.lid}`).join(', '));
-            } else {
-              console.log(`[WA] No LID mapping found for recipient ${recipientPn}`);
-            }
-
-            // Also check reverse - what PNs map to any LID we might have
-            const dbMapping = await queryOne(
-              `SELECT lid, pn FROM lid_pn_mappings WHERE account_id = $1 AND pn = $2`,
-              [accountId, recipientPn]
-            );
-            if (dbMapping) {
-              console.log(`[WA] DB LID mapping: PN ${dbMapping.pn} -> LID ${dbMapping.lid}`);
-            }
-          } catch (mapErr) {
-            console.log(`[WA] LID mapping check error:`, mapErr);
-          }
-
-          // Check if media URL is accessible
-          try {
-            const headResp = await fetch(payload.mediaUrl, { method: 'HEAD' });
-            console.log(`[WA] Media URL accessible: ${headResp.ok} (status: ${headResp.status})`);
-            console.log(`[WA] Media Content-Type: ${headResp.headers.get('content-type')}`);
-            console.log(`[WA] Media Content-Length: ${headResp.headers.get('content-length')} bytes`);
-          } catch (urlErr) {
-            console.error(`[WA] Media URL check FAILED:`, urlErr);
-          }
-
-          // Force refresh Signal session before media send to ensure fresh keys
-          console.log(`[WA] Forcing Signal session refresh for ${jid}...`);
-          try {
-            const didFetch = await sock.assertSessions([jid], true); // force=true
-            console.log(`[WA] Session refresh result: ${didFetch ? 'FETCHED NEW SESSION' : 'SESSION EXISTS'}`);
-          } catch (sessErr) {
-            console.error(`[WA] Session refresh failed:`, sessErr);
-          }
-
-          // Get device list for recipient (force fresh fetch, no cache)
-          try {
-            // useCache=false to force fresh device list from WhatsApp servers
-            const devices = await sock.getUSyncDevices([jid], false, false);
-            console.log(`[WA] Recipient devices (${devices.length}):`, devices.map(d => `${d.user}:${d.device}@${d.jid}`).join(', '));
-
-            // If only device 0, try to get more info
-            if (devices.length === 1) {
-              console.log(`[WA] WARNING: Only 1 device found. Recipient may have more devices not synced.`);
-            }
-          } catch (devErr) {
-            console.log(`[WA] Could not fetch devices:`, devErr);
-          }
-
-          // Clear any cached participant nodes to force fresh encryption
-          // This ensures message goes to ALL devices, not just cached ones
-          console.log(`[WA] Clearing user device cache for fresh encryption...`);
-          try {
-            // Force clear cached sessions for this recipient
-            await sock.assertSessions([jid], true);
-
-            // Also try to refresh the sender's own device list
-            const myJid = sock.user?.id;
-            if (myJid) {
-              await sock.assertSessions([myJid], true);
-            }
-          } catch (cacheErr) {
-            console.log(`[WA] Cache clear note:`, cacheErr);
-          }
-
-          console.log(`[WA] ============================================`);
-          console.log(`[WA] Downloading image to buffer first...`);
-
-          // Download image to buffer first for reliability
-          // This ensures we control the fetch and can diagnose issues
-          const imageResponse = await fetch(payload.mediaUrl);
-          if (!imageResponse.ok) {
-            throw new Error(`Failed to fetch image: ${imageResponse.status} ${imageResponse.statusText}`);
-          }
-          const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-          console.log(`[WA] Image downloaded: ${imageBuffer.length} bytes, type: ${imageResponse.headers.get('content-type')}`);
-
-          // Send using buffer to PN (LID sending has delivery issues per Baileys #1950)
-          console.log(`[WA] Sending image as buffer to ${jid}...`);
+          // Simple image send using URL (same pattern as video)
+          console.log(`[WA] Sending image to ${jid} via URL`);
           result = await sock.sendMessage(jid, {
-            image: imageBuffer,
+            image: { url: payload.mediaUrl },
             caption: payload.content || undefined,
-            mimetype: imageResponse.headers.get('content-type') || 'image/jpeg',
           }, { quoted: quotedMsg });
-          console.log(`[WA] Image send result:`, JSON.stringify(result, null, 2));
           break;
         }
 
