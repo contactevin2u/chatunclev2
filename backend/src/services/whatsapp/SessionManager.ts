@@ -1514,10 +1514,18 @@ class SessionManager {
           if (!payload.mediaUrl) {
             throw new Error('Media URL is required for image');
           }
-          // Simple image send using URL (same pattern as video)
-          console.log(`[WA] Sending image to ${jid} via URL`);
+          // Download image to buffer to avoid Sharp/thumbnail issues with URL fetch
+          console.log(`[WA] Downloading image from ${payload.mediaUrl}`);
+          const imgResp = await fetch(payload.mediaUrl);
+          if (!imgResp.ok) {
+            throw new Error(`Failed to fetch image: ${imgResp.status}`);
+          }
+          const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+          const imgMime = imgResp.headers.get('content-type') || 'image/jpeg';
+          console.log(`[WA] Sending image to ${jid} (${imgBuffer.length} bytes, ${imgMime})`);
           result = await sock.sendMessage(jid, {
-            image: { url: payload.mediaUrl },
+            image: imgBuffer,
+            mimetype: imgMime,
             caption: payload.content || undefined,
           }, { quoted: quotedMsg });
           break;
