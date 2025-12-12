@@ -58,5 +58,5 @@ services:
 databases:
   - name: chatuncle-db
     region: singapore
-    plan: free
+    plan: basic-1gb
     ipAllowList: []
