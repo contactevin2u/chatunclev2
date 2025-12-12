@@ -2,7 +2,7 @@ import { Worker, Job } from 'bullmq';
 import { config } from '../config/env.js';
 import { QUEUE_CONFIG } from '../config/constants.js';
 import { getChannelRouter } from '../channels/router.js';
-import { broadcastMessageStatus } from '../realtime/socket.js';
+import { broadcastMessageStatus, broadcastHistorySyncProgress } from '../realtime/socket.js';
 import { db, scheduledMessages, messages } from '../db/index.js';
 import { eq } from 'drizzle-orm';
 import type {
@@ -106,16 +106,48 @@ async function processScheduledMessage(job: Job<ScheduledMessageJobData>): Promi
 // ============================================
 
 async function processHistorySync(job: Job<HistorySyncJobData>): Promise<void> {
-  const { accountId, type } = job.data;
+  const { accountId, type, syncGroups, syncProfiles, groupJids, contactJids } = job.data;
 
   console.log(`[Worker] Processing history sync for ${accountId} (${type})`);
 
   try {
-    // TODO: Implement history sync logic
-    // This would:
-    // 1. Get messages from WhatsApp using Baileys
-    // 2. Batch insert to database
-    // 3. Emit progress events via Socket.io
+    const router = getChannelRouter();
+    const adapter = router.getAdapter('whatsapp');
+
+    if (!adapter) {
+      throw new Error('WhatsApp adapter not available');
+    }
+
+    if (!adapter.isConnected(accountId)) {
+      throw new Error('WhatsApp session not connected');
+    }
+
+    // Handle different sync types
+    if (type === 'metadata_only') {
+      // Sync metadata only (groups and/or profiles)
+      if (syncGroups && groupJids && groupJids.length > 0) {
+        console.log(`[Worker] Syncing ${groupJids.length} groups for ${accountId}`);
+        await (adapter as any).syncGroupMetadata(accountId, groupJids);
+      }
+
+      if (syncProfiles && contactJids && contactJids.length > 0) {
+        console.log(`[Worker] Syncing ${contactJids.length} contact profiles for ${accountId}`);
+        await (adapter as any).syncContactProfiles(accountId, contactJids);
+      }
+    } else if (type === 'full' || type === 'recent') {
+      // Full or recent history sync
+      // Get all groups and sync metadata
+      if (syncGroups !== false) {
+        const groups = await (adapter as any).getGroups(accountId);
+        if (groups.length > 0) {
+          console.log(`[Worker] Syncing metadata for ${groups.length} groups`);
+          await (adapter as any).syncGroupMetadata(accountId, groups);
+        }
+      }
+
+      // Note: Contact sync happens automatically via Baileys events
+      // This worker is mainly for on-demand or scheduled metadata refresh
+    }
 
     console.log(`[Worker] History sync completed for ${accountId}`);
   } catch (error) {

@@ -217,9 +217,9 @@ export async function batchUpdateContactProfiles(
         profile_pic_url = COALESCE(updates.profile_pic, contacts.profile_pic_url),
         updated_at = NOW()
       FROM (
-        SELECT UNNEST($2::text[]) as wa_id, UNNEST($3::text[]) as profile_pic
+        SELECT UNNEST($2::text[]) as channel_contact_id, UNNEST($3::text[]) as profile_pic
       ) as updates
-      WHERE contacts.account_id = $1 AND contacts.wa_id = updates.wa_id
+      WHERE contacts.account_id = $1 AND contacts.channel_contact_id = updates.channel_contact_id
       `,
       [
         accountId,

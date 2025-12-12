@@ -18,6 +18,7 @@
   "dependencies": {
     "@chatuncle/shared": "*",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "pino": "^9.5.0",
     "node-cache": "^5.1.2",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.12.0",

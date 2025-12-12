@@ -5,11 +5,15 @@ import makeWASocket, {
   type WASocket,
   type ConnectionState,
   type proto,
+  type Contact,
   Browsers,
   isJidGroup,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import NodeCache from 'node-cache';
+import P from 'pino';
+import { db, messages } from '../../db/index.js';
+import { eq } from 'drizzle-orm';
 import type {
   ChannelConfig,
   ConnectionResult,
@@ -32,6 +36,16 @@ import { MessageQueue } from './message-queue.js';
 import { AntiBanService } from './anti-ban.js';
 import { WHATSAPP_CONFIG, RATE_LIMITS } from '../../config/constants.js';
 import { batchUpsertLidPnMappings } from '../../db/batch-operations.js';
+import { processHistorySyncBackground, type HistorySyncProgressCallback } from './history-sync.js';
+import {
+  syncGroupMetadataBackground,
+  syncContactProfilesBackground,
+  syncContactsFromBaileys,
+  extractContactJids,
+  extractGroupJidsFromContacts,
+  type MetadataSyncProgressCallback,
+} from './metadata-sync.js';
+import { runInBackground } from '../../utils/parallel.js';
 
 /**
  * WhatsApp adapter implementation using Baileys v7
@@ -59,15 +73,48 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
 
   private qrHandlers: QRHandler[] = [];
   private pairingCodeHandlers: PairingCodeHandler[] = [];
+  private historySyncProgressHandlers: HistorySyncProgressCallback[] = [];
+  private metadataSyncProgressHandlers: MetadataSyncProgressCallback[] = [];
 
   private config: ChannelConfig = {};
 
+  // Pino logger required by Baileys v7
+  private logger = P({ level: process.env.NODE_ENV === 'production' ? 'silent' : 'warn' });
+
+  // Version caching to avoid rate limits from repeated fetchLatestBaileysVersion calls
+  private cachedVersion: [number, number, number] | null = null;
+  private versionFetchedAt: number = 0;
+
   async initialize(config: ChannelConfig): Promise<void> {
     this.config = config;
+    // Pre-fetch and cache Baileys version on startup
+    await this.fetchAndCacheVersion();
     console.log('[WhatsApp] Adapter initialized');
   }
 
-  async connect(accountId: string, credentials?: unknown): Promise<ConnectionResult> {
+  /**
+   * Fetch and cache Baileys version - called once on startup and refreshed hourly
+   */
+  private async fetchAndCacheVersion(): Promise<void> {
+    const now = Date.now();
+    if (this.cachedVersion && (now - this.versionFetchedAt) < WHATSAPP_CONFIG.VERSION_CACHE_MS) {
+      return;
+    }
+    try {
+      const { version } = await fetchLatestBaileysVersion();
+      this.cachedVersion = version;
+      this.versionFetchedAt = now;
+      console.log(`[WhatsApp] Cached Baileys version: ${version.join('.')}`);
+    } catch (error) {
+      console.error('[WhatsApp] Failed to fetch Baileys version:', error);
+      // Use fallback version if fetch fails
+      if (!this.cachedVersion) {
+        this.cachedVersion = [2, 3000, 0]; // Safe fallback
+      }
+    }
+  }
+
+  async connect(accountId: string, credentials?: unknown, usePairingCode: boolean = false): Promise<ConnectionResult> {
     if (this.isShuttingDown) {
       return { success: false, error: 'Adapter is shutting down' };
     }
@@ -103,28 +150,35 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
       const antiBan = new AntiBanService(accountId);
       this.antiBan.set(accountId, antiBan);
 
-      // Initialize caches (critical for Baileys v7)
-      const msgRetryCounterCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+      // Reuse existing caches if available (for reconnects), otherwise create new
+      const msgRetryCounterCache = this.msgRetryCounterCaches.get(accountId)
+        ?? new NodeCache({ stdTTL: 300, checkperiod: 60 });
       this.msgRetryCounterCaches.set(accountId, msgRetryCounterCache);
 
-      const messageCache = new NodeCache({ stdTTL: 600, checkperiod: 120 }); // 10 min TTL
+      const messageCache = this.messageCaches.get(accountId)
+        ?? new NodeCache({ stdTTL: 600, checkperiod: 120 }); // 10 min TTL
       this.messageCaches.set(accountId, messageCache);
 
-      const groupMetadataCache = new NodeCache({ stdTTL: 300, checkperiod: 60 }); // 5 min TTL
+      const groupMetadataCache = this.groupMetadataCaches.get(accountId)
+        ?? new NodeCache({ stdTTL: 300, checkperiod: 60 }); // 5 min TTL
       this.groupMetadataCaches.set(accountId, groupMetadataCache);
 
-      // Get latest Baileys version
-      const { version, isLatest } = await fetchLatestBaileysVersion();
-      console.log(`[WhatsApp] Using Baileys v${version.join('.')} (latest: ${isLatest})`);
+      // Use cached Baileys version (refreshed hourly) - prevents rate limits from repeated fetches
+      await this.fetchAndCacheVersion();
+      console.log(`[WhatsApp] Using Baileys v${this.cachedVersion!.join('.')}`);
 
       // Create socket with critical v7 configurations
       const sock = makeWASocket({
-        version,
+        version: this.cachedVersion!,
+        logger: this.logger, // Required by Baileys v7
         auth: {
           creds: authState.state.creds,
-          keys: makeCacheableSignalKeyStore(authState.state.keys, console),
+          keys: makeCacheableSignalKeyStore(authState.state.keys, this.logger),
         },
-        browser: Browsers.ubuntu(WHATSAPP_CONFIG.BROWSER_NAME),
+        // Pairing code requires Chrome/macOS browser; QR works with ubuntu
+        browser: usePairingCode
+          ? Browsers.macOS('Google Chrome')
+          : Browsers.ubuntu(WHATSAPP_CONFIG.BROWSER_NAME),
         printQRInTerminal: false,
         syncFullHistory: this.config.whatsapp?.syncHistory ?? WHATSAPP_CONFIG.SYNC_FULL_HISTORY,
         markOnlineOnConnect: WHATSAPP_CONFIG.MARK_ONLINE_ON_CONNECT,
@@ -132,9 +186,26 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
         // Critical v7 configurations:
         msgRetryCounterCache, // Prevents decryption loops
         getMessage: async (key) => {
-          // Try cache first, then return empty (Baileys will retry)
+          // Layer 1: Memory cache (fast)
           const cached = messageCache.get<proto.IMessage>(key.id || '');
           if (cached) return cached;
+
+          // Layer 2: Database fallback (for retries after restart)
+          try {
+            const dbMsg = await db.query.messages.findFirst({
+              where: eq(messages.channelMessageId, key.id || ''),
+            });
+            if (dbMsg?.rawMessage) {
+              const raw = dbMsg.rawMessage as proto.IWebMessageInfo;
+              if (raw.message) {
+                messageCache.set(key.id || '', raw.message); // Cache for next time
+                return raw.message;
+              }
+            }
+          } catch (error) {
+            console.error('[WhatsApp] getMessage DB lookup failed:', error);
+          }
+
           return undefined;
         },
         cachedGroupMetadata: async (jid) => {
@@ -148,6 +219,10 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
           } catch {
             return undefined;
           }
+        },
+        // Control which history messages to sync
+        shouldSyncHistoryMessage: () => {
+          return this.config.whatsapp?.syncHistory ?? WHATSAPP_CONFIG.SYNC_FULL_HISTORY;
         },
       });
 
@@ -167,8 +242,8 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
   }
 
   async connectWithPairingCode(accountId: string, phoneNumber: string): Promise<ConnectionResult> {
-    // First establish connection
-    const result = await this.connect(accountId);
+    // First establish connection with pairing code browser config
+    const result = await this.connect(accountId, undefined, true);
     if (!result.success) return result;
 
     const sock = this.sessions.get(accountId);
@@ -304,10 +379,16 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
         return this.sendMediaDirect(params as SendMediaParams);
       }
 
-      // Add quoted message if replying
+      // Add quoted message using contextInfo (correct v7 format, not "quoted" property)
       if (params.replyToMessageId) {
-        (messageContent as any).quoted = {
-          key: { remoteJid: params.recipientId, id: params.replyToMessageId },
+        (messageContent as any).contextInfo = {
+          stanzaId: params.replyToMessageId,
+          participant: isJidGroup(params.recipientId)
+            ? (params as any).quotedSenderId || params.recipientId
+            : params.recipientId,
+          quotedMessage: (params as any).replyToContent
+            ? { conversation: (params as any).replyToContent }
+            : undefined,
         };
       }
 
@@ -380,8 +461,13 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
         case 'audio':
           messageContent = {
             audio: { url: params.mediaUrl },
-            mimetype: params.mediaMimeType,
-            ptt: params.mediaMimeType?.includes('ogg'), // Voice note if OGG
+            mimetype: params.mediaMimeType || 'audio/ogg; codecs=opus',
+            // Voice note (PTT) detection: explicit flag, or infer from mime type/filename
+            ptt: (params as any).isVoiceNote ?? (
+              params.mediaMimeType?.includes('ogg') ||
+              params.mediaMimeType?.includes('opus') ||
+              params.mediaFileName?.endsWith('.ogg')
+            ),
           };
           break;
 
@@ -404,10 +490,16 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
           return { success: false, error: `Unsupported media type: ${params.contentType}` };
       }
 
-      // Add quoted message if replying
+      // Add quoted message using contextInfo (correct v7 format, not "quoted" property)
       if (params.replyToMessageId) {
-        (messageContent as any).quoted = {
-          key: { remoteJid: params.recipientId, id: params.replyToMessageId },
+        (messageContent as any).contextInfo = {
+          stanzaId: params.replyToMessageId,
+          participant: isJidGroup(params.recipientId)
+            ? (params as any).quotedSenderId || params.recipientId
+            : params.recipientId,
+          quotedMessage: (params as any).replyToContent
+            ? { conversation: (params as any).replyToContent }
+            : undefined,
         };
       }
 
@@ -491,6 +583,74 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     this.pairingCodeHandlers.push(handler);
   }
 
+  /**
+   * Register handler for history sync progress
+   */
+  onHistorySyncProgress(handler: HistorySyncProgressCallback): void {
+    this.historySyncProgressHandlers.push(handler);
+  }
+
+  /**
+   * Register handler for metadata sync progress
+   */
+  onMetadataSyncProgress(handler: MetadataSyncProgressCallback): void {
+    this.metadataSyncProgressHandlers.push(handler);
+  }
+
+  /**
+   * Manually trigger group metadata sync
+   */
+  async syncGroupMetadata(accountId: string, groupJids: string[]): Promise<void> {
+    const sock = this.sessions.get(accountId);
+    if (!sock) {
+      throw new Error('Session not connected');
+    }
+
+    syncGroupMetadataBackground(sock, accountId, groupJids, {
+      onProgress: (progress) => {
+        for (const handler of this.metadataSyncProgressHandlers) {
+          handler(progress);
+        }
+      },
+    });
+  }
+
+  /**
+   * Manually trigger contact profile sync
+   */
+  async syncContactProfiles(accountId: string, contactJids: string[]): Promise<void> {
+    const sock = this.sessions.get(accountId);
+    if (!sock) {
+      throw new Error('Session not connected');
+    }
+
+    syncContactProfilesBackground(sock, accountId, contactJids, {
+      onProgress: (progress) => {
+        for (const handler of this.metadataSyncProgressHandlers) {
+          handler(progress);
+        }
+      },
+    });
+  }
+
+  /**
+   * Get all groups for an account
+   */
+  async getGroups(accountId: string): Promise<string[]> {
+    const sock = this.sessions.get(accountId);
+    if (!sock) {
+      throw new Error('Session not connected');
+    }
+
+    try {
+      const groups = await sock.groupFetchAllParticipating();
+      return Object.keys(groups);
+    } catch (error) {
+      console.error(`[WhatsApp] Failed to fetch groups:`, error);
+      return [];
+    }
+  }
+
   // === PRIVATE METHODS ===
 
   private setupEventHandlers(
@@ -523,27 +683,78 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
       await this.handleReactions(accountId, reactions);
     });
 
-    // LID/PN mapping (Baileys v7) - Critical for deduplication
+    // History sync (Baileys v7) - Process in background, NEVER block live messages
     sock.ev.on('messaging-history.set' as any, async (data: any) => {
-      // Handle LID mappings from history sync if available
-      if (data?.isLatest && data?.messages) {
-        console.log(`[WhatsApp] Processing ${data.messages.length} history messages`);
+      if (data?.messages || data?.contacts) {
+        console.log(`[WhatsApp] History sync received for ${accountId}: ${data.messages?.length || 0} messages, ${data.contacts?.length || 0} contacts`);
+
+        // Process in background - does NOT block live messages
+        processHistorySyncBackground(accountId, {
+          messages: data.messages || [],
+          contacts: data.contacts || [],
+          isLatest: data.isLatest,
+        }, {
+          onProgress: (progress) => {
+            // Notify all registered progress handlers
+            for (const handler of this.historySyncProgressHandlers) {
+              handler(progress);
+            }
+          },
+        });
+
+        // If this is after initial sync and we have contacts, sync metadata in background
+        if (data.isLatest && data.contacts?.length > 0) {
+          const contactJids = extractContactJids(data.contacts);
+          const groupJids = extractGroupJidsFromContacts(data.contacts);
+
+          // Sync group metadata in background (parallel)
+          if (groupJids.length > 0) {
+            syncGroupMetadataBackground(sock, accountId, groupJids, {
+              onProgress: (progress) => {
+                for (const handler of this.metadataSyncProgressHandlers) {
+                  handler(progress);
+                }
+              },
+            });
+          }
+
+          // Sync contact profile pics in background (parallel)
+          if (contactJids.length > 0) {
+            syncContactProfilesBackground(sock, accountId, contactJids, {
+              onProgress: (progress) => {
+                for (const handler of this.metadataSyncProgressHandlers) {
+                  handler(progress);
+                }
+              },
+            });
+          }
+        }
+      }
+    });
+
+    // Handle LID/PN mapping updates (critical Baileys v7 event)
+    sock.ev.on('lid-mapping.update' as any, async (mapping: { lid: string; pn: string }) => {
+      console.log(`[WhatsApp] LID mapping update for ${accountId}: ${mapping.lid} -> ${mapping.pn}`);
+      try {
+        await batchUpsertLidPnMappings(accountId, [mapping]);
+      } catch (error) {
+        console.error('[WhatsApp] Failed to store LID mapping:', error);
       }
     });
 
     // Handle contacts with LID format
     sock.ev.on('contacts.upsert', async (contacts: any[]) => {
-      await this.handleContactsUpsert(accountId, contacts);
+      await this.handleContactsUpsert(accountId, sock, contacts);
     });
 
     // Group updates
     sock.ev.on('groups.update', async (groups) => {
-      await this.handleGroupsUpdate(accountId, groups);
+      await this.handleGroupsUpdate(accountId, sock, groups);
     });
 
-    // Contacts update
+    // Contacts update (name, profile pic changes)
     sock.ev.on('contacts.update', async (contacts) => {
-      await this.handleContactsUpdate(accountId, contacts);
+      await this.handleContactsUpdate(accountId, sock, contacts);
     });
   }
 
@@ -632,8 +843,43 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     accountId: string,
     updates: { key: proto.IMessageKey; update: Partial<proto.IWebMessageInfo> }[]
   ): Promise<void> {
-    // Handle message status updates (sent, delivered, read)
-    // This would emit status events
+    for (const { key, update } of updates) {
+      if (!key.id || !key.remoteJid) continue;
+
+      // Extract status from update
+      let status: string | undefined;
+
+      if (update.status !== undefined) {
+        // Map Baileys status codes to our status strings
+        switch (update.status) {
+          case 1: status = 'pending'; break;   // PENDING
+          case 2: status = 'sent'; break;      // SERVER_ACK
+          case 3: status = 'delivered'; break; // DELIVERY_ACK
+          case 4: status = 'read'; break;      // READ
+          case 5: status = 'played'; break;    // PLAYED (for audio/video)
+        }
+      }
+
+      if (status) {
+        // Emit status update event
+        this.emitStatus({
+          accountId,
+          messageId: key.id,
+          status,
+          timestamp: new Date(),
+        });
+
+        // Update database
+        try {
+          await db
+            .update(messages)
+            .set({ status, updatedAt: new Date() })
+            .where(eq(messages.channelMessageId, key.id));
+        } catch (error) {
+          console.error('[WhatsApp] Failed to update message status:', error);
+        }
+      }
+    }
   }
 
   private async handleReactions(
@@ -643,16 +889,53 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
     // Handle message reactions
   }
 
-  private async handleGroupsUpdate(accountId: string, groups: unknown[]): Promise<void> {
-    // Handle group metadata updates
+  private async handleGroupsUpdate(accountId: string, sock: WASocket, groups: any[]): Promise<void> {
+    // Handle group metadata updates in background (parallel fetch)
+    if (groups.length === 0) return;
+
+    const groupJids = groups
+      .filter((g) => g.id?.endsWith('@g.us'))
+      .map((g) => g.id as string);
+
+    if (groupJids.length > 0) {
+      // Sync updated groups in background (parallel)
+      syncGroupMetadataBackground(sock, accountId, groupJids, {
+        onProgress: (progress) => {
+          for (const handler of this.metadataSyncProgressHandlers) {
+            handler(progress);
+          }
+        },
+      });
+    }
   }
 
-  private async handleContactsUpdate(accountId: string, contacts: unknown[]): Promise<void> {
-    // Handle contact updates (name, profile pic changes)
+  private async handleContactsUpdate(accountId: string, sock: WASocket, contacts: any[]): Promise<void> {
+    // Handle contact updates (name, profile pic changes) in background
+    if (contacts.length === 0) return;
+
+    // Sync contacts that have updates
+    runInBackground(async () => {
+      await syncContactsFromBaileys(accountId, contacts as Contact[]);
+
+      // Also sync profile pictures for updated contacts
+      const contactJids = contacts
+        .filter((c) => c.id?.endsWith('@s.whatsapp.net'))
+        .map((c) => c.id as string);
+
+      if (contactJids.length > 0) {
+        syncContactProfilesBackground(sock, accountId, contactJids, {
+          onProgress: (progress) => {
+            for (const handler of this.metadataSyncProgressHandlers) {
+              handler(progress);
+            }
+          },
+        });
+      }
+    });
   }
 
-  private async handleContactsUpsert(accountId: string, contacts: any[]): Promise<void> {
-    // Extract LID/PN mappings from contacts
+  private async handleContactsUpsert(accountId: string, sock: WASocket, contacts: any[]): Promise<void> {
+    // Extract LID/PN mappings from contacts (Baileys v7)
     const mappings: Array<{ lid: string; pn: string }> = [];
 
     for (const contact of contacts) {
@@ -673,6 +956,23 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
         console.error(`[WhatsApp] Failed to store LID mappings:`, error);
       }
     }
+
+    // Also sync contacts to database and fetch profile pics in background
+    runInBackground(async () => {
+      await syncContactsFromBaileys(accountId, contacts as Contact[]);
+
+      // Sync profile pictures for new contacts
+      const contactJids = extractContactJids(contacts as Contact[]);
+      if (contactJids.length > 0) {
+        syncContactProfilesBackground(sock, accountId, contactJids, {
+          onProgress: (progress) => {
+            for (const handler of this.metadataSyncProgressHandlers) {
+              handler(progress);
+            }
+          },
+        });
+      }
+    });
   }
 
   private transformMessage(
@@ -752,14 +1052,21 @@ export class WhatsAppAdapterImpl extends BaseChannelAdapter implements WhatsAppA
       return;
     }
 
-    // Clean up existing session but keep auth state
+    // Preserve caches - DON'T delete them (they'll be reused in connect())
+    // This ensures message retry cache survives reconnects
+
+    // Clean up socket only
     const sock = this.sessions.get(accountId);
     if (sock) {
       sock.end(undefined);
       this.sessions.delete(accountId);
     }
 
-    // Reconnect
+    // Clear ready state for new connection
+    this.readyPromises.delete(accountId);
+    this.readyResolvers.delete(accountId);
+
+    // Reconnect - will reuse existing caches
     await this.connect(accountId);
   }
 

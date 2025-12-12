@@ -248,6 +248,46 @@ export function broadcastSyncProgress(
 }
 
 /**
+ * Broadcast history sync progress
+ */
+export function broadcastHistorySyncProgress(
+  accountId: string,
+  phase: 'contacts' | 'groups' | 'messages' | 'complete',
+  processed: number,
+  total: number,
+  percentage: number
+): void {
+  const server = getIO();
+  server.to(`${SOCKET_CONFIG.ROOM_ACCOUNT}${accountId}`).emit('sync:progress', {
+    accountId,
+    type: phase === 'complete' ? 'history' : phase,
+    progress: percentage,
+    total,
+    processed,
+  });
+}
+
+/**
+ * Broadcast metadata sync progress (groups, profiles)
+ */
+export function broadcastMetadataSyncProgress(
+  accountId: string,
+  type: 'groups' | 'profiles' | 'contacts',
+  processed: number,
+  total: number,
+  percentage: number
+): void {
+  const server = getIO();
+  server.to(`${SOCKET_CONFIG.ROOM_ACCOUNT}${accountId}`).emit('sync:progress', {
+    accountId,
+    type,
+    progress: percentage,
+    total,
+    processed,
+  });
+}
+
+/**
  * Send to specific user's personal room
  */
 export function sendToUser(userId: string, event: keyof ServerToClientEvents, data: any): void {

@@ -76,6 +76,7 @@ export interface SendMediaParams extends SendMessageParams {
   mediaMimeType: string;
   thumbnail?: Buffer;
   caption?: string;
+  isVoiceNote?: boolean; // Explicit PTT (Push-to-Talk) flag for audio messages
 }
 
 // ============================================

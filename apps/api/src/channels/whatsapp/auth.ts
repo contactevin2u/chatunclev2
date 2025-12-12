@@ -124,23 +124,24 @@ export class PostgresAuthState {
 
   /**
    * Set Signal keys in database
+   * Uses transaction for batching - much faster than sequential operations
    */
   private async setKeys(data: { [type: string]: { [id: string]: unknown } }): Promise<void> {
-    const operations: Array<{
+    const upsertOps: Array<{
       accountId: string;
       dataType: string;
       dataKey: string;
       dataValue: string;
     }> = [];
 
-    const deleteOperations: Array<{ type: string; key: string }> = [];
+    const deleteOps: Array<{ type: string; key: string }> = [];
 
     for (const [type, entries] of Object.entries(data)) {
       for (const [id, value] of Object.entries(entries)) {
         if (value === null || value === undefined) {
-          deleteOperations.push({ type, key: id });
+          deleteOps.push({ type, key: id });
         } else {
-          operations.push({
+          upsertOps.push({
             accountId: this.accountId,
             dataType: type,
             dataKey: id,
@@ -151,10 +152,11 @@ export class PostgresAuthState {
     }
 
     try {
-      // Batch upsert
-      if (operations.length > 0) {
-        for (const op of operations) {
-          await db
+      // Use transaction for all operations - significantly faster
+      await db.transaction(async (tx) => {
+        // Batch upsert in transaction
+        for (const op of upsertOps) {
+          await tx
             .insert(whatsappAuthState)
             .values(op)
             .onConflictDoUpdate({
@@ -165,12 +167,10 @@ export class PostgresAuthState {
               },
             });
         }
-      }
 
-      // Batch delete
-      if (deleteOperations.length > 0) {
-        for (const { type, key } of deleteOperations) {
-          await db
+        // Batch delete in same transaction
+        for (const { type, key } of deleteOps) {
+          await tx
             .delete(whatsappAuthState)
             .where(
               and(
@@ -180,7 +180,7 @@ export class PostgresAuthState {
               )
             );
         }
-      }
+      });
     } catch (error) {
       console.error(`[PostgresAuthState] Failed to set keys:`, error);
       throw error;

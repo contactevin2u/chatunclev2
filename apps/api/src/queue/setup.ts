@@ -63,9 +63,13 @@ export interface ScheduledMessageJobData {
 
 export interface HistorySyncJobData {
   accountId: string;
-  type: 'full' | 'recent' | 'on_demand';
+  type: 'full' | 'recent' | 'on_demand' | 'metadata_only';
   startDate?: string;
   endDate?: string;
+  syncGroups?: boolean;
+  syncProfiles?: boolean;
+  groupJids?: string[];
+  contactJids?: string[];
 }
 
 export interface MediaProcessingJobData {

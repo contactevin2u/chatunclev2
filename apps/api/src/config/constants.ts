@@ -151,6 +151,12 @@ export const WHATSAPP_CONFIG = {
   MAX_VIDEO_SIZE_MB: 64,
   MAX_AUDIO_SIZE_MB: 16,
   MAX_DOCUMENT_SIZE_MB: 100,
+
+  // Version caching - don't fetch version more often than this
+  VERSION_CACHE_MS: 3600000, // 1 hour
+
+  // Pairing code requires Chrome/macOS browser
+  PAIRING_CODE_BROWSER: ['macOS', 'Google Chrome'] as const,
 } as const;
 
 // ============================================
