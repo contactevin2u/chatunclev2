@@ -313,6 +313,11 @@ class SessionManager {
       // SPEED: Fast message retries
       maxMsgRetryCount: 3,            // Reduced retries for speed (was 5)
 
+      // AUTO SESSION RECREATION: Automatically recreate sessions for failed messages
+      // This helps recover from session corruption that occurs during media sending
+      enableAutoSessionRecreation: true,
+      enableRecentMessageCache: true,  // Enable caching for retry handling
+
       // SPEED: Fire init queries immediately for faster connection
       fireInitQueries: true,
 
