@@ -860,7 +860,35 @@ BEGIN
       secondary_contact_id := dup.contact_ids[i];
       RAISE NOTICE 'Merging duplicate contact % into % (name: %)', secondary_contact_id, primary_contact_id, dup.name;
 
-      -- Move conversations
+      -- Move conversations - handle duplicates by merging messages first
+      -- Move messages from duplicate conversations to primary conversation
+      UPDATE messages m
+      SET conversation_id = (
+        SELECT c2.id FROM conversations c2
+        WHERE c2.contact_id = primary_contact_id
+        AND c2.account_id = (SELECT c3.account_id FROM conversations c3 WHERE c3.id = m.conversation_id)
+        LIMIT 1
+      )
+      WHERE m.conversation_id IN (
+        SELECT c.id FROM conversations c
+        WHERE c.contact_id = secondary_contact_id
+        AND EXISTS (
+          SELECT 1 FROM conversations c2
+          WHERE c2.contact_id = primary_contact_id
+          AND c2.account_id = c.account_id
+        )
+      );
+
+      -- Delete duplicate conversations (primary already has one for same account)
+      DELETE FROM conversations c
+      WHERE c.contact_id = secondary_contact_id
+      AND EXISTS (
+        SELECT 1 FROM conversations c2
+        WHERE c2.contact_id = primary_contact_id
+        AND c2.account_id = c.account_id
+      );
+
+      -- Move remaining conversations (no conflict)
       UPDATE conversations
       SET contact_id = primary_contact_id, updated_at = NOW()
       WHERE contact_id = secondary_contact_id;
