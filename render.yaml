@@ -58,6 +58,5 @@ services:
 databases:
   - name: chatuncle-db
     region: singapore
-    plan: starter
-    postgresMajorVersion: 16
+    plan: free
     ipAllowList: []
