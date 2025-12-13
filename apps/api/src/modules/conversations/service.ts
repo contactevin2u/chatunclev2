@@ -223,7 +223,8 @@ export async function getUnifiedInbox(
       account: {
         columns: {
           id: true,
-          name: true,
+          channelIdentifier: true,
+          phoneNumber: true,
           channelType: true,
         },
       },
@@ -258,10 +259,10 @@ export async function getUnifiedInbox(
     .from(conversations)
     .where(and(...conditions));
 
-  const conversationsWithDetails = results.map(c => ({
+  const conversationsWithDetails = results.map((c: any) => ({
     id: c.id,
     accountId: c.accountId,
-    accountName: (c as any).account?.name || undefined,
+    accountName: c.account?.channelIdentifier || c.account?.phoneNumber || undefined,
     channelType: c.channelType as ChannelType,
     isGroup: c.isGroup,
     lastMessageAt: c.lastMessageAt,
