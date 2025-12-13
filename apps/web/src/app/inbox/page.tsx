@@ -245,7 +245,7 @@ export default function UnifiedInboxPage() {
   messagesArray.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   // Get sorted conversations
-  const sortedConversations = [...conversations.values()].sort((a, b) => {
+  const sortedConversations = Array.from(conversations.values()).sort((a, b) => {
     const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
     const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
     return bTime - aTime;
