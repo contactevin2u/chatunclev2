@@ -13,9 +13,8 @@ const nextConfig = {
       },
     ],
   },
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
-  },
+  // NEXT_PUBLIC_* variables are automatically exposed to the client
+  // No need to define them here - they're read from Vercel env vars at build time
 };
 
 module.exports = nextConfig;
