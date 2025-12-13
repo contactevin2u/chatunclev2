@@ -8,7 +8,7 @@ import type {
   ConnectionResult,
   ConnectionStatus,
 } from '@chatuncle/shared';
-import type { ChannelAdapter, MessageHandler, StatusHandler, ConnectionHandler } from './base.js';
+import type { ChannelAdapter, MessageHandler, StatusHandler, ConnectionHandler, QRHandler } from './base.js';
 
 // Import adapters
 import { WhatsAppAdapterImpl } from './whatsapp/adapter.js';
@@ -25,6 +25,7 @@ export class ChannelRouter {
   private messageHandlers: MessageHandler[] = [];
   private statusHandlers: StatusHandler[] = [];
   private connectionHandlers: ConnectionHandler[] = [];
+  private qrHandlers: QRHandler[] = [];
   private initialized = false;
 
   /**
@@ -63,6 +64,13 @@ export class ChannelRouter {
         adapter.onConnection(async (accountId, status, error) => {
           await this.handleConnectionChange(accountId, status, error);
         });
+
+        // Register QR handler for WhatsApp (only WhatsApp has onQR)
+        if ('onQR' in adapter && typeof adapter.onQR === 'function') {
+          adapter.onQR(async (accountId: string, qrCode: string) => {
+            await this.handleQRCode(accountId, qrCode);
+          });
+        }
 
         this.adapters.set(adapter.type, adapter);
         console.log(`[ChannelRouter] ${adapter.type} adapter initialized`);
@@ -232,6 +240,13 @@ export class ChannelRouter {
   }
 
   /**
+   * Register handler for QR code events
+   */
+  onQR(handler: QRHandler): void {
+    this.qrHandlers.push(handler);
+  }
+
+  /**
    * Gracefully shutdown all adapters
    */
   async shutdown(): Promise<void> {
@@ -285,6 +300,16 @@ export class ChannelRouter {
         await handler(accountId, status, error);
       } catch (error) {
         console.error('[ChannelRouter] Connection handler error:', error);
+      }
+    }
+  }
+
+  private async handleQRCode(accountId: string, qrCode: string): Promise<void> {
+    for (const handler of this.qrHandlers) {
+      try {
+        await handler(accountId, qrCode);
+      } catch (error) {
+        console.error('[ChannelRouter] QR handler error:', error);
       }
     }
   }

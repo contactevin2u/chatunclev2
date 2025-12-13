@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import { createServer } from 'http';
 import { config, validateConfig } from './config/env.js';
 import { testConnection, closePool } from './db/index.js';
-import { initializeSocket } from './realtime/socket.js';
+import { initializeSocket, broadcastQRUpdate } from './realtime/socket.js';
 import { getChannelRouter, destroyChannelRouter } from './channels/router.js';
 import { getDeduplicator } from './services/deduplication.js';
 
@@ -138,6 +138,13 @@ async function start() {
   // Initialize channel router
   const router = getChannelRouter();
   await router.initialize({});
+
+  // Register QR code broadcast handler
+  router.onQR((accountId, qrCode) => {
+    console.log(`[App] Broadcasting QR code for ${accountId}`);
+    broadcastQRUpdate(accountId, qrCode);
+  });
+
   console.log('📱 Channel router initialized');
 
   // Initialize deduplication service
