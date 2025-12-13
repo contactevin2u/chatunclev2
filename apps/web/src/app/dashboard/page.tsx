@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth';
 import { api } from '@/lib/api';
 import { connectSocket, joinAccount, leaveAccount } from '@/lib/socket';
 import { ChannelIcon } from '@/components/channel/ChannelIcon';
-import { Plus, LogOut, MessageSquare, Inbox, Users, X } from 'lucide-react';
+import { Plus, LogOut, MessageSquare, Inbox, Users, X, Trash2, Power } from 'lucide-react';
 import type { ChannelType } from '@chatuncle/shared';
 
 interface Account {
@@ -127,11 +127,13 @@ export default function DashboardPage() {
     }
   };
 
-  const handleConnectExisting = async (account: Account) => {
-    if (account.status === 'connected') {
-      router.push(`/chat/${account.id}`);
-      return;
-    }
+  const handleAccountClick = (account: Account) => {
+    // Always navigate to chat - connection can be done there if needed
+    router.push(`/chat/${account.id}`);
+  };
+
+  const handleConnect = async (e: React.MouseEvent, account: Account) => {
+    e.stopPropagation();
 
     // Start connecting
     setConnectingAccountId(account.id);
@@ -147,6 +149,32 @@ export default function DashboardPage() {
     } catch (error) {
       console.error('Failed to connect:', error);
       closeQrModal();
+    }
+  };
+
+  const handleDisconnect = async (e: React.MouseEvent, accountId: string) => {
+    e.stopPropagation();
+    if (!confirm('Disconnect this account?')) return;
+
+    try {
+      await api.disconnectAccount(accountId);
+      setAccounts(prev => prev.map(a =>
+        a.id === accountId ? { ...a, status: 'disconnected' } : a
+      ));
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, accountId: string) => {
+    e.stopPropagation();
+    if (!confirm('Delete this account? All conversations and messages will be lost.')) return;
+
+    try {
+      await api.deleteAccount(accountId);
+      setAccounts(prev => prev.filter(a => a.id !== accountId));
+    } catch (error) {
+      console.error('Failed to delete:', error);
     }
   };
 
@@ -226,19 +254,19 @@ export default function DashboardPage() {
             {accounts.map((account) => (
               <div
                 key={account.id}
-                onClick={() => handleConnectExisting(account)}
-                className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
+                onClick={() => handleAccountClick(account)}
+                className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow cursor-pointer"
               >
-                <div className="flex items-center gap-4">
-                  <ChannelIcon type={account.channelType} size={40} />
+                <div className="flex items-center gap-3">
+                  <ChannelIcon type={account.channelType} size={36} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {account.profileName || account.phoneNumber || account.channelType}
                     </p>
-                    <p className="text-sm text-gray-500 capitalize">{account.channelType}</p>
+                    <p className="text-xs text-gray-500 capitalize">{account.channelType}</p>
                   </div>
                   <span
-                    className={`px-2 py-1 text-xs font-medium rounded-full ${
+                    className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                       account.status === 'connected'
                         ? 'bg-green-100 text-green-800'
                         : account.status === 'connecting'
@@ -248,6 +276,34 @@ export default function DashboardPage() {
                   >
                     {account.status}
                   </span>
+                </div>
+
+                {/* Action buttons */}
+                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2">
+                  {account.status === 'connected' ? (
+                    <button
+                      onClick={(e) => handleDisconnect(e, account.id)}
+                      className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                    >
+                      <Power className="h-3 w-3" />
+                      Disconnect
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => handleConnect(e, account)}
+                      className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded hover:bg-primary-700"
+                    >
+                      <Power className="h-3 w-3" />
+                      Connect
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => handleDelete(e, account.id)}
+                    className="inline-flex items-center justify-center p-1.5 text-red-500 hover:bg-red-50 rounded"
+                    title="Delete account"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
             ))}
