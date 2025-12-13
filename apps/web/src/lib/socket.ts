@@ -48,9 +48,17 @@ export function disconnectSocket(): void {
 }
 
 export function joinAccount(accountId: string): void {
-  if (socket?.connected) {
+  if (!socket) return;
+
+  if (socket.connected) {
     socket.emit('join:account', { accountId });
     console.log('[Socket] Joined account:', accountId);
+  } else {
+    // Wait for connection before joining
+    socket.once('connect', () => {
+      socket!.emit('join:account', { accountId });
+      console.log('[Socket] Joined account after connect:', accountId);
+    });
   }
 }
 
@@ -63,11 +71,19 @@ export function leaveAccount(accountId: string): void {
 
 // Join multiple accounts at once (for unified inbox)
 export function joinAccounts(accountIds: string[]): void {
-  if (socket?.connected) {
+  if (!socket) return;
+
+  const doJoin = () => {
     accountIds.forEach(accountId => {
       socket!.emit('join:account', { accountId });
     });
     console.log('[Socket] Joined accounts:', accountIds);
+  };
+
+  if (socket.connected) {
+    doJoin();
+  } else {
+    socket.once('connect', doJoin);
   }
 }
 
