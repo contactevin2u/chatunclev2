@@ -11,7 +11,7 @@ import { ConversationList } from '@/components/chat/ConversationList';
 import { MessageThread } from '@/components/chat/MessageThread';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { ContactPanel } from '@/components/chat/ContactPanel';
-import { ArrowLeft, Settings, RefreshCw, QrCode, UserPlus, User, X, Info } from 'lucide-react';
+import { ArrowLeft, Settings, RefreshCw, QrCode, UserPlus, User, X, Info, MoreVertical, Power, Trash2 } from 'lucide-react';
 import { ChannelIcon } from '@/components/channel/ChannelIcon';
 import type { ChannelType, NewMessageEvent, MessageStatusEvent, AccountStatusEvent } from '@chatuncle/shared';
 
@@ -65,6 +65,7 @@ export default function ChatPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [showAssignDropdown, setShowAssignDropdown] = useState(false);
   const [showContactPanel, setShowContactPanel] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
 
   // Load account data
   useEffect(() => {
@@ -229,6 +230,27 @@ export default function ChatPage() {
     }
   };
 
+  const handleDisconnect = async () => {
+    if (!confirm('Disconnect this WhatsApp account?')) return;
+    try {
+      await api.disconnectAccount(accountId);
+      setAccount((prev) => prev ? { ...prev, status: 'disconnected' } : null);
+      setShowAccountMenu(false);
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!confirm('Delete this account? This will remove all conversations and messages. This action cannot be undone.')) return;
+    try {
+      await api.deleteAccount(accountId);
+      router.replace('/dashboard');
+    } catch (error) {
+      console.error('Failed to delete account:', error);
+    }
+  };
+
   const handleSelectConversation = async (conversationId: string) => {
     selectConversation(conversationId);
     resetUnread(conversationId);
@@ -336,6 +358,39 @@ export default function ChatPage() {
           >
             <RefreshCw className="h-5 w-5" />
           </button>
+
+          {/* Account Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowAccountMenu(!showAccountMenu)}
+              className="text-gray-500 hover:text-gray-700 p-1"
+              title="Account options"
+            >
+              <MoreVertical className="h-5 w-5" />
+            </button>
+            {showAccountMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                <div className="py-1">
+                  {account?.status === 'connected' && (
+                    <button
+                      onClick={handleDisconnect}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <Power className="h-4 w-4" />
+                      Disconnect
+                    </button>
+                  )}
+                  <button
+                    onClick={handleDeleteAccount}
+                    className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Account
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

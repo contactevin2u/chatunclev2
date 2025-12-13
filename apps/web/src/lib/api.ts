@@ -87,6 +87,11 @@ class ApiClient {
     return data;
   }
 
+  async deleteAccount(accountId: string) {
+    await this.client.delete(`/accounts/${accountId}`);
+    return { success: true };
+  }
+
   // Conversations
   async getConversations(accountId: string, params?: {
     page?: number;
