@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
 import { api } from '@/lib/api';
+import { connectSocket, joinAccount, leaveAccount } from '@/lib/socket';
 import { ChannelIcon } from '@/components/channel/ChannelIcon';
-import { Plus, LogOut, MessageSquare, Inbox, Users } from 'lucide-react';
+import { Plus, LogOut, MessageSquare, Inbox, Users, X } from 'lucide-react';
 import type { ChannelType } from '@chatuncle/shared';
 
 interface Account {
@@ -26,6 +27,11 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
+  // QR Modal state
+  const [connectingAccountId, setConnectingAccountId] = useState<string | null>(null);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+
   useEffect(() => {
     if (!authLoading && !token) {
       router.replace('/login');
@@ -37,6 +43,43 @@ export default function DashboardPage() {
       loadAccounts();
     }
   }, [token]);
+
+  // Socket setup for QR updates
+  useEffect(() => {
+    if (!token || !connectingAccountId) return;
+
+    const socket = connectSocket(token);
+    joinAccount(connectingAccountId);
+
+    const handleQrUpdate = (data: { accountId: string; qrCode: string }) => {
+      if (data.accountId === connectingAccountId) {
+        setQrCode(data.qrCode);
+      }
+    };
+
+    const handleAccountStatus = (data: { accountId: string; status: string }) => {
+      if (data.accountId === connectingAccountId) {
+        if (data.status === 'connected') {
+          // Update account in list
+          setAccounts(prev => prev.map(a =>
+            a.id === connectingAccountId ? { ...a, status: 'connected' } : a
+          ));
+          // Close modal and navigate
+          closeQrModal();
+          router.push(`/chat/${connectingAccountId}`);
+        }
+      }
+    };
+
+    socket.on('qr:update', handleQrUpdate);
+    socket.on('account:status', handleAccountStatus);
+
+    return () => {
+      socket.off('qr:update', handleQrUpdate);
+      socket.off('account:status', handleAccountStatus);
+      leaveAccount(connectingAccountId);
+    };
+  }, [token, connectingAccountId, router]);
 
   const loadAccounts = async () => {
     try {
@@ -54,14 +97,56 @@ export default function DashboardPage() {
     router.replace('/login');
   };
 
+  const closeQrModal = () => {
+    setConnectingAccountId(null);
+    setQrCode(null);
+    setPairingCode(null);
+  };
+
   const handleCreateAccount = async (channelType: ChannelType) => {
     try {
+      // Create the account
       const { account } = await api.createAccount(channelType);
       setAccounts([...accounts, account]);
       setShowCreateModal(false);
-      router.push(`/chat/${account.id}`);
+
+      // Start connecting immediately
+      setConnectingAccountId(account.id);
+
+      // Request connection (will trigger QR via socket)
+      const result = await api.connectAccount(account.id);
+      if (result.qrCode) {
+        setQrCode(result.qrCode);
+      }
+      if (result.pairingCode) {
+        setPairingCode(result.pairingCode);
+      }
     } catch (error) {
       console.error('Failed to create account:', error);
+      closeQrModal();
+    }
+  };
+
+  const handleConnectExisting = async (account: Account) => {
+    if (account.status === 'connected') {
+      router.push(`/chat/${account.id}`);
+      return;
+    }
+
+    // Start connecting
+    setConnectingAccountId(account.id);
+
+    try {
+      const result = await api.connectAccount(account.id);
+      if (result.qrCode) {
+        setQrCode(result.qrCode);
+      }
+      if (result.pairingCode) {
+        setPairingCode(result.pairingCode);
+      }
+    } catch (error) {
+      console.error('Failed to connect:', error);
+      closeQrModal();
     }
   };
 
@@ -141,7 +226,7 @@ export default function DashboardPage() {
             {accounts.map((account) => (
               <div
                 key={account.id}
-                onClick={() => router.push(`/chat/${account.id}`)}
+                onClick={() => handleConnectExisting(account)}
                 className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
               >
                 <div className="flex items-center gap-4">
@@ -199,6 +284,41 @@ export default function DashboardPage() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Modal */}
+      {connectingAccountId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Connect WhatsApp</h3>
+              <button onClick={closeQrModal} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {qrCode ? (
+              <div className="flex flex-col items-center">
+                <img src={qrCode} alt="QR Code" className="w-64 h-64" />
+                <p className="mt-4 text-sm text-gray-600 text-center">
+                  Scan this QR code with WhatsApp on your phone
+                </p>
+              </div>
+            ) : pairingCode ? (
+              <div className="text-center">
+                <p className="text-3xl font-mono font-bold tracking-wider">{pairingCode}</p>
+                <p className="mt-4 text-sm text-gray-600">
+                  Enter this code in WhatsApp on your phone
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center py-8">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+                <p className="mt-4 text-sm text-gray-500">Generating QR code...</p>
+              </div>
+            )}
           </div>
         </div>
       )}
