@@ -6,6 +6,7 @@ import { config, validateConfig } from './config/env.js';
 import { testConnection, closePool } from './db/index.js';
 import { initializeSocket, broadcastQRUpdate } from './realtime/socket.js';
 import { getChannelRouter, destroyChannelRouter } from './channels/router.js';
+import QRCode from 'qrcode';
 import { getDeduplicator } from './services/deduplication.js';
 
 // Import routes
@@ -139,10 +140,20 @@ async function start() {
   const router = getChannelRouter();
   await router.initialize({});
 
-  // Register QR code broadcast handler
-  router.onQR((accountId, qrCode) => {
-    console.log(`[App] Broadcasting QR code for ${accountId}`);
-    broadcastQRUpdate(accountId, qrCode);
+  // Register QR code broadcast handler - convert QR string to data URL
+  router.onQR(async (accountId, qrCode) => {
+    try {
+      // Convert QR string to data URL for frontend display
+      const qrDataUrl = await QRCode.toDataURL(qrCode, {
+        width: 256,
+        margin: 2,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
+      console.log(`[App] Broadcasting QR code for ${accountId}`);
+      broadcastQRUpdate(accountId, qrDataUrl);
+    } catch (error) {
+      console.error(`[App] Failed to generate QR code for ${accountId}:`, error);
+    }
   });
 
   console.log('📱 Channel router initialized');
