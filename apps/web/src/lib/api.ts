@@ -98,6 +98,25 @@ class ApiClient {
     return data;
   }
 
+  // Unified Inbox - all accounts
+  async getInbox(params?: {
+    page?: number;
+    limit?: number;
+    isGroup?: boolean;
+    unreadOnly?: boolean;
+    channelType?: string;
+    assignedAgentId?: string;
+  }) {
+    const { data } = await this.client.get('/inbox', { params });
+    return data;
+  }
+
+  // Assign agent to conversation
+  async assignConversation(conversationId: string, agentId: string | null) {
+    const { data } = await this.client.patch(`/conversations/${conversationId}/assign`, { agentId });
+    return data;
+  }
+
   async getConversation(conversationId: string) {
     const { data } = await this.client.get(`/conversations/${conversationId}`);
     return data;
@@ -127,6 +146,95 @@ class ApiClient {
     tempId?: string;
   }) {
     const { data } = await this.client.post(`/conversations/${conversationId}/messages`, message);
+    return data;
+  }
+
+  // Contacts
+  async getContacts(accountId: string, params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    labelId?: string;
+  }) {
+    const { data } = await this.client.get(`/accounts/${accountId}/contacts`, { params });
+    return data;
+  }
+
+  async getContact(contactId: string) {
+    const { data } = await this.client.get(`/contacts/${contactId}`);
+    return data;
+  }
+
+  async updateContact(contactId: string, updates: { name?: string }) {
+    const { data } = await this.client.patch(`/contacts/${contactId}`, updates);
+    return data;
+  }
+
+  // Notes
+  async getContactNotes(contactId: string) {
+    const { data } = await this.client.get(`/contacts/${contactId}/notes`);
+    return data;
+  }
+
+  async createNote(contactId: string, content: string) {
+    const { data } = await this.client.post(`/contacts/${contactId}/notes`, { content });
+    return data;
+  }
+
+  async updateNote(noteId: string, content: string) {
+    const { data } = await this.client.patch(`/notes/${noteId}`, { content });
+    return data;
+  }
+
+  async deleteNote(noteId: string) {
+    const { data } = await this.client.delete(`/notes/${noteId}`);
+    return data;
+  }
+
+  // Labels
+  async getLabels(accountId: string) {
+    const { data } = await this.client.get(`/accounts/${accountId}/labels`);
+    return data;
+  }
+
+  async createLabel(accountId: string, label: { name: string; color?: string }) {
+    const { data } = await this.client.post(`/accounts/${accountId}/labels`, label);
+    return data;
+  }
+
+  async updateLabel(labelId: string, updates: { name?: string; color?: string }) {
+    const { data } = await this.client.patch(`/labels/${labelId}`, updates);
+    return data;
+  }
+
+  async deleteLabel(labelId: string) {
+    const { data } = await this.client.delete(`/labels/${labelId}`);
+    return data;
+  }
+
+  async addLabelToContact(contactId: string, labelId: string) {
+    const { data } = await this.client.post(`/contacts/${contactId}/labels/${labelId}`);
+    return data;
+  }
+
+  async removeLabelFromContact(contactId: string, labelId: string) {
+    const { data } = await this.client.delete(`/contacts/${contactId}/labels/${labelId}`);
+    return data;
+  }
+
+  // Team Management
+  async getAccountAgents(accountId: string) {
+    const { data } = await this.client.get(`/accounts/${accountId}/agents`);
+    return data;
+  }
+
+  async addAccountAgent(accountId: string, email: string, role: string) {
+    const { data } = await this.client.post(`/accounts/${accountId}/agents`, { email, role });
+    return data;
+  }
+
+  async removeAccountAgent(accountId: string, agentId: string) {
+    const { data } = await this.client.delete(`/accounts/${accountId}/agents/${agentId}`);
     return data;
   }
 }

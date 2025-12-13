@@ -61,6 +61,26 @@ export function leaveAccount(accountId: string): void {
   }
 }
 
+// Join multiple accounts at once (for unified inbox)
+export function joinAccounts(accountIds: string[]): void {
+  if (socket?.connected) {
+    accountIds.forEach(accountId => {
+      socket!.emit('join:account', { accountId });
+    });
+    console.log('[Socket] Joined accounts:', accountIds);
+  }
+}
+
+// Leave multiple accounts
+export function leaveAccounts(accountIds: string[]): void {
+  if (socket?.connected) {
+    accountIds.forEach(accountId => {
+      socket!.emit('leave:account', { accountId });
+    });
+    console.log('[Socket] Left accounts:', accountIds);
+  }
+}
+
 export function emitTyping(accountId: string, conversationId: string): void {
   if (socket?.connected) {
     socket.emit('typing:start', { accountId, conversationId });

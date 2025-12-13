@@ -14,6 +14,7 @@ import authRoutes from './modules/auth/routes.js';
 import accountRoutes from './modules/accounts/routes.js';
 import conversationRoutes from './modules/conversations/routes.js';
 import messageRoutes from './modules/messages/routes.js';
+import contactRoutes from './modules/contacts/routes.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -92,6 +93,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api', conversationRoutes);
 app.use('/api', messageRoutes);
+app.use('/api', contactRoutes);
 
 // ============================================
 // ERROR HANDLING

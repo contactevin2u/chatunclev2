@@ -41,6 +41,16 @@ export interface ConversationListParams {
   unreadOnly?: boolean;
 }
 
+export interface UnifiedInboxParams {
+  accountIds: string[];
+  page?: number;
+  limit?: number;
+  isGroup?: boolean;
+  assignedAgentId?: string;
+  unreadOnly?: boolean;
+  channelType?: string;
+}
+
 /**
  * Get conversations for an account with pagination
  */
@@ -122,6 +132,136 @@ export async function getConversations(
   const conversationsWithDetails: ConversationWithDetails[] = results.map(c => ({
     id: c.id,
     accountId: c.accountId,
+    channelType: c.channelType as ChannelType,
+    isGroup: c.isGroup,
+    lastMessageAt: c.lastMessageAt,
+    unreadCount: c.unreadCount,
+    assignedAgentId: c.assignedAgentId,
+    createdAt: c.createdAt,
+    contact: c.contact ? {
+      id: c.contact.id,
+      name: c.contact.name,
+      phoneNumber: c.contact.phoneNumber,
+      profilePicUrl: c.contact.profilePicUrl,
+    } : undefined,
+    group: c.group ? {
+      id: c.group.id,
+      name: c.group.name,
+      participantCount: c.group.participantCount,
+      profilePicUrl: c.group.profilePicUrl,
+    } : undefined,
+    lastMessage: lastMessageMap.get(c.id) ? {
+      id: lastMessageMap.get(c.id)!.id,
+      contentType: lastMessageMap.get(c.id)!.contentType,
+      content: lastMessageMap.get(c.id)!.content,
+      senderType: lastMessageMap.get(c.id)!.senderType,
+      createdAt: lastMessageMap.get(c.id)!.createdAt,
+    } : undefined,
+  }));
+
+  return {
+    conversations: conversationsWithDetails,
+    total: count,
+  };
+}
+
+/**
+ * Get conversations across all accounts (unified inbox)
+ */
+export async function getUnifiedInbox(
+  params: UnifiedInboxParams
+): Promise<{ conversations: (ConversationWithDetails & { accountName?: string })[]; total: number }> {
+  const { accountIds, page = 1, limit = 50, isGroup, assignedAgentId, unreadOnly, channelType } = params;
+  const offset = (page - 1) * limit;
+
+  if (accountIds.length === 0) {
+    return { conversations: [], total: 0 };
+  }
+
+  // Build where conditions
+  const conditions = [sql`${conversations.accountId} IN ${accountIds}`];
+
+  if (isGroup !== undefined) {
+    conditions.push(eq(conversations.isGroup, isGroup));
+  }
+
+  if (assignedAgentId) {
+    conditions.push(eq(conversations.assignedAgentId, assignedAgentId));
+  }
+
+  if (unreadOnly) {
+    conditions.push(sql`${conversations.unreadCount} > 0`);
+  }
+
+  if (channelType) {
+    conditions.push(eq(conversations.channelType, channelType));
+  }
+
+  // Get conversations with related data
+  const results = await db.query.conversations.findMany({
+    where: and(...conditions),
+    orderBy: [desc(conversations.lastMessageAt), desc(conversations.createdAt)],
+    limit,
+    offset,
+    with: {
+      contact: {
+        columns: {
+          id: true,
+          name: true,
+          phoneNumber: true,
+          profilePicUrl: true,
+        },
+      },
+      group: {
+        columns: {
+          id: true,
+          name: true,
+          participantCount: true,
+          profilePicUrl: true,
+        },
+      },
+      account: {
+        columns: {
+          id: true,
+          name: true,
+          channelType: true,
+        },
+      },
+    },
+  });
+
+  // Get last message for each conversation
+  const conversationIds = results.map(c => c.id);
+  const lastMessages = conversationIds.length > 0
+    ? await db
+        .select({
+          conversationId: messages.conversationId,
+          id: messages.id,
+          contentType: messages.contentType,
+          content: messages.content,
+          senderType: messages.senderType,
+          createdAt: messages.createdAt,
+        })
+        .from(messages)
+        .where(sql`${messages.conversationId} IN ${conversationIds}`)
+        .orderBy(desc(messages.createdAt))
+        .limit(conversationIds.length)
+    : [];
+
+  const lastMessageMap = new Map(
+    lastMessages.map(m => [m.conversationId, m])
+  );
+
+  // Get total count
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(conversations)
+    .where(and(...conditions));
+
+  const conversationsWithDetails = results.map(c => ({
+    id: c.id,
+    accountId: c.accountId,
+    accountName: (c as any).account?.name || undefined,
     channelType: c.channelType as ChannelType,
     isGroup: c.isGroup,
     lastMessageAt: c.lastMessageAt,

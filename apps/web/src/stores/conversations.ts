@@ -27,15 +27,24 @@ interface LastMessage {
 export interface Conversation {
   id: string;
   accountId: string;
+  accountName?: string;
   channelType: ChannelType;
   isGroup: boolean;
   lastMessageAt: string | null;
   unreadCount: number;
   assignedAgentId: string | null;
+  assignedAgentName?: string | null;
   createdAt: string;
   contact?: Contact;
   group?: Group;
   lastMessage?: LastMessage;
+}
+
+interface InboxFilters {
+  isGroup?: boolean;
+  unreadOnly?: boolean;
+  channelType?: string;
+  assignedAgentId?: string;
 }
 
 interface ConversationsState {
@@ -48,11 +57,13 @@ interface ConversationsState {
   hasMore: boolean;
 
   loadConversations: (accountId: string, reset?: boolean) => Promise<void>;
+  loadInbox: (filters?: InboxFilters, reset?: boolean) => Promise<void>;
   selectConversation: (conversationId: string | null) => void;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
   updateLastMessage: (conversationId: string, message: LastMessage) => void;
   incrementUnread: (conversationId: string) => void;
   resetUnread: (conversationId: string) => void;
+  addConversation: (conversation: Conversation) => void;
   clear: () => void;
 }
 
@@ -92,6 +103,38 @@ export const useConversationsStore = create<ConversationsState>((set, get) => ({
       });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to load conversations';
+      set({ error: message, isLoading: false });
+    }
+  },
+
+  loadInbox: async (filters?: InboxFilters, reset = false) => {
+    const { page, conversations: existingConversations } = get();
+    const currentPage = reset ? 1 : page;
+
+    set({ isLoading: true, error: null });
+
+    try {
+      const { conversations, total, totalPages } = await api.getInbox({
+        page: currentPage,
+        limit: 50,
+        ...filters,
+      });
+
+      const newConversations = reset ? new Map() : new Map(existingConversations);
+
+      conversations.forEach((conv: Conversation) => {
+        newConversations.set(conv.id, conv);
+      });
+
+      set({
+        conversations: newConversations,
+        total,
+        page: currentPage + 1,
+        hasMore: currentPage < totalPages,
+        isLoading: false,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to load inbox';
       set({ error: message, isLoading: false });
     }
   },
@@ -152,6 +195,13 @@ export const useConversationsStore = create<ConversationsState>((set, get) => ({
       updated.set(conversationId, { ...existing, unreadCount: 0 });
       set({ conversations: updated });
     }
+  },
+
+  addConversation: (conversation: Conversation) => {
+    const { conversations } = get();
+    const updated = new Map(conversations);
+    updated.set(conversation.id, conversation);
+    set({ conversations: updated });
   },
 
   clear: () => {

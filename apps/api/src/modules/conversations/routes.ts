@@ -6,7 +6,9 @@ import {
   getConversationById,
   markConversationRead,
   assignAgent,
+  getUnifiedInbox,
 } from './service.js';
+import { getUserAccountAccess } from '../accounts/access.js';
 
 const router = Router();
 
@@ -20,8 +22,64 @@ const listQuerySchema = z.object({
   unreadOnly: z.enum(['true', 'false']).optional().transform(v => v === 'true'),
 });
 
+const inboxQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().positive().max(200).optional().default(50),
+  isGroup: z.enum(['true', 'false']).optional().transform(v => v === 'true'),
+  assignedAgentId: z.string().uuid().optional(),
+  unreadOnly: z.enum(['true', 'false']).optional().transform(v => v === 'true'),
+  channelType: z.enum(['whatsapp', 'telegram', 'tiktok', 'instagram', 'messenger']).optional(),
+});
+
 const assignAgentSchema = z.object({
   agentId: z.string().uuid().nullable(),
+});
+
+/**
+ * GET /api/inbox
+ * Get unified inbox - conversations across ALL accounts user has access to
+ */
+router.get('/inbox', async (req, res) => {
+  try {
+    const query = inboxQuerySchema.parse(req.query);
+
+    // Get all accounts the user has access to
+    const accountIds = await getUserAccountAccess(req.user!.userId);
+
+    if (accountIds.length === 0) {
+      return res.json({
+        conversations: [],
+        total: 0,
+        page: query.page,
+        limit: query.limit,
+        totalPages: 0,
+      });
+    }
+
+    const result = await getUnifiedInbox({
+      accountIds,
+      page: query.page,
+      limit: query.limit,
+      isGroup: query.isGroup,
+      assignedAgentId: query.assignedAgentId,
+      unreadOnly: query.unreadOnly,
+      channelType: query.channelType,
+    });
+
+    res.json({
+      conversations: result.conversations,
+      total: result.total,
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(result.total / query.limit),
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', details: error.errors });
+    }
+    console.error('[Inbox] List error:', error);
+    res.status(500).json({ error: 'Failed to get inbox' });
+  }
 });
 
 /**

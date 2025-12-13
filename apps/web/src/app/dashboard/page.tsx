@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
 import { api } from '@/lib/api';
 import { ChannelIcon } from '@/components/channel/ChannelIcon';
-import { Plus, LogOut, MessageSquare } from 'lucide-react';
+import { Plus, LogOut, MessageSquare, Inbox, Users } from 'lucide-react';
 import type { ChannelType } from '@chatuncle/shared';
 
 interface Account {
@@ -81,6 +81,20 @@ export default function DashboardPage() {
           <div className="flex justify-between items-center py-4">
             <h1 className="text-2xl font-bold text-gray-900">ChatUncle</h1>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => router.push('/inbox')}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary-600 hover:bg-primary-700"
+              >
+                <Inbox className="h-4 w-4 mr-2" />
+                Open Inbox
+              </button>
+              <button
+                onClick={() => router.push('/settings/team')}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Users className="h-4 w-4 mr-2" />
+                Team
+              </button>
               <span className="text-sm text-gray-600">{user?.name || user?.email}</span>
               <button
                 onClick={handleLogout}

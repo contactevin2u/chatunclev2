@@ -10,7 +10,8 @@ import { connectSocket, disconnectSocket, getSocket, joinAccount, leaveAccount }
 import { ConversationList } from '@/components/chat/ConversationList';
 import { MessageThread } from '@/components/chat/MessageThread';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { ArrowLeft, Settings, RefreshCw, QrCode } from 'lucide-react';
+import { ContactPanel } from '@/components/chat/ContactPanel';
+import { ArrowLeft, Settings, RefreshCw, QrCode, UserPlus, User, X, Info } from 'lucide-react';
 import { ChannelIcon } from '@/components/channel/ChannelIcon';
 import type { ChannelType, NewMessageEvent, MessageStatusEvent, AccountStatusEvent } from '@chatuncle/shared';
 
@@ -22,17 +23,25 @@ interface Account {
   phoneNumber: string | null;
 }
 
+interface Agent {
+  agentId: string;
+  agentName: string;
+  agentEmail: string;
+  role: 'owner' | 'admin' | 'agent';
+}
+
 export default function ChatPage() {
   const params = useParams();
   const router = useRouter();
   const accountId = params.accountId as string;
 
-  const { token, isLoading: authLoading } = useAuthStore();
+  const { token, user, isLoading: authLoading } = useAuthStore();
   const {
     conversations,
     selectedId,
     loadConversations,
     selectConversation,
+    updateConversation,
     updateLastMessage,
     incrementUnread,
     resetUnread,
@@ -53,6 +62,9 @@ export default function ChatPage() {
   const [showQR, setShowQR] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [showAssignDropdown, setShowAssignDropdown] = useState(false);
+  const [showContactPanel, setShowContactPanel] = useState(false);
 
   // Load account data
   useEffect(() => {
@@ -101,11 +113,35 @@ export default function ChatPage() {
       const { account } = await api.getAccount(accountId);
       setAccount(account);
       await loadConversations(accountId, true);
+      // Load agents for this account
+      try {
+        const { agents: accountAgents } = await api.getAccountAgents(accountId);
+        setAgents(accountAgents);
+      } catch (err) {
+        console.error('Failed to load agents:', err);
+      }
     } catch (error) {
       console.error('Failed to load account:', error);
       router.replace('/dashboard');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAssignConversation = async (agentId: string | null) => {
+    if (!selectedId) return;
+    try {
+      await api.assignConversation(selectedId, agentId);
+      // Update local state using store function
+      updateConversation(selectedId, {
+        assignedAgentId: agentId,
+        assignedAgentName: agentId
+          ? agents.find((a) => a.agentId === agentId)?.agentName || null
+          : null,
+      });
+      setShowAssignDropdown(false);
+    } catch (error) {
+      console.error('Failed to assign conversation:', error);
     }
   };
 
@@ -318,20 +354,112 @@ export default function ChatPage() {
         <div className="flex-1 flex flex-col">
           {selectedConversation ? (
             <>
-              <div className="bg-white border-b border-gray-200 px-4 py-3">
-                <p className="font-medium text-gray-900">
-                  {selectedConversation.isGroup
-                    ? selectedConversation.group?.name
-                    : selectedConversation.contact?.name || selectedConversation.contact?.phoneNumber}
-                </p>
-                {selectedConversation.isGroup && (
-                  <p className="text-xs text-gray-500">
-                    {selectedConversation.group?.participantCount} participants
+              <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-gray-900">
+                    {selectedConversation.isGroup
+                      ? selectedConversation.group?.name
+                      : selectedConversation.contact?.name || selectedConversation.contact?.phoneNumber}
                   </p>
+                  {selectedConversation.isGroup && (
+                    <p className="text-xs text-gray-500">
+                      {selectedConversation.group?.participantCount} participants
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Contact Info Button (only for 1:1 chats) */}
+                  {!selectedConversation.isGroup && selectedConversation.contact && (
+                    <button
+                      onClick={() => setShowContactPanel(!showContactPanel)}
+                      className={`p-2 rounded-md hover:bg-gray-100 ${
+                        showContactPanel ? 'bg-gray-100 text-primary-600' : 'text-gray-500'
+                      }`}
+                      title="Contact details"
+                    >
+                      <Info className="h-5 w-5" />
+                    </button>
+                  )}
+
+                  {/* Agent Assignment */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowAssignDropdown(!showAssignDropdown)}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    {selectedConversation.assignedAgentId ? (
+                      <>
+                        <User className="h-4 w-4 text-primary-600" />
+                        <span className="text-gray-700">{selectedConversation.assignedAgentName || 'Assigned'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="h-4 w-4 text-gray-500" />
+                        <span className="text-gray-500">Assign</span>
+                      </>
+                    )}
+                  </button>
+
+                  {showAssignDropdown && (
+                    <div className="absolute right-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                      <div className="py-1">
+                        {selectedConversation.assignedAgentId && (
+                          <button
+                            onClick={() => handleAssignConversation(null)}
+                            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                          >
+                            <X className="h-4 w-4" />
+                            Unassign
+                          </button>
+                        )}
+                        {agents.map((agent) => (
+                          <button
+                            key={agent.agentId}
+                            onClick={() => handleAssignConversation(agent.agentId)}
+                            className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 ${
+                              selectedConversation.assignedAgentId === agent.agentId
+                                ? 'bg-primary-50 text-primary-700'
+                                : 'text-gray-700'
+                            }`}
+                          >
+                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium">
+                              {agent.agentName?.charAt(0)?.toUpperCase() || '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="truncate">{agent.agentName}</p>
+                              <p className="text-xs text-gray-500 truncate">{agent.agentEmail}</p>
+                            </div>
+                            {selectedConversation.assignedAgentId === agent.agentId && (
+                              <span className="text-primary-600">✓</span>
+                            )}
+                          </button>
+                        ))}
+                        {agents.length === 0 && (
+                          <p className="px-4 py-2 text-sm text-gray-500">No team members</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 flex overflow-hidden">
+                <div className="flex-1 flex flex-col">
+                  <MessageThread messages={messagesArray} />
+                  <MessageInput onSend={handleSendMessage} />
+                </div>
+
+                {/* Contact Panel */}
+                {showContactPanel && !selectedConversation.isGroup && selectedConversation.contact && (
+                  <ContactPanel
+                    contact={selectedConversation.contact}
+                    accountId={accountId}
+                    currentUserId={user?.id || ''}
+                    onClose={() => setShowContactPanel(false)}
+                  />
                 )}
               </div>
-              <MessageThread messages={messagesArray} />
-              <MessageInput onSend={handleSendMessage} />
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-gray-500">
