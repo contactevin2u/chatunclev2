@@ -61,8 +61,8 @@ export function leaveAccount(accountId: string): void {
   }
 }
 
-export function emitTyping(conversationId: string): void {
+export function emitTyping(accountId: string, conversationId: string): void {
   if (socket?.connected) {
-    socket.emit('typing:start', { conversationId });
+    socket.emit('typing:start', { accountId, conversationId });
   }
 }
